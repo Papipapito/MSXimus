@@ -29,8 +29,9 @@ GW5AT-60B (PBGA484) ✅ · PLL_ADV/Gowin_PLL fraccional ✅ · DDR3 Memory Inter
 | `fpga/constraints/msx_console60k.sdc` | ✅ (skeleton) | create_clock 50 MHz + SPI; generados 108/54/27/135 = TODO (nombres PLLA) |
 | Migrar IP PORTA-TAL-CUAL | ✅ (76 ficheros) | ver abajo |
 | Plan de reloj (open-item 1) | ✅ | [CLOCK_PLAN.md](CLOCK_PLAN.md): 1 Gowin_PLL fraccional 50→108/54/27 + PLL#2 135 |
-| Generar IP `Gowin_PLL` #1 (108/54/27) | ⬜ | IDE o gw_sh → `fpga/ip/gowin_pll/` |
-| Wrapper DDR3 (stub de interfaz) | ⬜ | preservar `ram_*`/`vram_*` @54MHz; siguiente entregable |
+| Generar IP `Gowin_PLL` #1 (108/54/27) | ✅ | proyecto `fpga/msx_console60k/` (device gw5at60b-002); **108/54/27 EXACTOS** (VCO 1350 = 50×27, div 12.5/25/50), fase estática, Lock. ⚠️ integración: el módulo trae `PLL_INIT` y necesita puerto `mdclk` alimentado con 50 MHz |
+| Proyecto Gowin 60K (`msx_console60k.gprj`) | ✅ | seed del proyecto de build P2 (device correcto) |
+| Wrapper DDR3 (stub de interfaz) | ⬜ | preservar `ram_*`/`vram_*` @54MHz; **siguiente entregable** |
 
 ### Ficheros migrados tal cual (76 RTL, P0)
 - **G80A** (Z80/T80): 7 `.vhd` (sin `T80_RegX`, muerto).

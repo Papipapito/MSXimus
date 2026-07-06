@@ -81,6 +81,17 @@ La DDR3 IP (`ddr3.ipspec`) trae su propio reloj: **`Memory_Clock`** (default 200
 
 *(Repetir para PLL #2: CLKIN 50 → CLKOUT0 = 135, Static, para el TMDS.)*
 
+## ✅ Resultado generado (PLL #1)
+
+Generada en el IDE → proyecto `fpga/msx_console60k/`, IP en `src/gowin_pll/`. El IDE eligió:
+- **VCO = 1350 MHz** (IDIV=1 → PFD 50 MHz; feedback ×27 = 50×27). Dentro de rango GW5A (el IDE lo validó → techo VCO ≥1350).
+- Salidas por divisor de VCO: **108 = 1350/12.5** (fraccional, `Clkout0VCOFrac=4` = 0.5), **54 = 1350/25**, **27 = 1350/50** → **108/54/27 EXACTOS** (cero error), fase estática, Lock ON.
+
+**Módulo `Gowin_PLL`** (puertos): `clkin`, `clkout0`=108, `clkout1`=54, `clkout2`=27, `lock`, **`mdclk`** (in).
+- ⚠️ **Integración top.v (P2)**: el wrapper trae un `PLL_INIT` (secuencia de arranque por mDRP, propia del GW5A) → hay que **alimentar `mdclk` con el reloj de entrada de 50 MHz** (`CLK_PERIOD=20`, `MULTI_FAC=27`). El rPLL viejo no tenía esto. `lock` sale ya tras el init → va a la cadena de reset (equivale a `clock_locked`).
+- Ficheros: `gowin_pll.v` (wrapper) + `gowin_pll_mod.v` (primitiva PLLA) + `pll_init.v`. Los `*_tmp.v` son basura del generador (gitignored).
+
 ## Siguiente
-1. Generar la IP `Gowin_PLL` #1 (pasos de arriba) → `fpga/ip/gowin_pll/`.
-2. Wrapper DDR3 (frente B): interfaz `ram_*`/`vram_*` a 54 MHz + user clock 54 + requisito MG2 + waits adaptativos.
+1. ✅ PLL #1 generada.
+2. **Wrapper DDR3 (frente B)**: interfaz `ram_*`/`vram_*` a 54 MHz + user clock 54 + requisito MG2 + waits adaptativos. ← siguiente
+3. Pendiente: PLL #2 (135 TMDS) cuando toque el port de HDMI.

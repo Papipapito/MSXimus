@@ -4,6 +4,8 @@ fpga/**/impl/
 fpga/build_log.txt
 fpga/*.log
 *.gprj.user
+# Temporales del IP Core Generator (regenerables, basura)
+**/*_tmp.v
 
 # --- Copyrighted MSX BIOS pack — NOT redistributed ---
 # Se construye localmente desde tus propias ROMs y se flashea (dirección re-mapeada en el 60K).
