@@ -7,12 +7,18 @@
 //Device Version: B
 //Created Time: Mon Jul  6 19:30:39 2026
 
-module Gowin_PLL_MOD (lock, clkout0, clkout1, clkout2, mdrdo, clkin, reset, mdclk, mdopc, mdainc, mdwdi);
+//  MOD (port 60K): CLKOUT3 habilitado a mano = 135.000 MHz (VCO 1350 / ODIV3=10)
+//  para el TMDS del HDMI (5x el pixel de 27, mismo VCO -> alineados por
+//  construccion). PLL_INIT solo programa trim analogico via mDRP (regs
+//  0x0B/0x0C/0x11/0x12 segun MULTI_FAC), NO los divisores -> cambio seguro.
+//  Si se regenera en el IDE: .ipc y .mod actualizados con CLKOUT3=135.
+module Gowin_PLL_MOD (lock, clkout0, clkout1, clkout2, clkout3, mdrdo, clkin, reset, mdclk, mdopc, mdainc, mdwdi);
 
 output lock;
 output clkout0;
 output clkout1;
 output clkout2;
+output clkout3;
 output [7:0] mdrdo;
 input clkin;
 input reset;
@@ -21,7 +27,6 @@ input [1:0] mdopc;
 input mdainc;
 input [7:0] mdwdi;
 
-wire clkout3;
 wire clkout4;
 wire clkout5;
 wire clkout6;
@@ -66,7 +71,7 @@ defparam PLLA_inst.FBDIV_SEL = 1;
 defparam PLLA_inst.ODIV0_SEL = 12;
 defparam PLLA_inst.ODIV1_SEL = 25;
 defparam PLLA_inst.ODIV2_SEL = 50;
-defparam PLLA_inst.ODIV3_SEL = 8;
+defparam PLLA_inst.ODIV3_SEL = 10;   // 1350/10 = 135.000 MHz (TMDS HDMI)
 defparam PLLA_inst.ODIV4_SEL = 8;
 defparam PLLA_inst.ODIV5_SEL = 8;
 defparam PLLA_inst.ODIV6_SEL = 8;
@@ -76,7 +81,7 @@ defparam PLLA_inst.ODIV0_FRAC_SEL = 4;
 defparam PLLA_inst.CLKOUT0_EN = "TRUE";
 defparam PLLA_inst.CLKOUT1_EN = "TRUE";
 defparam PLLA_inst.CLKOUT2_EN = "TRUE";
-defparam PLLA_inst.CLKOUT3_EN = "FALSE";
+defparam PLLA_inst.CLKOUT3_EN = "TRUE";
 defparam PLLA_inst.CLKOUT4_EN = "FALSE";
 defparam PLLA_inst.CLKOUT5_EN = "FALSE";
 defparam PLLA_inst.CLKOUT6_EN = "FALSE";

@@ -1,50 +1,43 @@
 # ============================================================================
 #  msx_console60k.sdc — Timing constraints · MSXnano port · Tang Console 60K
 # ----------------------------------------------------------------------------
-#  SKELETON. El SDC del TN20K (Z80_goauld.sdc) NO se copia: sus create_clock y
-#  generated_clocks están anclados a nombres GW2A (rpll_inst/CLKOUT, O_sdram_clk)
-#  y a la RED en vez del puerto (origen de fallos silenciosos, AUDIT §5.A3).
+#  El SDC del TN20K NO se copia (nombres GW2A, red-vs-puerto: fallos silenciosos,
+#  AUDIT §5.A3). Este es el SDC nuevo, minimo y correcto para el primer bring-up.
 #
-#  ⚠ Tras el 1er PnR en GW5A, VERIFICAR EN EL LOG que cada get_ports/get_pins/
-#    get_nets casa >0 objetos. Un match vacío NO da error: pierde la constraint.
+#  ⚠ Tras CADA PnR, VERIFICAR EN EL LOG que cada get_ports/get_pins casa >0
+#    objetos. Un match vacio NO da error: pierde la constraint.
 #
-#  Los generated clocks (108/54/27/135) se anclan a los nombres de instancia del
-#  PLLA/CLKDIV del GW5A, que aún no existen (IP por regenerar, docs/GW5A_IP.md).
-#  Dejados como TODO hasta portar top.v + IP de reloj.
+#  Relojes: un unico PLLA (pll_main/u_pll/PLLA_inst) con VCO 1350 MHz y 4
+#  salidas de divisor entero/fraccional: 108 / 54 / 27 / 135, todas alineadas
+#  (PE=0, mismo VCO). Los periodos de abajo usan RATIOS EXACTOS entre si
+#  (hiperperiodo 74.08 ns) para que la STA modele la alineacion de fase:
+#  cruces 27<->54 registro-a-registro seguros como en el TN20K.
 # ============================================================================
 
-# ---- Reloj de ENTRADA: 50 MHz en V22 (¡NO 27!) ----
-#  Confirmado por el .sdc de C64Nano (period 20 ns = 50 MHz). El net del top se
-#  llama ex_clk_27m (engañoso) hasta que se renombre en el port.
-create_clock -name clk_in -period 20.000 [get_ports {ex_clk_27m}]   ;# 50 MHz
+# ---- Reloj de ENTRADA: 50 MHz en V22 (el net conserva el nombre del TN20K) ----
+create_clock -name clk_in -period 20.000 [get_ports {ex_clk_27m}]
 
-# ---- Reloj SPI del BL616 onboard (dominio del companion) ----
-#  Resuelve el hueco TA1132 del TN20K (mcu_spi_new.v:43/117): con el pin SPI
-#  limpio del 60K, create_clock directo sobre spi_sclk (C64Nano usa period 50).
+# ---- Salidas del PLLA (ratios exactos: 9.26*2=18.52, *4=37.04, 37.04/5=7.408) ----
+create_clock -name clk_108m -period 9.260  [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT0}]
+create_clock -name clk_54m  -period 18.520 [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT1}]
+create_clock -name clk_27m  -period 37.040 [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}]
+create_clock -name clk_135m -period 7.408  [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT3}]
+
+# ---- Reloj SPI del BL616 onboard (resuelve el hueco TA1132 del TN20K) ----
 create_clock -name spi_sclk -period 50.000 [get_ports {spi_sclk}]
-# spi_io_clk se declara como LOCAL_CLOCK en el .cst (reloj interno del mux SPI).
+# El dominio SPI es asincrono respecto al arbol del PLLA (el companion cruza por
+# sincronizadores propios):
+set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] \
+    -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m}]
 
 # ============================================================================
-#  TODO (al portar top.v + regenerar la IP de reloj PLLA/CLKDIV):
+#  TODO (iterar tras el primer PnR, con el netlist real delante):
+#   1) generated clocks de video del VDP (VideoDHClk/VideoDLClk, ÷2/÷4 de 27):
+#      re-derivar sobre los pines reales del netlist GW5A (el SDC viejo los
+#      declaraba sobre nombres GW2A). Fasan el secuenciador de memoria.
+#   2) constraint del reloj SDRAM reenviado (O_sdram_clk por GPIO B17, 108 MHz):
+#      set_output_delay de addr/dq/dqm/cmd referidos a ese reloj + compensacion
+#      de skew del modulo externo. EL PUNTO DELICADO del SDR externo.
+#   3) false_paths reales (config estatica, LEDs, ws2812) — NO copiar los viejos.
+#   4) cruce megaram 27MHz->controlador (AUDIT §5.B megaram) si aplica.
 # ============================================================================
-# 1) generated clocks del árbol PLLA (sustituir <PLLA_INST> por el nombre real):
-#    create_generated_clock -name clk_108m -source [get_ports {ex_clk_27m}] \
-#        -master_clock clk_in [get_pins {<PLLA_INST>/CLKOUT0}]     ;# 108 MHz
-#    create_generated_clock -name clk_54m  -source [get_pins {<PLLA_INST>/CLKOUT0}] \
-#        -divide_by 2 [get_pins {<CLKDIV2_INST>/CLKOUT}]           ;# 54 MHz
-#    create_generated_clock -name clk_27m  -source [get_pins {<PLLA_INST>/CLKOUT0}] \
-#        -divide_by 4 [get_pins {<CLKDIV_INST>/CLKOUT}]            ;# 27 MHz
-#    create_generated_clock -name clk_135m -source [get_ports {ex_clk_27m}] \
-#        -master_clock clk_in [get_pins {<PLLA135_INST>/CLKOUT0}]  ;# 135 MHz TMDS
-#    (Recomendado GW5A_IP §2/§4.4: generar 108/54/27 desde UNA sola PLLA de 7
-#     salidas → garantiza alineación de fase de los cruces 27↔54 sin sync.)
-#
-# 2) generated clocks de vídeo (VideoDHClk ÷2 / VideoDLClk ÷4 de 27) que fasan
-#    el secuenciador de memoria — re-anclar a los pines reales del port.
-#
-# 3) Reloj de usuario de la DDR3 IP (memory_clk / clk de usuario): declararlo y,
-#    si es independiente del árbol PLLA, marcar los cruces al wrapper ram_*/vram_*
-#    como frontera CDC (set_false_path / set_max_delay). Ver docs/MEMORY_CONTRACT.
-#
-# 4) set_false_path de los cruces asíncronos reales (companion SPI ↔ core, etc.).
-#    NO copiar los false_path del SDC viejo: re-derivarlos con nombres GW5A.

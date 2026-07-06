@@ -1,8 +1,10 @@
+//  MOD (port 60K): clkout3 = 135.000 MHz añadido (TMDS HDMI). Ver gowin_pll_mod.v.
 module Gowin_PLL(
     clkin,
     clkout0,
     clkout1,
     clkout2,
+    clkout3,
     lock,
     mdclk
 );
@@ -12,6 +14,7 @@ input clkin;
 output clkout0;
 output clkout1;
 output clkout2;
+output clkout3;
 output lock;
 input mdclk;
 wire [7:0] mdrdo;
@@ -26,6 +29,7 @@ wire pll_rst;
     Gowin_PLL_MOD u_pll(
         .clkout1(clkout1),
         .clkout2(clkout2),
+        .clkout3(clkout3),
         .clkout0(clkout0),
         .lock(pll_lock),
         .mdrdo(wMdQOut),
