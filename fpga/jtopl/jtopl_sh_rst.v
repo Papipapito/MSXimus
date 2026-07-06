@@ -28,7 +28,8 @@ module jtopl_sh_rst #(parameter width=5, stages=18, rstval=1'b0 )
    	output		[width-1:0]	drop
 );
 
-reg [stages-1:0] bits[width-1:0];
+// GW5A port: evitar extraccion a BSRAM con WRITE_MODE=2'b10 (PA2122) — ver jtopl_sh.v
+reg [stages-1:0] bits[width-1:0] /* synthesis syn_srlstyle = "registers" */;
 
 genvar i;
 integer k;

@@ -113,39 +113,25 @@ module v9958_top(
     logic [9:0] cy;
     logic [9:0] cx;
 
+    // GW5A port: BUFG (primitivo GW2A) NO existe en Arora V — el fitter enruta
+    // los relojes por la red global automaticamente. Sustituidos por assigns.
     wire clk_w;
-    BUFG clk_bufg_inst(
-    .O(clk_w),
-    .I(clk)
-    );
+    assign clk_w = clk;
 
     wire clk_50_w;
-    BUFG clk_50_bufg_inst(
-    .O(clk_50_w),
-    .I(clk_50)
-    );
+    assign clk_50_w = clk_50;
     wire clk_125_w;
-    BUFG clk_125_bufg_inst(
-    .O(clk_125_w),
-    .I(clk_125)
-    );
+    assign clk_125_w = clk_125;
 
     reg s1_n = 0;
     always @(posedge clk_w) s1_n <= ~s1;
 
-    BUFG rst_bufg_inst(
-    .O(rst_n),
-    .I(s1_n)
-    );
+    assign rst_n = s1_n;
 
     // GW5A port: the CLK_135 rPLL (GW2A primitive, no existe en GW5A) se elimina.
-    // El 135 MHz entra por el puerto clk_135 (segundo Gowin_PLL en el top) y su
-    // lock por clk_135_lock; el BUFG de abajo se conserva tal cual.
-
-    BUFG clk_135_bufg_inst(
-    .O(clk_135_w),
-    .I(clk_135)
-    );
+    // El 135 MHz entra por el puerto clk_135 (Gowin_PLL CLKOUT3 en el top) y su
+    // lock por clk_135_lock.
+    assign clk_135_w = clk_135;
 
     wire rst_n_w;
     assign rst_n_w = rst_n & clk_135_lock;
@@ -358,10 +344,7 @@ module v9958_top(
         .clk_src(clk_125_w),
         .clk_div(clk_cpu)
     );
-    BUFG clk_cpuclk_bufg_inst(
-    .O(cpuclk_w),
-    .I(clk_cpu)
-    );
+    assign cpuclk_w = clk_cpu;   // GW5A: sin BUFG
 
     assign int_n = pVdpInt_n;
 
@@ -425,10 +408,7 @@ module v9958_top(
         .clk_src(clk_w),
         .clk_div(clk_audio)
     );
-    BUFG clk_audio_bufg_inst(
-    .O(clk_audio_w),
-    .I(clk_audio)
-    );
+    assign clk_audio_w = clk_audio;   // GW5A: sin BUFG
 
 
     wire [15:0] sample_w;

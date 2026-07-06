@@ -27,8 +27,7 @@ create_clock -name clk_135m -period 7.408  [get_pins {pll_main/u_pll/PLLA_inst/C
 create_clock -name spi_sclk -period 50.000 [get_ports {spi_sclk}]
 # El dominio SPI es asincrono respecto al arbol del PLLA (el companion cruza por
 # sincronizadores propios):
-set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] \
-    -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m}]
+set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m}]
 
 # ============================================================================
 #  TODO (iterar tras el primer PnR, con el netlist real delante):
