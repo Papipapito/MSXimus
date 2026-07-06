@@ -52,8 +52,12 @@ Arrancar **ya** con lo específico del 60K que **no** depende de los fixes pre-p
 - [ ] Keypad ColecoVision
 - [ ] A/B de envelopes PSG (fix YM2149 síncrono)
 
-## Docs code-grounded (se rellenan en la pasada de análisis)
+## Docs code-grounded (pasada de análisis — HECHA)
+- **[PORT_FINDINGS.md](PORT_FINDINGS.md) — reconciliación + hallazgos críticos + decisiones abiertas. LEER PRIMERO.**
 - [CLOCK_CONSTANTS.md](CLOCK_CONSTANTS.md) — tabla exhaustiva de constantes dependientes de la base de reloj (file:line, valor actual, fórmula, valor 60K).
 - [MEMORY_CONTRACT.md](MEMORY_CONTRACT.md) — contrato exacto de la interfaz `ram_*`/`vram_*` a preservar + estrategia DDR3.
 - [FILE_MANIFEST.md](FILE_MANIFEST.md) — clasificación por fichero: PORTA-TAL-CUAL / SE-RETOCA / SE-REESCRIBE, con pre-req de fix.
-- [BOARD_60K.md](BOARD_60K.md) — pinout GW5AT-60, IP DDR3, PLLA, topología del companion.
+- [BOARD_60K.md](BOARD_60K.md) — pinout GW5AT-60 real (27 pines ALTA + INCIERTOS), skeleton `.cst`, topología del companion.
+- [GW5A_IP.md](GW5A_IP.md) — regeneración PLLA/CLKDIV/TMDS + interfaz de la IP DDR3 de Gowin.
+
+> **Hallazgos que cambian el plan** (ver PORT_FINDINGS): el reloj de entrada del 60K es **50 MHz, no 27** (108 exacto no es trivial); existe vía **SDRAM-por-PMOD** como alternativa a reescribir a DDR3; PLLA obliga al **flujo propietario Gowin**.
