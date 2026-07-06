@@ -61,6 +61,26 @@ Módulo generado: `Gowin_PLL` (target `gowin_pll`). Al integrarlo, conservar los
 
 La DDR3 IP (`ddr3.ipspec`) trae su propio reloj: **`Memory_Clock`** (default 200 MHz = DDR3-400) y **`CLK_Ratio`** (1:2 o 1:4) → reloj de usuario = memory_clk / ratio. Objetivo de diseño del wrapper: **hacer que el reloj de usuario de la DDR3 = 54 MHz** (el dominio del handshake `ram_*`/`vram_*`) para NO crear un dominio nuevo y evitar CDC. Ej.: `Memory_Clock=216`, `CLK_Ratio=1:4` → user = 54 MHz (DDR3-432, holgado). A cerrar en el diseño del wrapper DDR3 (docs/MEMORY_CONTRACT.md).
 
+## Cómo generar la IP en el IDE (paso a paso)
+
+> El generador headless `GowinModGen.exe` **no arranca fuera del entorno de proyecto** del IDE (falla con "MG2000: Failed to read MODFILE" y no expone su sintaxis). Se genera desde el IDE. Deja `.mod`+`.ipc`+`.v` → a partir de ahí se puede scriptar la regeneración.
+
+1. **Gowin IDE** → `File ▸ New ▸ FPGA Design Project`. Elegir el device:
+   - Series **GW5AT** · Device **GW5AT-60B** · Package **PBGA484A** · Part Number **`GW5AT-LV60PG484AC1/I0`**.
+   - Guardar el proyecto en `MSX_up/fpga/` (p.ej. `msx_console60k`).
+2. `Tools ▸ IP Core Generator` → `Hard Module ▸ CLOCK ▸ PLL` (= PLL_ADV / `Gowin_PLL`).
+3. Ajustes (General Mode):
+   - **Clock Frequency (CLKIN) = 50 MHz**.
+   - **CLKOUT0**: Expected Frequency **108**, Tolerance **0**, Phase = Static, valor 0.
+   - Enable **CLKOUT1**: **54**, Tol 0, Static 0.
+   - Enable **CLKOUT2**: **27**, Tol 0, Static 0.
+   - **Enable Lock** = ON.
+   - Verificar que la ventana muestre las 3 salidas a 108/54/27 con error ~0 (usa fraccional automáticamente).
+4. Module Name **`Gowin_PLL`**, guardar en `MSX_up/fpga/ip/gowin_pll/`. Generar.
+5. Commitear los `gowin_pll.{v,ipc,mod}` resultantes (o avísame y lo integro yo).
+
+*(Repetir para PLL #2: CLKIN 50 → CLKOUT0 = 135, Static, para el TMDS.)*
+
 ## Siguiente
-1. Generar la IP `Gowin_PLL` #1 con los ajustes de arriba (IDE o gw_sh) → `fpga/ip/gowin_pll/`.
+1. Generar la IP `Gowin_PLL` #1 (pasos de arriba) → `fpga/ip/gowin_pll/`.
 2. Wrapper DDR3 (frente B): interfaz `ram_*`/`vram_*` a 54 MHz + user clock 54 + requisito MG2 + waits adaptativos.
