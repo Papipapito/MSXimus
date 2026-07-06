@@ -1,0 +1,28 @@
+# --- Gowin GW5A synthesis / place-and-route outputs ---
+fpga/impl/
+fpga/**/impl/
+fpga/build_log.txt
+fpga/*.log
+*.gprj.user
+
+# --- Copyrighted MSX BIOS pack — NOT redistributed ---
+# Se construye localmente desde tus propias ROMs y se flashea (dirección re-mapeada en el 60K).
+fpga/src/rom/*.bin
+fpga/src/rom/*.fs
+fpga/src/rom/*.ROM
+
+# --- Entregas de bitstream (packs con copyright) ---
+files/
+
+# --- Bases de datos de herramientas (regenerables, no son del proyecto) ---
+ruvector.db
+**/ruvector.db
+
+# --- Office / editor temporales ---
+~$*
+*.swp
+.DS_Store
+
+# --- Ficheros basura sueltos ---
+/0
+/D
