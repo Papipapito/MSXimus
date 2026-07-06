@@ -7,7 +7,7 @@ Tracker vivo del port. Ver [PORT_PLAN.md](PORT_PLAN.md) para el plan y [PORT_FIN
 | Decisión | Elección | Consecuencia |
 |---|---|---|
 | Enfoque | **Híbrido** | Scaffolding 60K ya; flash_rw/SD/YM2149 con fixes en P1 |
-| Memoria | **DDR3 onboard** | Reescribir `memory.v` + wrapper `ram_*`/`vram_*`; VRAM en BRAM; desbloquea roadmap |
+| Memoria core | **SDR SDRAM (W9825, 16b/32MB)** ⭐ | Reusar `memory.v` (rework 32→16b); DDR3 = fase 2 framebuffer. Ver [MEMORY_OPTIONS.md](MEMORY_OPTIONS.md) (revierte la decisión DDR3 previa) |
 | Companion | **BL616 onboard** | Pines JTAG-repurposed; quitar `spi_ext`/mux (→ fuera TA1132); dock M0S eliminado |
 
 ## Toolchain confirmado (Gowin 1.9.11.03 Education, local)
@@ -49,13 +49,26 @@ GW5AT-60B (PBGA484) ✅ · PLL_ADV/Gowin_PLL fraccional ✅ · DDR3 Memory Inter
 | `YM2149.vhdl` | #2 carga síncrona del envelope (lotería placement GW5A) | ⬜ |
 
 ## P2 — top-level + integración
+
+### Memoria del core = SDR SDRAM (camino ACTIVO)
 | Item | Estado | Nota |
 |---|---|---|
-| Diseño wrapper DDR3 | ✅ | [DDR3_WRAPPER.md](DDR3_WRAPPER.md): VRAM→BRAM, CPU→DDR3, interfaz IP real, CDC, MG2/waits |
-| `fpga/src/memory_ddr3.v` (skeleton) | ✅ | puertos core-side + IP real + FSM/CDC/BRAM como TODO (se itera en sim) |
-| Generar IP DDR3 en el IDE | ⬜ | Controller, 1:4, DQ16; confirmar part del chip antes |
-| Implementar FSM/CDC/pack + dpram VRAM | ⬜ | testbench Icarus (patrón megaram_equiv) |
-| `top.v` portado | ⬜ | magic-ports SDRAM fuera, waits adaptativos, quitar `spi_ext`, `mdclk`=50MHz al PLL |
+| Decisión + comparativa | ✅ | [MEMORY_OPTIONS.md](MEMORY_OPTIONS.md) |
+| Spec cirugía 32→16b | ✅ | [SDR_MEMORY_PORT.md](SDR_MEMORY_PORT.md) (bloque a bloque + geometría W9825) |
+| `fpga/src/memory.v` (base, aún 32b) | ✅ copiado | rework pendiente de aplicar |
+| Pines SDRAM en el CST | 🟡 parcial | 5 de control confirmados; addr/dq/ba/dqm pendientes de copiar de C64Nano |
+| Aplicar rework 32→16b | ⬜ | según el spec |
+| Testbench Icarus (modelo W9825) | ⬜ | gate antes de HW (patrón megaram_equiv) |
+
+### DDR3 = FASE 2 (framebuffer del frontend gráfico) — diseño listo, no activo
+| Item | Estado | Nota |
+|---|---|---|
+| Diseño wrapper DDR3 | ✅ (fase 2) | [DDR3_WRAPPER.md](DDR3_WRAPPER.md) + skeleton `memory_ddr3.v`. Uso probado en el 60K = framebuffer (nand2mario, 297MHz, refresh off) |
+
+### Resto P2
+| Item | Estado | Nota |
+|---|---|---|
+| `top.v` portado | ⬜ | magic-ports→GPIO SDRAM, quitar `spi_ext`, `mdclk`=50MHz al PLL, banco por sdram_addr[22:21] |
 | resto SE-RETOCA (v9958_top, megaram+SDC, companion…) | ⬜ | |
 
 ## P3 — bring-up en placa

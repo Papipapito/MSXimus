@@ -93,6 +93,21 @@ IO_LOC  "usb_uart_tx" R14; IO_PORT "usb_uart_tx" IO_TYPE=LVCMOS33 DRIVE=8;
 //   PMOD1 io[4]=E22 / io[5]=D22, o uart_ext_rx=B22 / uart_ext_tx=C22. Decidir
 //   dónde se enchufa físicamente el ESP-01S. NO inventar par de pines.
 
-// ---- Memoria principal (DDR3 512MB) ----
-//  DDR3 = HARD-IP del GW5AT: NO aparece como IO_LOC en el .cst. Los pines DDR3
-//  los gestiona la Gowin DDR3 Memory Interface IP (IPUG281). Aquí NO va nada.
+// ---- Memoria del CORE: SDR SDRAM (módulo Tang SDRAM, W9825G6KH, 16b/32MB) ----
+//  Decisión (docs/MEMORY_OPTIONS.md): el core va en SDR SDRAM, reusando memory.v
+//  (frente 32→16b). Pines del slot SDRAM1 del Console 60K, del .cst de C64Nano.
+//  ⚠️ El nombre de net debe casar con el memory.v portado (16 bits: dq[15:0],
+//  dqm[1:0]). O_sdram_clk por pin GPIO con skew controlado (punto delicado @108MHz).
+//  Pines de control CONFIRMADOS (investigación, .cst de C64Nano console60k):
+IO_LOC  "O_sdram_clk"   B17; IO_PORT "O_sdram_clk"   IO_TYPE=LVCMOS33 DRIVE=8 PULL_MODE=NONE;  // [ALTA]
+IO_LOC  "O_sdram_cs_n"  F21; IO_PORT "O_sdram_cs_n"  IO_TYPE=LVCMOS33 DRIVE=8 PULL_MODE=NONE;  // [ALTA]
+IO_LOC  "O_sdram_ras_n" F16; IO_PORT "O_sdram_ras_n" IO_TYPE=LVCMOS33 DRIVE=8 PULL_MODE=NONE;  // [ALTA]
+IO_LOC  "O_sdram_cas_n" E17; IO_PORT "O_sdram_cas_n" IO_TYPE=LVCMOS33 DRIVE=8 PULL_MODE=NONE;  // [ALTA]
+IO_LOC  "O_sdram_wen_n" D16; IO_PORT "O_sdram_wen_n" IO_TYPE=LVCMOS33 DRIVE=8 PULL_MODE=NONE;  // [ALTA]
+// <<<PENDIENTE (NO inventar): copiar del .cst de C64Nano console60k los IO_LOC EXACTOS de
+//   O_sdram_ba[0..1], O_sdram_dqm[0..1], O_sdram_addr[0..12] (13b) e IO_sdram_dq[0..15] (16b).
+//   La investigación confirmó que existen y su ancho, pero no listó cada pin.>>>
+//
+//  ---- DDR3 onboard (SK Hynix H5TQ4G63EFR, 512MB) — FASE 2 (framebuffer) ----
+//  Hard-IP: sin IO_LOC. Se generará su IP cuando toque el frontend gráfico
+//  (estilo nand2mario/ddr3_framebuffer_gowin, 297MHz/refresh-off). Ver DDR3_WRAPPER.md.
