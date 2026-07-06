@@ -18,7 +18,7 @@ parameter int width_a = 8
     output [width_a-1:0] q_b
 );
 
-localparam int array_size = $pow(2,widthad_a);
+localparam int array_size = (1<<widthad_a); // was $pow(2,...): yosys does not implement $pow; neutral in Gowin
 
     reg [width_a-1:0] mem_r[0:array_size-1];
     reg [width_a-1:0] a_r;

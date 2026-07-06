@@ -121,11 +121,13 @@ end
     // (rPLL CLK_108P + CLKDIV /4 + CLKDIV /2). clk_108m_n (fase CLKOUTP del
     // rPLL viejo) no tenia consumidores y se ha eliminado.
     wire clk_108m;
+    wire clk_135;               // TMDS x5 del HDMI (mismo VCO: 135 = 5 x 27 exacto)
     Gowin_PLL pll_main (
         .clkin  (ex_clk_27m),   // ⚠ en la Console 60K este pin lleva 50 MHz (V22)
         .clkout0(clk_108m),     // 108.000000 MHz (fraccional, exacto)
         .clkout1(clk_54m),      //  54.000000 MHz
         .clkout2(clk_27m),      //  27.000000 MHz
+        .clkout3(clk_135),      // 135.000000 MHz (TMDS; sustituye al CLK_135 del tn_vdp)
         .lock   (clock_locked),
         .mdclk  (ex_clk_27m)    // reloj de init del PLLA (secuencia mDRP)
     );
@@ -1249,6 +1251,8 @@ assign keyboard_addr = ppi_port_c[3:0];
 
     v9958_top vdp4 (
         .clk (clk_27m),
+        .clk_135 (clk_135),           // TMDS x5 desde el Gowin_PLL (CLKOUT3)
+        .clk_135_lock (clock_locked), // mismo PLL -> mismo lock (antes: lock del CLK_135 propio)
         .s1 (0),
         .clk_50 (0),
         .clk_125 (0),

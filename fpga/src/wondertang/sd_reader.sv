@@ -99,6 +99,14 @@ localparam [4:0] CMD0      = 5'd0,
 reg [4:0] sdcmd_stat = STANDBY;
 //enum logic [3:0] {CMD0, CMD8, CMD55_41, ACMD41, CMD2, CMD3, CMD7, CMD16, CMD17, READING, READING2} sdcmd_stat = CMD0;
 
+// AUDIT #4: bounded retries for CMD17/CMD24 relaunches and the CMD55/ACMD41 init
+// loop (previously retried forever on timeout/syntaxe). On exhaustion the command
+// FSM returns to IDLING and retry_fail (a level, cleared on the next IDLING launch)
+// makes the data FSM raise timeout_error.
+localparam [1:0] RETRY_MAX = 2'd3;
+reg [1:0] retry_cnt  = 0;
+reg       retry_fail = 1'b0;
+
 reg        sdclkl = 1'b0;
 
 localparam [3:0] RWAIT    = 4'd0,
@@ -129,11 +137,24 @@ assign card_stat = sdcmd_stat;
 reg sdcmdoe;
 reg sdcmdout;
 
+// PORT60K (audit 5.B): 2FF synchronizers on the asynchronous SD pad INPUT paths
+// only (sdcmd/sddat0 -> clk domain); the output/OE paths are untouched. Both
+// lines idle high, hence the 2'b11 init. The 2-clk delay is harmless: the FSMs
+// sample several clk cycles per sdclk half-period.
+reg [1:0] sdcmd_in_ff  = 2'b11;
+reg [1:0] sddat0_in_ff = 2'b11;
+always @ (posedge clk) begin
+    sdcmd_in_ff  <= {sdcmd_in_ff[0],  sdcmd};
+    sddat0_in_ff <= {sddat0_in_ff[0], sddat0};
+end
+wire sdcmd_in  = sdcmd_in_ff[1];
+wire sddat0_in = sddat0_in_ff[1];
+
 sdcmd_ctrl u_sdcmd_ctrl (
     .rstn        ( rstn         ),
     .clk         ( clk          ),
     .sdclk       ( sdclk        ),
-    .sdcmdin     ( sdcmdoe ? 1'b1 : sdcmd        ),
+    .sdcmdin     ( sdcmdoe ? 1'b1 : sdcmd_in     ),
     .sdcmdout    ( sdcmdout     ),
     .sdcmdoe     ( sdcmdoe      ),
     .clkdiv      ( clkdiv       ),
@@ -182,6 +203,8 @@ always @ (posedge clk or negedge rstn)
         card_type   <= UNKNOWN;
         sdcmd_stat  <= STANDBY;
         cmd8_cnt    <= 0;
+        retry_cnt   <= 0;
+        retry_fail  <= 1'b0;
 
         mid <= 0;
         oid <= 16'h2020;
@@ -217,15 +240,19 @@ always @ (posedge clk or negedge rstn)
                 CMD12   :   set_cmd(1,                 256 , 12,  'h00000000);
                 CMD16   :   set_cmd(1, (SIMULATE?512:64000), 16,  'h00000200);
                 IDLING  :  begin
-                                if(rstart) begin 
+                                if(rstart) begin
                                     set_cmd(1, 96, 17, (card_type==SDHCv2) ? rsector : {rsector[22:0], 9'b0} );
                                     rsectoraddr <= (card_type==SDHCv2) ? rsector : {rsector[22:0], 9'b0};
                                     sdcmd_stat <= READING;
+                                    retry_cnt  <= 0;        // AUDIT #4
+                                    retry_fail <= 1'b0;
                                 end else
-                                if(wstart) begin 
+                                if(wstart) begin
                                     set_cmd(1, 96, 24, (card_type==SDHCv2) ? rsector : {rsector[22:0], 9'b0} );
                                     rsectoraddr <= (card_type==SDHCv2) ? rsector : {rsector[22:0], 9'b0};
                                     sdcmd_stat <= WRITING;
+                                    retry_cnt  <= 0;        // AUDIT #4
+                                    retry_fail <= 1'b0;
                                 end
                             end
                 STANDBY :   if (init) sdcmd_stat <= CMD0;
@@ -244,11 +271,25 @@ always @ (posedge clk or negedge rstn)
                             end
                 CMD55_41:   if(~timeout && ~syntaxe)
                                 sdcmd_stat <= ACMD41;
+                            else if(retry_cnt != RETRY_MAX) begin   // AUDIT #4: bounded retry
+                                retry_cnt  <= retry_cnt + 2'd1;
+                            end else begin
+                                sdcmd_stat <= IDLING;
+                                retry_fail <= 1'b1;
+                            end
                 ACMD41  :   if(~timeout && ~syntaxe && resparg[31]) begin
                                 card_type <= sdv1_maybe ? SDv1 : (resparg[30] ? SDHCv2 : SDv2);
                                 sdcmd_stat <= CMD2;
-                            end else begin
+                                retry_cnt  <= 0;
+                            end else if(~timeout && ~syntaxe) begin
+                                sdcmd_stat <= CMD55_41;     // card busy: legit poll, not an error
+                                retry_cnt  <= 0;
+                            end else if(retry_cnt != RETRY_MAX) begin   // AUDIT #4: bounded retry
                                 sdcmd_stat <= CMD55_41;
+                                retry_cnt  <= retry_cnt + 2'd1;
+                            end else begin
+                                sdcmd_stat <= IDLING;
+                                retry_fail <= 1'b1;
                             end
                 CMD2    :   if(~timeout && ~syntaxe)
                                 sdcmd_stat <= CMD3;
@@ -283,14 +324,26 @@ always @ (posedge clk or negedge rstn)
                 CMD16   :   if(~timeout && ~syntaxe)
                                 sdcmd_stat <= IDLING;
 
-                READING :   if(~timeout && ~syntaxe)
+                READING :   if(~timeout && ~syntaxe) begin
                                 sdcmd_stat <= READING2;
-                            else
+                                retry_cnt  <= 0;
+                            end else if(retry_cnt != RETRY_MAX) begin   // AUDIT #4: bounded retry
+                                retry_cnt  <= retry_cnt + 2'd1;
                                 set_cmd(1, 128, 17, rsectoraddr);
-                WRITING :   if(~timeout && ~syntaxe)
+                            end else begin
+                                sdcmd_stat <= IDLING;
+                                retry_fail <= 1'b1;
+                            end
+                WRITING :   if(~timeout && ~syntaxe) begin
                                 sdcmd_stat <= WRITING2;
-                            else
+                                retry_cnt  <= 0;
+                            end else if(retry_cnt != RETRY_MAX) begin   // AUDIT #4: bounded retry
+                                retry_cnt  <= retry_cnt + 2'd1;
                                 set_cmd(1, 128, 24, rsectoraddr);
+                            end else begin
+                                sdcmd_stat <= IDLING;
+                                retry_fail <= 1'b1;
+                            end
                 CMD12	:   if(~timeout && ~syntaxe)
                                 sdcmd_stat <= IDLING;           // return idling after an error
                 default:		sdcmd_stat <= IDLING;	
@@ -353,7 +406,7 @@ always @ (posedge clk or negedge rstn)
             case(sddat_stat)
                 // reading
                 RWAIT   : begin
-                    if(~sddat0) begin           // start bit = 0
+                    if(~sddat0_in) begin        // start bit = 0
                         sddat_stat <= RDURING;
                         ridx   <= 0;
 
@@ -364,7 +417,7 @@ always @ (posedge clk or negedge rstn)
                     end
                 end
                 RDURING : begin
-                    outbyte[3'd7 - ridx[2:0]] <= sddat0;
+                    outbyte[3'd7 - ridx[2:0]] <= sddat0_in;
                   
                     if(ridx[2:0] == 3'd7) begin
                         outen  <= 1'b1;
@@ -379,6 +432,12 @@ always @ (posedge clk or negedge rstn)
                     end
                 end
                 RTAIL   : begin
+                    // AUDIT #6 (upstream WonderTANG limitation, kept AS-IS by design):
+                    // the 16-bit READ CRC and the end bit are skipped here, so bus
+                    // corruption reaches the host as valid data. Note also that
+                    // crc_error keeps the stale value of the last WRITE during reads.
+                    // If ever fixed: feed sd_crc_16 during RDURING, compare here in
+                    // RTAIL, and clear crc_error when entering READING.
                     if(ridx >= 8*8-1)          // ignores crc and end bit
                         sddat_stat <= RDONE;
                     ridx   <= ridx + 1;
@@ -412,8 +471,8 @@ always @ (posedge clk or negedge rstn)
                     end else if (ridx < 512*8+16+1+2) begin
                         sddat0oe <= 0;          // wait for crc status 2 cycles                   
                     end else begin
-                        if (!sddat0) begin      // wait for ack
-                            sddat_stat = WTAIL;
+                        if (!sddat0_in) begin   // wait for ack
+                            sddat_stat <= WTAIL;    // AUDIT #5: unified to nonblocking
                             ridx <= 0;
                         end
                         if(ridx > 13000000)      
@@ -429,24 +488,27 @@ always @ (posedge clk or negedge rstn)
                 end
                 WTAIL   : begin                 // busy wait
                     if (ridx < 3) begin
-                        crc_stat <= { crc_stat[1:0], sddat0 };
+                        crc_stat <= { crc_stat[1:0], sddat0_in };
                     end else begin
-        
+
                         if (ridx == 4)
                             crc_error <= crc_stat != 3'b010;
 
-                        if (!sddat0) begin      // wait for ack
-                            sddat_stat = WBUSY;
+                        if (!sddat0_in) begin   // wait for ack
+                            sddat_stat <= WBUSY;
                             ridx <= 0;
-                        if(ridx > 13000000)      
-                             sddat_stat <= WTIMEOUT;
                         end
+                        // AUDIT #5: timeout check moved OUT of the !sddat0 guard
+                        // (it was unreachable if the card never pulled DAT0 low),
+                        // same structure as WBUSY below.
+                        if(ridx > 13000000)
+                             sddat_stat <= WTIMEOUT;
                     end
                     ridx   <= ridx + 1;
                 end
                 WBUSY   :  begin
-                    if (sddat0) begin      // wait for ack
-                        sddat_stat = WDONE;
+                    if (sddat0_in) begin   // wait for ack
+                        sddat_stat <= WDONE;    // AUDIT #5: unified to nonblocking
                         ridx <= 0;
                     end
                     if(ridx > 13000000)      
@@ -458,6 +520,8 @@ always @ (posedge clk or negedge rstn)
 
             endcase
         end
+        if (retry_fail)         // AUDIT #4: command retries exhausted -> surface as timeout
+            timeout_error <= 1;
     end
 
 

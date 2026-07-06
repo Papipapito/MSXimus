@@ -489,13 +489,59 @@ module flash
             r_CS <= 1;
             counter <= counter + 1;
             if (counter == DELAY_LONG) begin
+                counter <= 0;
+                wip_timeout <= 0;
+                state <= STATE_05c_1;
+            end
+            else begin
+                state <= STATE_02_5;
+            end
+          end
+
+          // Espera WIP=0 tras el PAGE PROGRAM (mismo patron que el poll del
+          // erase, STATE_05b_*): no dar la escritura por terminada hasta que
+          // la flash acabe de programar (tPP max ~3 ms) o salte el timeout.
+          // Critico para escrituras en rafaga (auto-commit SRAM del 60K).
+          STATE_05c_1: begin
+            r_CS <= 0;
+            r_data_ready <= 0;
+            counter <= 0;
+            dataToSend[23-:8] <= CMD_READ_STATUS;
+            bitsToSend <= 8;
+            state <= STATE_SEND;
+            returnState <= STATE_05c_2;
+          end
+
+          STATE_05c_2: begin
+            counter <= 0;
+            dataIn <= 0;
+            state <= STATE_READ_DATA2;
+            returnState <= STATE_05c_3;
+          end
+
+          STATE_05c_3: begin
+            r_CS <= 1;
+            counter <= counter + 1;
+            if (wip_timeout >= WIP_TIMEOUT) begin
+                // Timeout: la flash nunca bajo WIP tras el program -> aborta a idle
                 r_write_busy <= 0;
                 r_write_counter <= 0;
                 counter <= 0;
                 state <= STATE_LOAD_CMD_TO_SEND;
             end
+            else if (counter == DELAY_SHORT) begin
+                counter <= 0;
+                if (dataIn[0] == 0) begin
+                    r_write_busy <= 0;
+                    r_write_counter <= 0;
+                    state <= STATE_LOAD_CMD_TO_SEND;
+                end
+                else begin
+                    state <= STATE_05c_1;
+                end
+            end
             else begin
-                state <= STATE_02_5;
+                state <= STATE_05c_3;
             end
           end
 

@@ -12,7 +12,7 @@ module sdcmd_ctrl (
     input  wire         clk,
     // SDcard signals (sdclk and sdcmd)
     output reg          sdclk,
-    input reg           sdcmdin,
+    input wire          sdcmdin,
     output reg          sdcmdout,
     output reg          sdcmdoe,
     // config clk freq

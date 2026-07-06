@@ -127,7 +127,7 @@ add_file tn_vdp_v3_v9958/src/vdp/vencode.vhd
 add_file constraints/msx_console60k.cst
 add_file constraints/msx_console60k.sdc
 
-set_option -use_sspi_as_gpio 1 -use_mspi_as_gpio 1 -top_module top -verilog_std sysv2017 -include_path src
+set_option -use_sspi_as_gpio 1 -use_mspi_as_gpio 1 -use_jtag_as_gpio 1 -top_module top -verilog_std sysv2017 -include_path src
 set_option -place_option 2
 set_option -route_option 2
 

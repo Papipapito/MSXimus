@@ -17,14 +17,17 @@
 // ============================================================================
 
 // ---- JTAG-repurposed / SPI-IO clock (NUEVO en el 60K, no existía en TN20K) ----
-//  El Console 60K reconfigura los pines JTAG como SPI del BL616 y BLOQUEA la
-//  reprogramación por JTAG. Requiere estas líneas especiales de cabecera:
-CLOCK_LOC "spi_io_clk" LOCAL_CLOCK;
-NET_LOC   "jtagseln" V_JTAGSELN;
-IO_PORT   "jtagseln" PULL_MODE=DOWN IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
-// bl616_jtagsel: ex-UART-out del BL616, ahora entrada FPGA (net a cablear en top.v)
-IO_LOC    "bl616_jtagsel" V14;                                             // [ALTA]
-IO_PORT   "bl616_jtagsel" PULL_MODE=UP IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+//  El Console 60K reconfigura los pines JTAG como SPI del BL616 (build.tcl lleva
+//  -use_jtag_as_gpio 1). C64Nano ademas usa un net "jtagseln" (NET_LOC V_JTAGSELN)
+//  y una entrada "bl616_jtagsel" (V14) que el top del MSXnano AUN NO TIENE:
+//  ⚠ TODO bring-up del companion: estudiar el top de C64Nano y añadir esos nets
+//  a top.v si son necesarios para que el BL616 onboard entre en modo SPI.
+//  Comentados hasta entonces (un IO_LOC sobre net inexistente se pierde EN SILENCIO):
+// CLOCK_LOC "spi_io_clk" LOCAL_CLOCK;
+// NET_LOC   "jtagseln" V_JTAGSELN;
+// IO_PORT   "jtagseln" PULL_MODE=DOWN IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+// IO_LOC    "bl616_jtagsel" V14;
+// IO_PORT   "bl616_jtagsel" PULL_MODE=UP IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
 
 // ---- Companion BL616 ONBOARD (mismos nets spi_* del MSXnano) ----
 IO_LOC  "spi_csn"  T13;  IO_PORT "spi_csn"  PULL_MODE=UP   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;  // TMS  [ALTA]
