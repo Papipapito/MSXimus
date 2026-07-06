@@ -28,3 +28,7 @@ ruvector.db
 # --- Ficheros basura sueltos ---
 /0
 /D
+
+# Artefactos de simulacion (regenerables)
+*.vvp
+*.vcd
