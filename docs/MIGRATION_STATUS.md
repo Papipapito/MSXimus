@@ -50,15 +50,14 @@ GW5AT-60B (PBGA484) ✅ · PLL_ADV/Gowin_PLL fraccional ✅ · DDR3 Memory Inter
 
 ## P2 — top-level + integración
 
-### Memoria del core = SDR SDRAM (camino ACTIVO)
+### Memoria del core = SDR SDRAM (camino ACTIVO) — ✅ FRENTE COMPLETADO EN RTL
 | Item | Estado | Nota |
 |---|---|---|
 | Decisión + comparativa | ✅ | [MEMORY_OPTIONS.md](MEMORY_OPTIONS.md) |
-| Spec cirugía 32→16b | ✅ | [SDR_MEMORY_PORT.md](SDR_MEMORY_PORT.md) (bloque a bloque + geometría W9825) |
-| `fpga/src/memory.v` (base, aún 32b) | ✅ copiado | rework pendiente de aplicar |
-| Pines SDRAM en el CST | 🟡 parcial | 5 de control confirmados; addr/dq/ba/dqm pendientes de copiar de C64Nano |
-| Aplicar rework 32→16b | ⬜ | según el spec |
-| Testbench Icarus (modelo W9825) | ⬜ | gate antes de HW (patrón megaram_equiv) |
+| Cirugía 32→16b APLICADA | ✅ | `fpga/src/memory.v` de 16 bits; mapeo geometría-preservante (addr[1]→LSB col); tristate explícito dq_oe/dq_in (fix del idioma Gowin-mágico); initializers para sim |
+| Testbench Icarus (modelo W9825) | ✅ **ALL TESTS PASS** | `tools/sdr16_tb/`: init real+MRS validado, lanes/DQM, 600 accesos random, words VDP, **aliasing de geometría (T6)**, **MG2 (T7)** |
+| Pines SDRAM en el CST | ✅ | bloque completo de 34 pines verbatim de C64Nano console60k (CKE sin pin: atado en placa) |
+| Spec + hallazgos | ✅ | [SDR_MEMORY_PORT.md](SDR_MEMORY_PORT.md) (4 hallazgos de implementación documentados) |
 
 ### DDR3 = FASE 2 (framebuffer del frontend gráfico) — diseño listo, no activo
 | Item | Estado | Nota |

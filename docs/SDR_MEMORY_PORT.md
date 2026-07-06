@@ -1,27 +1,29 @@
 # Port SDR de `memory.v`: 32-bit (SDRAM embebida GW2AR) → 16-bit (W9825G6KH externo)
 
-Spec de la cirugía. Base: `fpga/src/memory.v` (copiado de `dev`, aún en 32 bits). Objetivo: mismo controlador SDR, bus de 16 bits, para el módulo Tang SDRAM (1× W9825G6KH, 16b, 32 MB) por GPIO del slot SDRAM1 del Console 60K. **La FSM y el contrato `ram_*`/`vram_*` NO cambian.** Solo el frente físico + el mapeo byte/palabra + la geometría.
+**✅ CIRUGÍA APLICADA Y VERIFICADA EN SIMULACIÓN** (`tools/sdr16_tb/`, Icarus 12 en WSL: **ALL TESTS PASS** — init real precharge/refresh/MRS, lanes, DQM, 600 accesos aleatorios, words VDP, aliasing de geometría, MG2/refresh). La FSM y el contrato `ram_*`/`vram_*` NO cambiaron; solo el frente físico + mapeo byte/palabra + geometría.
 
-> ⚠️ **Verificar en simulación (Icarus) antes de confiar** — patrón `tools/megaram_equiv` + un modelo conductual del W9825. Los bit-slices de abajo son la propuesta; el testbench los valida.
+## Geometría (implementada)
 
-## Geometría
-
-| | 32-bit (actual, embebida) | 16-bit (W9825G6KH) |
+| | 32-bit (original, embebida) | 16-bit (W9825G6KH) |
 |---|---|---|
 | Bus datos | `IO_sdram_dq[31:0]` (4 bytes) | `[15:0]` (2 bytes) |
 | DQM | `[3:0]` (HU/HL/U/L) | `[1:0]` (U/L) |
 | Byte-en-palabra | `sdram_addr[1:0]` (1 de 4) | **`sdram_addr[0]`** (1 de 2) |
 | Bus dir | `SdrAdr[10:0]` (11) | **`SdrAdr[12:0]`** (13) |
-| Filas / Cols | 11 / 8 | **13 / 9** (8192×512×4banks) |
-| Palabra dir | `sdram_addr[22:2]` | `sdram_addr[22:1]` |
 
-**Mapeo CPU** (preservando el banco = `sdram_addr[22:21]`, que fija el mapa mapper/megaram/VRAM de top.v:1389-1418):
-- Byte: `sdram_addr[0]` (0=`SdrDat[7:0]`, 1=`SdrDat[15:8]`)
-- Bank: `sdram_addr[22:21]`
-- Row (13b): `{2'b00, sdram_addr[20:10]}` (11 usados → 2 MB/banco × 4 = 8 MB)
-- Col (9b): `sdram_addr[9:1]`
+**Mapeo GEOMETRÍA-PRESERVANTE (el implementado — sustituye a la propuesta inicial de este doc):** el bit `sdram_addr[1]`, que antes elegía la mitad alta/baja del word de 32 bits (lanes HU/HL vs U/L), pasa a ser el **LSB de COLUMNA**. Cada word de 32b original = 2 columnas de 16b adyacentes → **la biyección dirección→celda física y la geometría de colisión CPU↔VRAM del banco D quedan IDÉNTICAS al diseño original** (VRAM en columnas pares de la región `3'b111`; lo que vivía en HU/HL vive ahora en las columnas impares). Cualquier patrón de direcciones que no colisionaba antes sigue sin colisionar.
 
-**VDP**: ya trabaja en 16 bits (`vram_dout <= {SdrDat[15:8],SdrDat[7:0]}`, byte por `vram_addr[16]`) → **casi sin cambios**; solo la geometría de fila/col del banco D (`vram_addr`).
+- **CPU**: bank=`addr[22:21]` · row=`{2'b00, addr[12:2]}` (mismos bits que el original) · col=`{addr[20:13], addr[1]}` · byte=`addr[0]`
+- **VDP**: bank=`2'b11` · row=`{2'b00, vram[10:0]}` · col=`{3'b111, vram[15:11], 1'b0}` · byte=`vram[16]`
+
+> La propuesta inicial de este doc (row=`addr[20:10]`, col=`addr[9:1]`) era funcionalmente correcta pero **cambiaba la geometría de colisión del banco D** (donde conviven VRAM y BIOS/kanji/disk). Descartada por eso; el test T6 del testbench verifica la geometría implementada.
+
+## Hallazgos de implementación (importantes para el resto del port)
+
+1. **Idioma de lectura del bus era Gowin-mágico**: el original hacía `assign IO_sdram_dq = SdrDat` (con `SdrDat<=z` en lecturas) y luego **leía el reg `SdrDat`** para capturar el dato — solo funciona porque Gowin lo mapea al pad de la SDRAM *embebida*. Con chip externo por GPIO (GW5A) y en cualquier simulador eso lee `z`. **Fix aplicado**: tristate explícito `dq_oe` + `wire dq_in = IO_sdram_dq`, y los latches leen `dq_in`. Portable a cualquier toolchain.
+2. **Doble latch fases 5+6 = tolerancia CL2/CL2+pad-register**: el latch de lectura dispara en las fases 5 **y** 6. En fase 6 el chip ya no conduce (BL=1 + DQM read-latency) → el bus retiene el valor por capacidad (igual que en el TN20K). Si el IOB del GW5A añade un registro de entrada, la fase 6 lo cubre. El modelo del testbench emula la retención (conduce 1 ciclo extra).
+3. **Initializers de registros** (`ff_mem_seq`, `ff_sdr_seq`, `SdrSta`, `SdrCmd`, DQM, latches): sin ellos la simulación se bloquea en X (el contador Johnson nunca sale de XX). Añadidos = power-up real de Gowin (0). Misma higiene que la auditoría pide para `kanji.v` — **aplicar el patrón al resto de módulos cuando se porten**.
+4. **CKE sin pin**: el módulo Tang SDRAM ata CKE alto en placa (el .cst de C64Nano no lo tiene). `O_sdram_cke` queda sin constraint.
 
 ## Cambios por bloque (memory.v)
 

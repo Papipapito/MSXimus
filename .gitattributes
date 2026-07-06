@@ -1,0 +1,2 @@
+# Los scripts de shell corren en WSL: siempre LF (lección msx: run.sh WSL-safe)
+*.sh text eol=lf
