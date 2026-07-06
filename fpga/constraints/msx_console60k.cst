@@ -1,0 +1,98 @@
+// ============================================================================
+//  msx_console60k.cst — Pin constraints  ·  MSXnano port  ·  Tang Console 60K
+//  Device: GW5AT-LV60PG484AC1/I0  (PBGA484)
+// ----------------------------------------------------------------------------
+//  SKELETON. Los pines marcados [ALTA] salen VERBATIM del .cst real del Console
+//  60K (MiSTle-Dev/C64Nano src/tang/console60k/c64nano.cst) — core que arranca
+//  HOY en la placa. Los marcados <<<INCIERTO>>> NO llevan pin: rellenar con el
+//  schematic oficial de Sipeed o midiendo. Ver docs/BOARD_60K.md.
+//
+//  Decisiones aplicadas: companion = BL616 ONBOARD (dock M0S eliminado);
+//  memoria = DDR3 onboard (hard-IP → SIN pines de usuario en este .cst).
+//
+//  ⚠⚠ FALLO SILENCIOSO DE GOWIN (AUDIT §5.A3): un IO_LOC sobre un net que no
+//  existe en el top NO da error — pierde la constraint. TRAS EL 1er PnR,
+//  VERIFICAR EN EL LOG que cada net casa >0 objetos. Los nombres de net de
+//  abajo son los del top del TN20K (tang9k.cst); ajustar al top.v ya portado.
+// ============================================================================
+
+// ---- JTAG-repurposed / SPI-IO clock (NUEVO en el 60K, no existía en TN20K) ----
+//  El Console 60K reconfigura los pines JTAG como SPI del BL616 y BLOQUEA la
+//  reprogramación por JTAG. Requiere estas líneas especiales de cabecera:
+CLOCK_LOC "spi_io_clk" LOCAL_CLOCK;
+NET_LOC   "jtagseln" V_JTAGSELN;
+IO_PORT   "jtagseln" PULL_MODE=DOWN IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+// bl616_jtagsel: ex-UART-out del BL616, ahora entrada FPGA (net a cablear en top.v)
+IO_LOC    "bl616_jtagsel" V14;                                             // [ALTA]
+IO_PORT   "bl616_jtagsel" PULL_MODE=UP IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+
+// ---- Companion BL616 ONBOARD (mismos nets spi_* del MSXnano) ----
+IO_LOC  "spi_csn"  T13;  IO_PORT "spi_csn"  PULL_MODE=UP   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;  // TMS  [ALTA]
+IO_LOC  "spi_sclk" V12;  IO_PORT "spi_sclk" PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // TCK [ALTA]
+IO_LOC  "spi_dat"  R13;  IO_PORT "spi_dat"  PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // TDI/MOSI [ALTA]
+IO_LOC  "spi_dir"  U13;  IO_PORT "spi_dir"  PULL_MODE=NONE DRIVE=8   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // TDO/MISO [ALTA]
+IO_LOC  "spi_irqn" U15;  IO_PORT "spi_irqn" PULL_MODE=NONE DRIVE=8   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // [ALTA]
+//  m0s[0..4] del dock M0S ELIMINADOS (decisión: companion onboard). Al portar
+//  top.v se quita spi_ext/mux (fpga_companion.v:47-59) → desaparece el TA1132.
+
+// ---- Reloj de sistema: 50 MHz en V22 (¡NO 27!) ----                        [ALTA]
+//  El net del top actual se llama ex_clk_27m (engañoso: aquí lleva 50 MHz).
+//  RENOMBRAR en el top.v portado (p.ej. ex_clk_50m) y recalcular PLL/CLKDIV.
+//  OPEN-ITEM Nº1: 108 exactos desde 50 no es trivial (ver docs/PORT_FINDINGS §2).
+IO_LOC  "ex_clk_27m" V22;
+IO_PORT "ex_clk_27m" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=OFF;
+
+// ---- Botones (BANCO 1.5V, activo bajo — cambia el IOSTANDARD vs TN20K) ----  [ALTA]
+IO_LOC  "s1" AB13; IO_PORT "s1" IO_TYPE=LVCMOS15 PULL_MODE=UP DRIVE=OFF BANK_VCCIO=1.5;  // user
+IO_LOC  "s2" AA13; IO_PORT "s2" IO_TYPE=LVCMOS15 PULL_MODE=UP DRIVE=OFF BANK_VCCIO=1.5;  // reset
+//  (Confirmar la asignación s1/user vs s2/reset contra la semántica del top.v.)
+
+// ---- LEDs onboard (solo 2 fiables; el MSXnano lleva 6) ----
+IO_LOC  "led[0]" G11; IO_PORT "led[0]" IO_TYPE=LVCMOS33 DRIVE=4 PULL_MODE=NONE BANK_VCCIO=3.3; // [ALTA]
+IO_LOC  "led[1]" U12; IO_PORT "led[1]" IO_TYPE=LVCMOS33 DRIVE=4 PULL_MODE=NONE BANK_VCCIO=3.3; // [ALTA]
+// <<<INCIERTO>>> led[2..5]: sin pin confirmado en el 60K. Opciones: reducir a 2
+//   LEDs en el top, o sacarlos por header/PMOD (candidato: pmod_companion_* si
+//   no se usa companion externo). NO inventar pin.
+
+// ---- HDMI TMDS (pares diferenciales) ----                                  [ALTA]
+IO_LOC  "clk_p"     G15,G16; IO_PORT "clk_p"     PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[0]" J14,H14; IO_PORT "data_p[0]" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[1]" J15,H15; IO_PORT "data_p[1]" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[2]" K17,J17; IO_PORT "data_p[2]" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
+//  (El pipeline TMDS del tn_vdp usa CLK_135 ×5 con DYN_DA_EN fantasma: regenerar
+//   PLLA con fase estática, o pasar a serdes nativo GW5A — ver docs/GW5A_IP §3.)
+
+// ---- microSD (SDIO 4-bit) ----                                             [ALTA]
+IO_LOC  "sd_sclk" V15;  IO_PORT "sd_sclk" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sd_cmd"  Y16;  IO_PORT "sd_cmd"  IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sd_dat0" AA15; IO_PORT "sd_dat0" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sd_dat1" AB15; IO_PORT "sd_dat1" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sd_dat2" W14;  IO_PORT "sd_dat2" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sd_dat3" W15;  IO_PORT "sd_dat3" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+// ---- Flash NOR MSPI (W25Q64 8MB, compartida con BL616) ----                [ALTA]
+//  Re-mapear direcciones del pack (0x200000) y config (0x280000): el bitstream
+//  GW5AT-60 es mayor y el BL616 comparte la flash (AUDIT §5.B). Aplicar antes
+//  los fixes de flash_rw.v (#1 write_terminate + WIP).
+IO_LOC  "mspi_cs"   T19; IO_PORT "mspi_cs"   IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "mspi_sclk" L12; IO_PORT "mspi_sclk" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "mspi_mosi" P22; IO_PORT "mspi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=NONE;  // DI
+IO_LOC  "mspi_miso" R22; IO_PORT "mspi_miso" IO_TYPE=LVCMOS33 PULL_MODE=NONE;  // DO
+//  mspi_wp=P21 / mspi_hold=R21 existen en el 60K (QSPI); el MSXnano no los usa.
+
+// ---- Monitor serie del BL616 (opcional) ----                               [MEDIA]
+IO_LOC  "usb_uart_tx" R14; IO_PORT "usb_uart_tx" IO_TYPE=LVCMOS33 DRIVE=8;
+
+// ---- WS2812B (tira de estado en carcasa) ----
+// <<<INCIERTO>>> ws2812_led: sin pin confirmado en el 60K. Candidato: una línea
+//   libre de PMOD1 (io[5]=D22) o header 2×20. Confirmar con schematic. NO inventar.
+
+// ---- WiFi ESP-01S UART (859372 bps fijos, firmware ducasp) ----
+// <<<INCIERTO>>> uart_rx / uart_tx del ESP-01S: el 60K no tiene conector ESP-01S
+//   dedicado; sacar 2 pines libres consecutivos por header/PMOD. Candidatos:
+//   PMOD1 io[4]=E22 / io[5]=D22, o uart_ext_rx=B22 / uart_ext_tx=C22. Decidir
+//   dónde se enchufa físicamente el ESP-01S. NO inventar par de pines.
+
+// ---- Memoria principal (DDR3 512MB) ----
+//  DDR3 = HARD-IP del GW5AT: NO aparece como IO_LOC en el .cst. Los pines DDR3
+//  los gestiona la Gowin DDR3 Memory Interface IP (IPUG281). Aquí NO va nada.
