@@ -2,6 +2,23 @@
 
 Tracker vivo del port. Ver [PORT_PLAN.md](PORT_PLAN.md) para el plan y [PORT_FINDINGS.md](PORT_FINDINGS.md) para los hallazgos.
 
+## 🏆 HITO (2026-07-07): PRIMER BITSTREAM GW5AT-60 — serial `msxup_60k_20260707_01`
+**TNS 0.000 (0 endpoints violados, setup+hold, 9 relojes) · Logic 25% · BSRAM 13%** (vs 89% CLS del TN20K). Entrega en `files/20260707/` (solo `.fs`; el `.bin` del pack requiere re-mapear el layout de flash: el bitstream ocupa 2.26MB > 0x200000). Prueba: **carga a SRAM** (no flashear; la flash la comparte el BL616). Esperable sin pack: configura + PLL lock + señal HDMI estable.
+
+### Iteración de bring-up de la síntesis (7 pasadas)
+1. `BUFG` no existe en GW5A → assigns (red global automática)
+2-3. BSRAM SP `WRITE_MODE=2'b10` (PA2122) → `syn_srlstyle="registers"` en jtopl (`syn_ramstyle` NO aplica a shift-extraction, SUG550 §5.17)
+4. Parser SDC sin `\` de continuación
+5. Pines dedicados: DONE/READY (los 2 LED onboard) + CPU/MSPI (flash) → `-use_done/ready/cpu_as_gpio`
+6. ✅ primer bitstream (con 1 violación 54MHz por excepciones ausentes)
+7. ✅ SDC completo (excepciones del TN20K portadas; las de `env_reset` OBSOLETAS por el fix #2) → **timing limpio**
+
+### Pendiente inmediato
+- [ ] **Re-mapear layout de flash** (pack/config; bitstream 2.26MB pisa 0x200000) + `flash_rw` offsets
+- [ ] Pines definitivos de `led[2..5]`, `ws2812`, UART ESP (hoy auto-colocados: U8/W16/E18/U9/P6/U21/R19 — no conectar PMODs al probar)
+- [ ] Companion BL616: nets `jtagseln`/`bl616_jtagsel` estilo C64Nano (líneas del CST comentadas) para el modo JTAG→SPI
+- [ ] Smoke en HW (SRAM load) → luego pack+flash → boot MSX completo
+
 ## Decisiones tomadas (2026-07-06)
 
 | Decisión | Elección | Consecuencia |
