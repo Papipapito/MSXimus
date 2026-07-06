@@ -19,6 +19,8 @@ Síntesis de los 5 docs code-grounded ([CLOCK_CONSTANTS](CLOCK_CONSTANTS.md), [M
 
 ## 2. Análisis del reloj base (hallazgo A) — el problema y las salidas
 
+> ✅ **RESUELTO (ver [CLOCK_PLAN.md](CLOCK_PLAN.md)):** el PLL del GW5A (`PLL_ADV`/`Gowin_PLL`, confirmado en el ipspec del toolchain) es **fraccional** → genera ~108 MHz desde 50 (opción 2 de abajo) sin re-derivar constantes ni necesitar un 27 MHz en placa. Toolchain 1.9.11.03 Education confirmado: GW5AT-60B + PLL_ADV + DDR3 soportados. Lo de abajo queda como registro del análisis.
+
 El core entero cuelga de **108 MHz** (y 54/27 por división entera). Con entrada de **50 MHz**, generar **108.000 MHz exactos** con PLL entera exige `FBDIV/IDIV = 108/50 = 54/25` → `IDIV` múltiplo de 25 → **PFD = 50/25 = 2 MHz**, por **debajo del mínimo PFD (~3 MHz)** que reportan las fuentes del GW5A. **Conclusión (condicionada a que el PFD mínimo sea 3 MHz): 108.000 exacto desde 50 MHz NO es alcanzable con PLL entera simple.** Salidas, por preferencia:
 
 1. **Fuente de 27 MHz en la placa** (si existe un XO de 27, o se saca del BL616/HDMI/externo) → se conserva TODO idéntico (cero recálculo). *Pendiente de confirmar en el schematic — el C64Nano usa 50 MHz, pero puede haber otro reloj.*

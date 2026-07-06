@@ -10,12 +10,15 @@ Tracker vivo del port. Ver [PORT_PLAN.md](PORT_PLAN.md) para el plan y [PORT_FIN
 | Memoria | **DDR3 onboard** | Reescribir `memory.v` + wrapper `ram_*`/`vram_*`; VRAM en BRAM; desbloquea roadmap |
 | Companion | **BL616 onboard** | Pines JTAG-repurposed; quitar `spi_ext`/mux (→ fuera TA1132); dock M0S eliminado |
 
-## Open-items (bloqueantes por fase, no para P0)
+## Toolchain confirmado (Gowin 1.9.11.03 Education, local)
+GW5AT-60B (PBGA484) ✅ · PLL_ADV/Gowin_PLL fraccional ✅ · DDR3 Memory Interface v5.9 ✅ — los tres soportan `GW5AT-60B` (ipspec locales). El build del 60K va por el flujo propietario Gowin (`gw_sh`), NO yosys/apicula (PLLA no soportada ahí).
 
-1. **Reloj base** — entrada 50 MHz, no 27; 108 exacto no trivial. Resolver: ¿hay 27 MHz en la placa? / PLLA fraccional / base cercana + re-derivar. (PORT_FINDINGS §2)
+## Open-items
+
+1. ✅ **RESUELTO — Reloj base**: el PLL del GW5A es **fraccional** → ~108 MHz desde 50 sin re-derivar constantes ni necesitar 27 MHz en placa. Ver [CLOCK_PLAN.md](CLOCK_PLAN.md). (Validar tolerancia ~0 al generar la IP.)
 2. **VRAM en BRAM vs DDR3** — recomendado BRAM; cerrar con presupuesto BRAM + latencia DDR3.
 3. **Pines INCIERTOS** — `ws2812`, UART ESP-01S (×2), `led[2..5]` (×4): pendientes del schematic oficial.
-4. **Toolchain GW5A** — PLLA no está en yosys/apicula → el build del 60K obliga al flujo propietario Gowin.
+4. **Reloj de usuario DDR3** — fijar a 54 MHz (= dominio `ram_*`) para evitar CDC; `Memory_Clock=216`, `CLK_Ratio=1:4`. Cerrar en el wrapper.
 
 ## P0 — scaffolding (EN CURSO)
 
@@ -25,8 +28,9 @@ Tracker vivo del port. Ver [PORT_PLAN.md](PORT_PLAN.md) para el plan y [PORT_FIN
 | `fpga/constraints/msx_console60k.cst` | ✅ (skeleton) | 27 pines ALTA (companion onboard, HDMI, SD, clk, botones, flash, 2 LED); INCIERTOS marcados; DDR3 sin pines |
 | `fpga/constraints/msx_console60k.sdc` | ✅ (skeleton) | create_clock 50 MHz + SPI; generados 108/54/27/135 = TODO (nombres PLLA) |
 | Migrar IP PORTA-TAL-CUAL | ✅ (76 ficheros) | ver abajo |
-| IP de reloj GW5A (PLLA/CLKDIV/TMDS) | ⬜ | requiere flujo Gowin + resolver open-item 1 |
-| Wrapper DDR3 (stub de interfaz) | ⬜ | preservar `ram_*`/`vram_*`; siguiente entregable |
+| Plan de reloj (open-item 1) | ✅ | [CLOCK_PLAN.md](CLOCK_PLAN.md): 1 Gowin_PLL fraccional 50→108/54/27 + PLL#2 135 |
+| Generar IP `Gowin_PLL` #1 (108/54/27) | ⬜ | IDE o gw_sh → `fpga/ip/gowin_pll/` |
+| Wrapper DDR3 (stub de interfaz) | ⬜ | preservar `ram_*`/`vram_*` @54MHz; siguiente entregable |
 
 ### Ficheros migrados tal cual (76 RTL, P0)
 - **G80A** (Z80/T80): 7 `.vhd` (sin `T80_RegX`, muerto).
