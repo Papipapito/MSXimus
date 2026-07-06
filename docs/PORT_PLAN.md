@@ -60,5 +60,6 @@ Arrancar **ya** con lo específico del 60K que **no** depende de los fixes pre-p
 - [BOARD_60K.md](BOARD_60K.md) — pinout GW5AT-60 real (27 pines ALTA + INCIERTOS), skeleton `.cst`, topología del companion.
 - [GW5A_IP.md](GW5A_IP.md) — regeneración PLLA/CLKDIV/TMDS + interfaz de la IP DDR3 de Gowin.
 - [CLOCK_PLAN.md](CLOCK_PLAN.md) — **plan de reloj definitivo** (open-item nº1 resuelto: PLL fraccional 50→108/54/27) + toolchain confirmado.
+- [DDR3_WRAPPER.md](DDR3_WRAPPER.md) — **diseño del wrapper DDR3** (frente B): VRAM→BRAM, CPU→DDR3, interfaz REAL de la IP, CDC, requisitos MG2/waits.
 
 > **Hallazgos que cambian el plan** (ver PORT_FINDINGS): el reloj de entrada del 60K es **50 MHz, no 27** (108 exacto no es trivial); existe vía **SDRAM-por-PMOD** como alternativa a reescribir a DDR3; PLLA obliga al **flujo propietario Gowin**.

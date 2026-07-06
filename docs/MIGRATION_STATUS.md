@@ -15,10 +15,11 @@ GW5AT-60B (PBGA484) ✅ · PLL_ADV/Gowin_PLL fraccional ✅ · DDR3 Memory Inter
 
 ## Open-items
 
-1. ✅ **RESUELTO — Reloj base**: el PLL del GW5A es **fraccional** → ~108 MHz desde 50 sin re-derivar constantes ni necesitar 27 MHz en placa. Ver [CLOCK_PLAN.md](CLOCK_PLAN.md). (Validar tolerancia ~0 al generar la IP.)
-2. **VRAM en BRAM vs DDR3** — recomendado BRAM; cerrar con presupuesto BRAM + latencia DDR3.
+1. ✅ **RESUELTO — Reloj base**: el PLL del GW5A es **fraccional** → 108/54/27 EXACTOS desde 50 (PLL generada). Ver [CLOCK_PLAN.md](CLOCK_PLAN.md).
+2. ✅ **RESUELTO — VRAM en BRAM**: la VRAM (128KB) va a BRAM dual-port → disuelve el requisito MG2 y da latencia fija; DDR3 solo CPU/mapper/megaram. Ver [DDR3_WRAPPER.md](DDR3_WRAPPER.md §0). (Confirmar presupuesto BRAM tras 1er build.)
 3. **Pines INCIERTOS** — `ws2812`, UART ESP-01S (×2), `led[2..5]` (×4): pendientes del schematic oficial.
-4. **Reloj de usuario DDR3** — fijar a 54 MHz (= dominio `ram_*`) para evitar CDC; `Memory_Clock=216`, `CLK_Ratio=1:4`. Cerrar en el wrapper.
+4. **Part del chip DDR3 del SOM** — confirmar (densidad/timings para generar la IP). Ref: `nand2mario/ddr3_framebuffer_gowin`.
+5. **CDC DDR3 vs alinear clk_out=54** — decidir en el wrapper (CDC explícito por defecto).
 
 ## P0 — scaffolding (EN CURSO)
 
@@ -48,7 +49,14 @@ GW5AT-60B (PBGA484) ✅ · PLL_ADV/Gowin_PLL fraccional ✅ · DDR3 Memory Inter
 | `YM2149.vhdl` | #2 carga síncrona del envelope (lotería placement GW5A) | ⬜ |
 
 ## P2 — top-level + integración
-`top.v` (magic-ports SDRAM fuera, mapa de bancos, waits adaptativos, quitar `spi_ext`), `memory.v`→wrapper DDR3, `v9958_top.v`, companion, `megaram.v` (+SDC cruce), resto SE-RETOCA.
+| Item | Estado | Nota |
+|---|---|---|
+| Diseño wrapper DDR3 | ✅ | [DDR3_WRAPPER.md](DDR3_WRAPPER.md): VRAM→BRAM, CPU→DDR3, interfaz IP real, CDC, MG2/waits |
+| `fpga/src/memory_ddr3.v` (skeleton) | ✅ | puertos core-side + IP real + FSM/CDC/BRAM como TODO (se itera en sim) |
+| Generar IP DDR3 en el IDE | ⬜ | Controller, 1:4, DQ16; confirmar part del chip antes |
+| Implementar FSM/CDC/pack + dpram VRAM | ⬜ | testbench Icarus (patrón megaram_equiv) |
+| `top.v` portado | ⬜ | magic-ports SDRAM fuera, waits adaptativos, quitar `spi_ext`, `mdclk`=50MHz al PLL |
+| resto SE-RETOCA (v9958_top, megaram+SDC, companion…) | ⬜ | |
 
 ## P3 — bring-up en placa
 Checklist de revalidación (ver PORT_PLAN): matches SDC>0, turbo 5.369318, RTC/DOS, WiFi 859372, MG2/R#13, SD + extracción, keypad Coleco, A/B PSG.
