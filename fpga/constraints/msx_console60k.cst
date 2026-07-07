@@ -85,6 +85,21 @@ IO_LOC  "mspi_hold" R21; IO_PORT "mspi_hold" IO_TYPE=LVCMOS33 PULL_MODE=NONE;  /
 // ---- Monitor serie del BL616 (opcional) ----                               [MEDIA]
 IO_LOC  "usb_uart_tx" R14; IO_PORT "usb_uart_tx" IO_TYPE=LVCMOS33 DRIVE=8;
 
+// ---- DEBUG BRING-UP: electrocardiograma por los dos PMODs (pines C64Nano) ----
+//  PMOD1 = relojes: lock, 50M, 27M, 54M, 108M, 135M(TMDS)
+IO_LOC  "dbg_pmod1[0]" W19; IO_PORT "dbg_pmod1[0]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[1]" W20; IO_PORT "dbg_pmod1[1]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[2]" F19; IO_PORT "dbg_pmod1[2]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[3]" F20; IO_PORT "dbg_pmod1[3]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[4]" E22; IO_PORT "dbg_pmod1[4]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[5]" D22; IO_PORT "dbg_pmod1[5]" IO_TYPE=LVCMOS33 DRIVE=8;
+//  PMOD0 = vitales: reset_n, pack cargado, Z80 M1, SPI BL616, jtagseln
+IO_LOC  "dbg_pmod0[0]" V19; IO_PORT "dbg_pmod0[0]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod0[1]" V18; IO_PORT "dbg_pmod0[1]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod0[2]" G22; IO_PORT "dbg_pmod0[2]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod0[3]" G21; IO_PORT "dbg_pmod0[3]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod0[4]" E18; IO_PORT "dbg_pmod0[4]" IO_TYPE=LVCMOS33 DRIVE=8;
+
 // ---- WS2812B (tira de estado en carcasa) ----
 // <<<INCIERTO>>> ws2812_led: sin pin confirmado en el 60K. Candidato: una línea
 //   libre de PMOD1 (io[5]=D22) o header 2×20. Confirmar con schematic. NO inventar.

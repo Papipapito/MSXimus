@@ -42,6 +42,12 @@ module top
     output wire [5:0] led,
     output wire ws2812_led,   // external WS2812B status strip (case)
 
+    // ---- DEBUG BRING-UP 60K: "electrocardiograma" por los dos PMODs ----
+    //  (se retirará al terminar el bring-up; pines de C64Nano, LVCMOS33)
+    //  PMOD1 io[0..5]=W19,W20,F19,F20,E22,D22 · PMOD0=V19,V18,G22,G21,E18
+    output wire [5:0] dbg_pmod1,
+    output wire [4:0] dbg_pmod0,
+
     //hdmi out
     output wire [2:0] data_p,
     output wire [2:0] data_n,
@@ -147,6 +153,23 @@ end
     // BL616 (bl616_jtagsel, PULL_UP). Sin término de botón: s2 es el reset MSX
     // y no debe flapear el modo JTAG.
     assign jtagseln = clock_locked & ~bl616_jtagsel;
+
+    // ================================================================
+    //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
+    // ================================================================
+    reg [24:0] dbg_cnt50  = 0;  always @(posedge ex_clk_27m) dbg_cnt50  <= dbg_cnt50  + 1'b1;  // XO 50MHz REAL (independiente del PLL)
+    reg [23:0] dbg_cnt27  = 0;  always @(posedge clk_27m)    dbg_cnt27  <= dbg_cnt27  + 1'b1;
+    reg [24:0] dbg_cnt54  = 0;  always @(posedge clk_54m)    dbg_cnt54  <= dbg_cnt54  + 1'b1;
+    reg [25:0] dbg_cnt108 = 0;  always @(posedge clk_108m)   dbg_cnt108 <= dbg_cnt108 + 1'b1;
+    reg [26:0] dbg_cnt135 = 0;  always @(posedge clk_135)    dbg_cnt135 <= dbg_cnt135 + 1'b1;
+
+    // PMOD1 = relojes: [0] lock fijo · [1] 50M · [2] 27M · [3] 54M · [4] 108M · [5] 135M(TMDS)
+    assign dbg_pmod1[0] = clock_locked;
+    assign dbg_pmod1[1] = dbg_cnt50[24];    // ~1.5 Hz
+    assign dbg_pmod1[2] = dbg_cnt27[23];    // ~1.6 Hz
+    assign dbg_pmod1[3] = dbg_cnt54[24];    // ~1.6 Hz
+    assign dbg_pmod1[4] = dbg_cnt108[25];   // ~1.6 Hz
+    assign dbg_pmod1[5] = dbg_cnt135[26];   // ~1.0 Hz  ← el reloj del HDMI
 
     wire clk_enable_27m;
     wire clk_enable_54m;
@@ -2815,6 +2838,20 @@ memory_ctrl mem1 (
     assign led[2] = ~joystick0[4];
     assign led[1] = ~(|joystick0[3:0]);
     assign led[0] = ~(|joystick1[5:0]);
+
+    // ---- DEBUG BRING-UP 60K, PMOD0 = vitales ----
+    //  [0] fuera de reset · [1] pack cargado de flash · [2] Z80 ejecutando (M1)
+    //  [3] BL616 hablando SPI · [4] jtagseln (companion en modo SPI)
+    wire dbg_m1_led, dbg_spi_led;
+    led_stretch #(.HOLD(1350000)) dbg_st_m1 (
+        .clk(clk_27m), .rst_n(bus_reset_n), .trig(~bus_m1_n), .active(dbg_m1_led));
+    led_stretch #(.HOLD(1350000)) dbg_st_spi (
+        .clk(clk_27m), .rst_n(bus_reset_n), .trig(~spi_csn), .active(dbg_spi_led));
+    assign dbg_pmod0[0] = bus_reset_n;
+    assign dbg_pmod0[1] = flash_idle;
+    assign dbg_pmod0[2] = dbg_m1_led;
+    assign dbg_pmod0[3] = dbg_spi_led;
+    assign dbg_pmod0[4] = jtagseln;
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
