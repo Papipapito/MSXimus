@@ -142,10 +142,22 @@ end
         .clkin  (ex_clk_27m),   // ⚠ en la Console 60K este pin lleva 50 MHz (V22)
         .clkout0(clk_108m),     // 108.000000 MHz (fraccional, exacto)
         .clkout1(clk_54m),      //  54.000000 MHz
-        .clkout2(clk_27m),      //  27.000000 MHz
+        .clkout2(),             //  (27 directo del PLLA SIN USAR — ver CLKDIV abajo)
         .clkout3(clk_135),      // 135.000000 MHz (TMDS; sustituye al CLK_135 del tn_vdp)
         .lock   (clock_locked),
         .mdclk  (ex_clk_27m)    // reloj de init del PLLA (secuencia mDRP)
+    );
+
+    // clk_27m = CLKDIV ÷5 del 135 (patrón nestang/z8086/Gowin en GW5A): el par
+    // PCLK(27)/FCLK(135) de los OSER10 del TMDS queda alineado POR CONSTRUCCIÓN.
+    // Dos salidas independientes del PLLA NO garantizan la fase de arranque de
+    // sus divisores → serialización TMDS muerta (bring-up 2026-07-07: z8086
+    // funcionaba en la placa y nuestro _06 no; este era el delta restante).
+    CLKDIV #(.DIV_MODE(5)) div5_video (
+        .CLKOUT(clk_27m),
+        .HCLKIN(clk_135),
+        .RESETN(1'b1),
+        .CALIB(1'b0)
     );
 
     // JTAG→SPI del companion (estilo C64Nano): los pines JTAG se entregan al
