@@ -47,6 +47,10 @@ module top
     output wire mspi_sclk,
     inout wire mspi_miso,
     inout wire mspi_mosi,
+    // Console 60K: la flash va cableada QSPI (W25Q64) — /WP y /HOLD deben ir a
+    // nivel alto o la flash puede bloquearse/pausarse con los pines flotando.
+    output wire mspi_wp,
+    output wire mspi_hold,
 
     // MicroSD
     output wire sd_sclk,
@@ -2201,7 +2205,17 @@ memory_ctrl mem1 (
 `endif
 
     /// FLASH ROM LOADER - BIOS
-    localparam FLASH_START_ADDRESS = 24'h200000;
+    // ------------------------------------------------------------------
+    //  LAYOUT DE FLASH DE LA CONSOLE 60K (W25Q64, 8 MB, compartida BL616):
+    //    0x000000 - 0x3FFFFF  bitstream GW5AT-60 (.bin = ~2.26 MB; margen a 4 MB)
+    //    0x400000 - 0x47FFFF  pack BIOS (512 KB)          <- antes 0x200000 (TN20K)
+    //    0x480000 - 0x480005  config (6 bytes, cola del pack) <- antes 0x280000
+    //    0x480006 - 0x7FFFFF  libre (~3.5 MB: futuro SRM/ROMs)
+    //  El bitstream del GW5AT-60 PISA el 0x200000 del TN20K (aviso del audit
+    //  §5.B confirmado). El pack se flashea ahora en 0x400000.
+    // ------------------------------------------------------------------
+    localparam FLASH_START_ADDRESS = 24'h400000;
+    localparam FLASH_CONFIG_ADDRESS = 24'h480000;   // = FLASH_START + 512KB
     localparam RAM_START_ADDRESS = 23'h6fffff;
     localparam GOAULD_ROM_SIZE = 512*1024 + 6; //512KB + signature (AB) + config
     reg ff_rom_wr = 0;
@@ -2263,8 +2277,12 @@ memory_ctrl mem1 (
         .write_busy(flash_write_busy),
         .write_counter(flash_write_counter),
         .write_terminate(flash_write_terminate),
-        .write_addr(24'h280000) //24'h278000)
+        .write_addr(FLASH_CONFIG_ADDRESS)   // 60K: 0x480000 (antes 0x280000 en TN20K)
     );
+
+    // /WP y /HOLD de la flash QSPI del 60K: desactivados (alto) permanentemente
+    assign mspi_wp   = 1'b1;
+    assign mspi_hold = 1'b1;
 
     reg [7:0] ff_flash_state = 8'd0;
     

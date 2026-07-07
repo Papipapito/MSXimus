@@ -13,11 +13,22 @@ Tracker vivo del port. Ver [PORT_PLAN.md](PORT_PLAN.md) para el plan y [PORT_FIN
 6. ✅ primer bitstream (con 1 violación 54MHz por excepciones ausentes)
 7. ✅ SDC completo (excepciones del TN20K portadas; las de `env_reset` OBSOLETAS por el fix #2) → **timing limpio**
 
+### Layout de flash del 60K (re-mapeado 2026-07-07)
+| Rango | Contenido |
+|---|---|
+| `0x000000-0x3FFFFF` | bitstream GW5AT-60 (2.26 MB reales, margen a 4 MB) |
+| `0x400000-0x47FFFF` | **pack BIOS** (512 KB) — antes `0x200000` en TN20K |
+| `0x480000-0x480005` | **config** (6 bytes, cola del pack) — antes `0x280000` |
+| `0x480006-0x7FFFFF` | libre (~3.5 MB: futuro SRM/ROMs) |
+
+Flasheo del pack: `openFPGALoader --external-flash -o 0x400000 goauld_rom_int.bin` (o programmer Gowin a esa dirección). `flash_rw` recibe la dirección por puerto (sin cambios). `/WP`+`/HOLD` de la QSPI conducidos a alto (P21/R21).
+
 ### Pendiente inmediato
-- [ ] **Re-mapear layout de flash** (pack/config; bitstream 2.26MB pisa 0x200000) + `flash_rw` offsets
+- [x] **Re-mapear layout de flash** → hecho (FLASH_START 0x400000, config 0x480000, WP/HOLD altos)
 - [ ] Pines definitivos de `led[2..5]`, `ws2812`, UART ESP (hoy auto-colocados: U8/W16/E18/U9/P6/U21/R19 — no conectar PMODs al probar)
 - [ ] Companion BL616: nets `jtagseln`/`bl616_jtagsel` estilo C64Nano (líneas del CST comentadas) para el modo JTAG→SPI
-- [ ] Smoke en HW (SRAM load) → luego pack+flash → boot MSX completo
+- [ ] Smoke en HW (SRAM load) → luego pack a 0x400000 + bitstream a flash → boot MSX completo
+- [ ] PackBuilder/README: documentar el offset nuevo del pack (tooling, no RTL)
 
 ## Decisiones tomadas (2026-07-06)
 

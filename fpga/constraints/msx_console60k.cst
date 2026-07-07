@@ -81,7 +81,9 @@ IO_LOC  "mspi_cs"   T19; IO_PORT "mspi_cs"   IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 IO_LOC  "mspi_sclk" L12; IO_PORT "mspi_sclk" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 IO_LOC  "mspi_mosi" P22; IO_PORT "mspi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=NONE;  // DI
 IO_LOC  "mspi_miso" R22; IO_PORT "mspi_miso" IO_TYPE=LVCMOS33 PULL_MODE=NONE;  // DO
-//  mspi_wp=P21 / mspi_hold=R21 existen en el 60K (QSPI); el MSXnano no los usa.
+//  QSPI: /WP y /HOLD conducidos a nivel alto desde top.v (flash single-SPI)
+IO_LOC  "mspi_wp"   P21; IO_PORT "mspi_wp"   IO_TYPE=LVCMOS33 PULL_MODE=NONE;  // [ALTA]
+IO_LOC  "mspi_hold" R21; IO_PORT "mspi_hold" IO_TYPE=LVCMOS33 PULL_MODE=NONE;  // [ALTA]
 
 // ---- Monitor serie del BL616 (opcional) ----                               [MEDIA]
 IO_LOC  "usb_uart_tx" R14; IO_PORT "usb_uart_tx" IO_TYPE=LVCMOS33 DRIVE=8;
