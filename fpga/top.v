@@ -114,7 +114,15 @@ end
 
     wire clock_locked;
     wire ex_bus_reset_n;
-    assign ex_bus_reset_n = ~s1 && clock_locked;   // s1 button = reset (active high press)
+    // Console 60K: los botones S1/S2 son ACTIVOS A NIVEL BAJO (PULL_UP en el CST,
+    // reposo=1, pulsado=0 — C64Nano los llama key_*_n). En el TN20K eran activos
+    // a nivel ALTO: con el pull-up del 60K, el ~s1 original dejaba ex_bus_reset_n
+    // =0 PERMANENTE = todo el core MSX en reset eterno (causa raiz del bring-up
+    // muerto 2026-07-07/08). Normalizamos a "press" activo-alto:
+    wire s1_press = ~s1;
+    wire s2_press = ~s2;
+    assign ex_bus_reset_n = ~s1_press && clock_locked;   // s1 pulsado = reset
+
 
     // 108 MHz / 30 = 3.6 MHz internal CPU clock (replaces ex_bus_clk_3m6 pin)
     wire ex_bus_clk_3m6;
@@ -917,7 +925,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         // bloque: domina sobre F11/puerto durante el boot (no disparan ahi de todos
         // modos). Con S2 (rescate) arranca SIEMPRE a 3.58.
         if (config_init)
-            turbo <= (s2 == 0 && config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
+            turbo <= (!s2_press && config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
     end
 
     // ===== v1.9 Panasonic-WSX turbo: 5.37 MHz CPU cadence =====
@@ -2112,7 +2120,7 @@ memory_ctrl mem1 (
     always @ (posedge clk_27m) begin
         config_init_delay <= config_init;
         if (config_init == 1 ) begin
-            if (s2 == 1) begin
+            if (s2_press) begin
                 config1_ff <= CONFIG1_DEFAULT;
                 config2_ff <= CONFIG2_DEFAULT;
                 config_turbo_boot_ff <= 0;      // rescate S2: boot turbo off
@@ -2798,7 +2806,7 @@ memory_ctrl mem1 (
 
     wire send;
     monostable mono2 (
-        .pulse_in(s2),
+        .pulse_in(s2_press),
         .clock(clk_27m),
         .pulse_out(send)
     );
@@ -2873,17 +2881,20 @@ memory_ctrl mem1 (
         dbg_ftp_d <= dbg_video_w[3];
         if (dbg_video_w[3] && !dbg_ftp_d) dbg_fdiv_pal <= dbg_fdiv_pal + 1'b1;
     end
-    assign dbg_pmod0[0] = dbg_vdprst_led;     // ON = el VDP pulsa vdp_hdmi_reset
-    assign dbg_pmod0[1] = dbg_vidrst_led;     // ON = la resincronizacion pulsa
-    assign dbg_pmod0[2] = dbg_video_w[5];     // nivel reset_w (debe estar OFF)
-    assign dbg_pmod0[3] = 1'b0;
-    assign dbg_pmod0[4] = 1'b0;
-    assign dbg_pmod1[0] = dbg_video_w[0];     // nivel PAL_MODE del VDP (1=PAL)
-    assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // ~1Hz si la instancia NTSC genera cuadros
-    assign dbg_pmod1[2] = dbg_fdiv_pal[5];    // ~1Hz si la instancia PAL genera cuadros
-    assign dbg_pmod1[3] = 1'b0;
-    assign dbg_pmod1[4] = 1'b0;
-    assign dbg_pmod1[5] = 1'b0;
+    // ⚠ Los modulos PMOD-LED del usuario son ACTIVOS A NIVEL BAJO (LED ON = pin 0):
+    //   las señales activas se INVIERTEN para que "LED encendido" = "señal activa",
+    //   y los pines sobrantes se conducen a 1 (= LED apagado de verdad).
+    assign dbg_pmod0[0] = ~dbg_vdprst_led;    // LED ON = el VDP pulsa vdp_hdmi_reset
+    assign dbg_pmod0[1] = ~dbg_vidrst_led;    // LED ON = la resincronizacion pulsa
+    assign dbg_pmod0[2] = ~dbg_video_w[5];    // LED ON = reset_w activo (debe estar OFF)
+    assign dbg_pmod0[3] = ~bus_reset_n;       // LED ON = core MSX EN RESET (debe estar OFF tras el fix s1)
+    assign dbg_pmod0[4] = 1'b1;               // apagado
+    assign dbg_pmod1[0] = ~dbg_video_w[0];    // LED ON = PAL (OFF = NTSC)
+    assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // parpadeo ~1Hz = instancia NTSC generando cuadros
+    assign dbg_pmod1[2] = dbg_fdiv_pal[5];    // parpadeo ~1Hz = instancia PAL generando cuadros
+    assign dbg_pmod1[3] = dbg_cnt27[23];      // parpadeo ~1.6Hz = clk_27m vivo (referencia)
+    assign dbg_pmod1[4] = 1'b1;               // apagado
+    assign dbg_pmod1[5] = 1'b1;               // apagado
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
