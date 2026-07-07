@@ -169,6 +169,7 @@ end
     // ================================================================
     //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
     // ================================================================
+    wire [3:0] dbg_video_w;   // sondas de video de v9958_top: {vdp_hdmi_reset, frame_tick, hdmi_reset, pal_mode}
     reg [24:0] dbg_cnt50  = 0;  always @(posedge ex_clk_27m) dbg_cnt50  <= dbg_cnt50  + 1'b1;  // XO 50MHz REAL (independiente del PLL)
     reg [23:0] dbg_cnt27  = 0;  always @(posedge clk_27m)    dbg_cnt27  <= dbg_cnt27  + 1'b1;
     reg [24:0] dbg_cnt54  = 0;  always @(posedge clk_54m)    dbg_cnt54  <= dbg_cnt54  + 1'b1;
@@ -177,7 +178,7 @@ end
 
     // PMOD1 = relojes: [0] lock fijo · [1] 50M · [2] 27M · [3] 54M · [4] 108M · [5] 135M(TMDS)
     assign dbg_pmod1[0] = clock_locked;
-    assign dbg_pmod1[1] = dbg_cnt50[24];    // ~1.5 Hz
+    assign dbg_pmod1[1] = dbg_video_w[0];   // nivel PAL_MODE del VDP (1=PAL)
     assign dbg_pmod1[2] = dbg_cnt27[23];    // ~1.6 Hz
     assign dbg_pmod1[3] = dbg_cnt54[24];    // ~1.6 Hz
     assign dbg_pmod1[4] = dbg_cnt108[25];   // ~1.6 Hz
@@ -1304,6 +1305,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         .clk (clk_27m),
         .clk_135 (clk_135),           // TMDS x5 desde el Gowin_PLL (CLKOUT3)
         .clk_135_lock (clock_locked), // mismo PLL -> mismo lock (antes: lock del CLK_135 propio)
+        .dbg_video (dbg_video_w),     // sondas de video del bring-up
         .s1 (0),
         .clk_50 (0),
         .clk_125 (0),
@@ -2851,19 +2853,26 @@ memory_ctrl mem1 (
     assign led[1] = ~(|joystick0[3:0]);
     assign led[0] = ~(|joystick1[5:0]);
 
-    // ---- DEBUG BRING-UP 60K, PMOD0 = vitales ----
-    //  [0] fuera de reset · [1] pack cargado de flash · [2] Z80 ejecutando (M1)
-    //  [3] BL616 hablando SPI · [4] jtagseln (companion en modo SPI)
-    wire dbg_m1_led, dbg_spi_led;
+    // ---- DEBUG BRING-UP 60K, PMOD0 = vitales + sondas de VIDEO ----
+    //  [0] fuera de reset · [1] pack cargado · [2] Z80 ejecutando (M1)
+    //  [3] FRAME HDMI corriendo (~1Hz) · [4] hdmi_reset pulsando (stretcher)
+    wire dbg_m1_led, dbg_vrst_led;
     led_stretch #(.HOLD(1350000)) dbg_st_m1 (
         .clk(clk_27m), .rst_n(bus_reset_n), .trig(~bus_m1_n), .active(dbg_m1_led));
-    led_stretch #(.HOLD(1350000)) dbg_st_spi (
-        .clk(clk_27m), .rst_n(bus_reset_n), .trig(~spi_csn), .active(dbg_spi_led));
+    // sondas de video desde v9958_top (dbg_video_w declarada junto al PLL)
+    led_stretch #(.HOLD(1350000)) dbg_st_vrst (
+        .clk(clk_27m), .rst_n(bus_reset_n), .trig(dbg_video_w[1]), .active(dbg_vrst_led));
+    reg [5:0] dbg_frame_div = 0;
+    reg dbg_ft_d = 0;
+    always @(posedge clk_27m) begin
+        dbg_ft_d <= dbg_video_w[2];
+        if (dbg_video_w[2] && !dbg_ft_d) dbg_frame_div <= dbg_frame_div + 1'b1;  // 1 tick/frame HDMI
+    end
     assign dbg_pmod0[0] = bus_reset_n;
     assign dbg_pmod0[1] = flash_idle;
     assign dbg_pmod0[2] = dbg_m1_led;
-    assign dbg_pmod0[3] = dbg_spi_led;
-    assign dbg_pmod0[4] = jtagseln;
+    assign dbg_pmod0[3] = dbg_frame_div[5];   // ~1Hz SI el HDMI genera cuadros
+    assign dbg_pmod0[4] = dbg_vrst_led;       // encendido = hdmi_reset activo/pulsando
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.

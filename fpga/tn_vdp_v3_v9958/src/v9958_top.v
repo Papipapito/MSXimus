@@ -6,6 +6,7 @@ module v9958_top(
     input   clk_125,
     input   clk_135,        // 135 MHz TMDS x5 (GW5A port: fed by a second Gowin_PLL in the top; replaces the internal CLK_135 rPLL)
     input   clk_135_lock,   // lock of that PLL (replaces the old CLK_135 .lock output, used in the reset chain)
+    output  wire [3:0] dbg_video,  // DEBUG bring-up 60K: {vdp_hdmi_reset, frame_tick, hdmi_reset, pal_mode}
  //   input   clk_111,
 
     input   s1,
@@ -404,6 +405,12 @@ module v9958_top(
 
     wire hdmi_reset;
     assign hdmi_reset = video_reset | reset_w ;
+
+    // DEBUG bring-up 60K: sondas del camino de video hacia los LEDs del top
+    assign dbg_video[0] = pal_mode;                                   // nivel: 1=PAL
+    assign dbg_video[1] = hdmi_reset;                                 // ¿el HDMI esta en reset / pulsando?
+    assign dbg_video[2] = (cx_ntsc == 10'd0 && cy_ntsc == 10'd0);     // tick de frame del HDMI (¿corre?)
+    assign dbg_video[3] = vdp_hdmi_reset;                             // pulso de cambio de modo del VDP
 
     localparam CLKFRQ = 27000;
     localparam AUDIO_RATE=44100;
