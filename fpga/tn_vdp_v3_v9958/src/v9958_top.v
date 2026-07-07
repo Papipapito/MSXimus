@@ -6,7 +6,7 @@ module v9958_top(
     input   clk_125,
     input   clk_135,        // 135 MHz TMDS x5 (GW5A port: fed by a second Gowin_PLL in the top; replaces the internal CLK_135 rPLL)
     input   clk_135_lock,   // lock of that PLL (replaces the old CLK_135 .lock output, used in the reset chain)
-    output  wire [3:0] dbg_video,  // DEBUG bring-up 60K: {vdp_hdmi_reset, frame_tick, hdmi_reset, pal_mode}
+    output  wire [5:0] dbg_video,  // DEBUG bring-up 60K r2: {reset_w, video_reset, tick_pal, tick_ntsc, vdp_hdmi_reset, pal_mode}
  //   input   clk_111,
 
     input   s1,
@@ -406,11 +406,13 @@ module v9958_top(
     wire hdmi_reset;
     assign hdmi_reset = video_reset | reset_w ;
 
-    // DEBUG bring-up 60K: sondas del camino de video hacia los LEDs del top
+    // DEBUG bring-up 60K (ronda 2): separar QUIEN dispara el reset en PAL
     assign dbg_video[0] = pal_mode;                                   // nivel: 1=PAL
-    assign dbg_video[1] = hdmi_reset;                                 // ¿el HDMI esta en reset / pulsando?
-    assign dbg_video[2] = (cx_ntsc == 10'd0 && cy_ntsc == 10'd0);     // tick de frame del HDMI (¿corre?)
-    assign dbg_video[3] = vdp_hdmi_reset;                             // pulso de cambio de modo del VDP
+    assign dbg_video[1] = vdp_hdmi_reset;                             // ¿pulsa el VDP repetidamente?
+    assign dbg_video[2] = (cx_ntsc == 10'd0 && cy_ntsc == 10'd0);     // tick frame instancia NTSC
+    assign dbg_video[3] = (cx_pal  == 10'd0 && cy_pal  == 10'd0);     // tick frame instancia PAL
+    assign dbg_video[4] = video_reset;                                // ¿pulsa la resincronizacion?
+    assign dbg_video[5] = reset_w;                                    // ¿reset global vivo?
 
     localparam CLKFRQ = 27000;
     localparam AUDIO_RATE=44100;

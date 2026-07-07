@@ -169,7 +169,7 @@ end
     // ================================================================
     //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
     // ================================================================
-    wire [3:0] dbg_video_w;   // sondas de video de v9958_top: {vdp_hdmi_reset, frame_tick, hdmi_reset, pal_mode}
+    wire [5:0] dbg_video_w;   // sondas de video r2: {reset_w, video_reset, tick_pal, tick_ntsc, vdp_hdmi_reset, pal_mode}
     reg [24:0] dbg_cnt50  = 0;  always @(posedge ex_clk_27m) dbg_cnt50  <= dbg_cnt50  + 1'b1;  // XO 50MHz REAL (independiente del PLL)
     reg [23:0] dbg_cnt27  = 0;  always @(posedge clk_27m)    dbg_cnt27  <= dbg_cnt27  + 1'b1;
     reg [24:0] dbg_cnt54  = 0;  always @(posedge clk_54m)    dbg_cnt54  <= dbg_cnt54  + 1'b1;
@@ -177,12 +177,8 @@ end
     reg [26:0] dbg_cnt135 = 0;  always @(posedge clk_135)    dbg_cnt135 <= dbg_cnt135 + 1'b1;
 
     // PMOD1 = relojes: [0] lock fijo · [1] 50M · [2] 27M · [3] 54M · [4] 108M · [5] 135M(TMDS)
-    assign dbg_pmod1[0] = clock_locked;
-    assign dbg_pmod1[1] = dbg_video_w[0];   // nivel PAL_MODE del VDP (1=PAL)
-    assign dbg_pmod1[2] = dbg_cnt27[23];    // ~1.6 Hz
-    assign dbg_pmod1[3] = dbg_cnt54[24];    // ~1.6 Hz
-    assign dbg_pmod1[4] = dbg_cnt108[25];   // ~1.6 Hz
-    assign dbg_pmod1[5] = dbg_cnt135[26];   // ~1.0 Hz  ← el reloj del HDMI
+    // (los assigns de dbg_pmod1 viven en el bloque de debug del final del
+    //  fichero, junto a los divisores de frame que los alimentan)
 
     wire clk_enable_27m;
     wire clk_enable_54m;
@@ -2859,20 +2855,35 @@ memory_ctrl mem1 (
     wire dbg_m1_led, dbg_vrst_led;
     led_stretch #(.HOLD(1350000)) dbg_st_m1 (
         .clk(clk_27m), .rst_n(bus_reset_n), .trig(~bus_m1_n), .active(dbg_m1_led));
-    // sondas de video desde v9958_top (dbg_video_w declarada junto al PLL)
-    led_stretch #(.HOLD(1350000)) dbg_st_vrst (
-        .clk(clk_27m), .rst_n(bus_reset_n), .trig(dbg_video_w[1]), .active(dbg_vrst_led));
-    reg [5:0] dbg_frame_div = 0;
-    reg dbg_ft_d = 0;
+    // ---- SONDAS DE VIDEO r2 (SOLO lo necesario encendido; resto APAGADO) ----
+    //  PMOD0: [0]=vdp_hdmi_reset pulsando (stretch) · [1]=video_reset pulsando
+    //         (stretch) · [2]=reset_w nivel · [3]=OFF · [4]=OFF
+    //  PMOD1: [0]=pal_mode nivel · [1]=frame NTSC ~1Hz · [2]=frame PAL ~1Hz ·
+    //         [3..5]=OFF
+    wire dbg_vdprst_led, dbg_vidrst_led;
+    led_stretch #(.HOLD(1350000)) dbg_st_vdprst (
+        .clk(clk_27m), .rst_n(bus_reset_n), .trig(dbg_video_w[1]), .active(dbg_vdprst_led));
+    led_stretch #(.HOLD(1350000)) dbg_st_vidrst (
+        .clk(clk_27m), .rst_n(bus_reset_n), .trig(dbg_video_w[4]), .active(dbg_vidrst_led));
+    reg [5:0] dbg_fdiv_ntsc = 0, dbg_fdiv_pal = 0;
+    reg dbg_ftn_d = 0, dbg_ftp_d = 0;
     always @(posedge clk_27m) begin
-        dbg_ft_d <= dbg_video_w[2];
-        if (dbg_video_w[2] && !dbg_ft_d) dbg_frame_div <= dbg_frame_div + 1'b1;  // 1 tick/frame HDMI
+        dbg_ftn_d <= dbg_video_w[2];
+        if (dbg_video_w[2] && !dbg_ftn_d) dbg_fdiv_ntsc <= dbg_fdiv_ntsc + 1'b1;
+        dbg_ftp_d <= dbg_video_w[3];
+        if (dbg_video_w[3] && !dbg_ftp_d) dbg_fdiv_pal <= dbg_fdiv_pal + 1'b1;
     end
-    assign dbg_pmod0[0] = bus_reset_n;
-    assign dbg_pmod0[1] = flash_idle;
-    assign dbg_pmod0[2] = dbg_m1_led;
-    assign dbg_pmod0[3] = dbg_frame_div[5];   // ~1Hz SI el HDMI genera cuadros
-    assign dbg_pmod0[4] = dbg_vrst_led;       // encendido = hdmi_reset activo/pulsando
+    assign dbg_pmod0[0] = dbg_vdprst_led;     // ON = el VDP pulsa vdp_hdmi_reset
+    assign dbg_pmod0[1] = dbg_vidrst_led;     // ON = la resincronizacion pulsa
+    assign dbg_pmod0[2] = dbg_video_w[5];     // nivel reset_w (debe estar OFF)
+    assign dbg_pmod0[3] = 1'b0;
+    assign dbg_pmod0[4] = 1'b0;
+    assign dbg_pmod1[0] = dbg_video_w[0];     // nivel PAL_MODE del VDP (1=PAL)
+    assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // ~1Hz si la instancia NTSC genera cuadros
+    assign dbg_pmod1[2] = dbg_fdiv_pal[5];    // ~1Hz si la instancia PAL genera cuadros
+    assign dbg_pmod1[3] = 1'b0;
+    assign dbg_pmod1[4] = 1'b0;
+    assign dbg_pmod1[5] = 1'b0;
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
