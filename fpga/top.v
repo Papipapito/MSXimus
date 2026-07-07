@@ -2881,18 +2881,21 @@ memory_ctrl mem1 (
         dbg_ftp_d <= dbg_video_w[3];
         if (dbg_video_w[3] && !dbg_ftp_d) dbg_fdiv_pal <= dbg_fdiv_pal + 1'b1;
     end
-    // ⚠ Los modulos PMOD-LED del usuario son ACTIVOS A NIVEL BAJO (LED ON = pin 0):
-    //   las señales activas se INVIERTEN para que "LED encendido" = "señal activa",
-    //   y los pines sobrantes se conducen a 1 (= LED apagado de verdad).
-    assign dbg_pmod0[0] = ~dbg_vdprst_led;    // LED ON = el VDP pulsa vdp_hdmi_reset
-    assign dbg_pmod0[1] = ~dbg_vidrst_led;    // LED ON = la resincronizacion pulsa
-    assign dbg_pmod0[2] = ~dbg_video_w[5];    // LED ON = reset_w activo (debe estar OFF)
-    assign dbg_pmod0[3] = ~bus_reset_n;       // LED ON = core MSX EN RESET (debe estar OFF tras el fix s1)
+    // ⚠ Modulos PMOD-LED ACTIVOS A NIVEL BAJO (LED ON = pin 0): niveles invertidos
+    //   para que "encendido" = "activo"; sobrantes a 1 (= apagados).
+    //  r3: vitales del lado MSX (el video ya esta demostrado: señal + frames)
+    wire dbg_rambusy_led;
+    led_stretch #(.HOLD(1350000)) dbg_st_ram (
+        .clk(clk_27m), .rst_n(bus_reset_n), .trig(ram_busy), .active(dbg_rambusy_led));
+    assign dbg_pmod0[0] = ~flash_idle;        // LED ON = PACK CARGADO de flash
+    assign dbg_pmod0[1] = ~dbg_m1_led;        // LED ON = Z80 ejecutando (M1)
+    assign dbg_pmod0[2] = ~dbg_rambusy_led;   // LED ON = memoria sirviendo accesos
+    assign dbg_pmod0[3] = bus_reset_n;        // LED ON (pin=0) = core en RESET (debe estar OFF)
     assign dbg_pmod0[4] = 1'b1;               // apagado
     assign dbg_pmod1[0] = ~dbg_video_w[0];    // LED ON = PAL (OFF = NTSC)
-    assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // parpadeo ~1Hz = instancia NTSC generando cuadros
-    assign dbg_pmod1[2] = dbg_fdiv_pal[5];    // parpadeo ~1Hz = instancia PAL generando cuadros
-    assign dbg_pmod1[3] = dbg_cnt27[23];      // parpadeo ~1.6Hz = clk_27m vivo (referencia)
+    assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // parpadeo = frames NTSC
+    assign dbg_pmod1[2] = dbg_fdiv_pal[5];    // parpadeo = frames PAL
+    assign dbg_pmod1[3] = dbg_cnt27[23];      // parpadeo = clk_27m (referencia)
     assign dbg_pmod1[4] = 1'b1;               // apagado
     assign dbg_pmod1[5] = 1'b1;               // apagado
 
