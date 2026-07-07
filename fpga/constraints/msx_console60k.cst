@@ -54,13 +54,20 @@ IO_LOC  "led[1]" U12; IO_PORT "led[1]" IO_TYPE=LVCMOS33 DRIVE=4 PULL_MODE=NONE B
 //   LEDs en el top, o sacarlos por header/PMOD (candidato: pmod_companion_* si
 //   no se usa companion externo). NO inventar pin.
 
-// ---- HDMI TMDS (pares diferenciales) ----                                  [ALTA]
-IO_LOC  "clk_p"     G15,G16; IO_PORT "clk_p"     PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
-IO_LOC  "data_p[0]" J14,H14; IO_PORT "data_p[0]" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
-IO_LOC  "data_p[1]" J15,H15; IO_PORT "data_p[1]" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
-IO_LOC  "data_p[2]" K17,J17; IO_PORT "data_p[2]" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33D;
-//  (El pipeline TMDS del tn_vdp usa CLK_135 ×5 con DYN_DA_EN fantasma: regenerar
-//   PLLA con fase estática, o pasar a serdes nativo GW5A — ver docs/GW5A_IP §3.)
+// ---- HDMI TMDS ----                                                        [ALTA]
+//  ⚠ ESTILO nestang (console.cst, PROBADO en esta placa): los 8 pines P y N
+//  constreñidos INDIVIDUALMENTE como LVCMOS33D. La sintaxis de par "G15,G16"
+//  sobre el nombre P (herencia TN20K) dejaba el driver MUDO en GW5A (bring-up
+//  2026-07-07: core vivo, TV sin señal): con ELVDS + par en pines TRUELVDS el
+//  PnR configura diferencial verdadero, inválido a 3.3V.
+IO_LOC  "clk_p"     G15; IO_PORT "clk_p"     PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "clk_n"     G16; IO_PORT "clk_n"     PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[0]" J14; IO_PORT "data_p[0]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_n[0]" H14; IO_PORT "data_n[0]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[1]" J15; IO_PORT "data_p[1]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_n[1]" H15; IO_PORT "data_n[1]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[2]" K17; IO_PORT "data_p[2]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_n[2]" J17; IO_PORT "data_n[2]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
 
 // ---- microSD (SDIO 4-bit) ----                                             [ALTA]
 IO_LOC  "sd_sclk" V15;  IO_PORT "sd_sclk" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;

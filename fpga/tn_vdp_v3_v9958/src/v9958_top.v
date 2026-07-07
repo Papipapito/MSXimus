@@ -491,23 +491,13 @@ module v9958_top(
     serializer #(.NUM_CHANNELS(NUM_CHANNELS), .VIDEO_RATE(0)) serializer(.clk_pixel(clk_w), .clk_pixel_x5(clk_135_w), .reset(reset_w),
     .tmds_internal(tmds_internal), .tmds(tmds) );
 
-    // GW5A port: el canal de RELOJ TMDS tambien se serializa por OSER10 con
-    // patron constante (5x1+5x0 = cuadrada de 27 MHz alineada con los datos por
-    // el mismo IOLOGIC). En GW2A valia sacar clk_w crudo al pad; en GW5A una
-    // red de reloj global NO llega al datapath de un IOB generico -> el par de
-    // reloj no conmutaba -> la TV no detectaba señal (bring-up 2026-07-07).
-    wire tmds_clk_ser;
-    OSER10 gwSerClk(
-        .Q( tmds_clk_ser ),
-        .D0( 1'b1 ), .D1( 1'b1 ), .D2( 1'b1 ), .D3( 1'b1 ), .D4( 1'b1 ),
-        .D5( 1'b0 ), .D6( 1'b0 ), .D7( 1'b0 ), .D8( 1'b0 ), .D9( 1'b0 ),
-        .PCLK( clk_w ),
-        .FCLK( clk_135_w ),
-        .RESET( reset_w ) );
-
     // Gowin LVDS output buffer
+    // (Topologia identica a nestang console60k, que FUNCIONA en esta placa:
+    //  3x OSER10 de datos + reloj de pixel CRUDO al ELVDS. El "no signal" del
+    //  bring-up era el estilo de constraint del CST, no este buffer — ver
+    //  msx_console60k.cst, pines TMDS individuales como nestang.)
     ELVDS_OBUF tmds_bufds [3:0] (
-        .I({tmds_clk_ser, tmds}),
+        .I({clk_w, tmds}),
         .O({tmds_clk_p, tmds_data_p}),
         .OB({tmds_clk_n, tmds_data_n})
     );
