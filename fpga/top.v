@@ -31,6 +31,12 @@ module top
     output wire spi_dir,
     input  wire spi_dat,
     output wire spi_irqn,
+    // Console 60K, mecánica JTAG→SPI (estilo C64Nano): jtagseln (NET_LOC
+    // V_JTAGSELN) entrega los pines JTAG al fabric cuando vale 1; el BL616
+    // reclama JTAG subiendo bl616_jtagsel (PULL_UP: sin firmware companion la
+    // placa queda en modo JTAG = siempre reprogramable).
+    input  wire bl616_jtagsel,
+    output wire jtagseln,
 
     // discrete status LEDs (active low)
     output wire [5:0] led,
@@ -135,6 +141,12 @@ end
         .lock   (clock_locked),
         .mdclk  (ex_clk_27m)    // reloj de init del PLLA (secuencia mDRP)
     );
+
+    // JTAG→SPI del companion (estilo C64Nano): los pines JTAG se entregan al
+    // fabric (SPI del BL616) solo con el PLL en lock y sin petición de JTAG del
+    // BL616 (bl616_jtagsel, PULL_UP). Sin término de botón: s2 es el reset MSX
+    // y no debe flapear el modo JTAG.
+    assign jtagseln = clock_locked & ~bl616_jtagsel;
 
     wire clk_enable_27m;
     wire clk_enable_54m;
