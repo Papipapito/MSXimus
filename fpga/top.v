@@ -2887,10 +2887,22 @@ memory_ctrl mem1 (
     wire dbg_rambusy_led;
     led_stretch #(.HOLD(1350000)) dbg_st_ram (
         .clk(clk_27m), .rst_n(bus_reset_n), .trig(ram_busy), .active(dbg_rambusy_led));
+    // r4: ¿estan vivos los relojes INTERNOS que gobiernan memoria y bus?
+    //  - VideoDHClk (strobe del VDP): sin el, mem1 NUNCA acepta peticiones
+    //  - clk_enable_3m6_54 (enable del bus 3.58M): sin el, el Z80 no avanza
+    reg dbg_dh_d = 0;  reg [22:0] dbg_dh_cnt = 0;
+    always @(posedge clk_108m) begin
+        dbg_dh_d <= VideoDHClk;
+        if (VideoDHClk && !dbg_dh_d) dbg_dh_cnt <= dbg_dh_cnt + 1'b1;
+    end
+    reg [20:0] dbg_en36_cnt = 0;
+    always @(posedge clk_54m) begin
+        if (clk_enable_3m6_54) dbg_en36_cnt <= dbg_en36_cnt + 1'b1;
+    end
     assign dbg_pmod0[0] = ~flash_idle;        // LED ON = PACK CARGADO de flash
-    assign dbg_pmod0[1] = ~dbg_m1_led;        // LED ON = Z80 ejecutando (M1)
-    assign dbg_pmod0[2] = ~dbg_rambusy_led;   // LED ON = memoria sirviendo accesos
-    assign dbg_pmod0[3] = bus_reset_n;        // LED ON (pin=0) = core en RESET (debe estar OFF)
+    assign dbg_pmod0[1] = ~dbg_rambusy_led;   // LED ON = memoria sirviendo accesos
+    assign dbg_pmod0[2] = dbg_dh_cnt[22];     // PARPADEO ~1.6Hz = VideoDHClk (VDP) vivo
+    assign dbg_pmod0[3] = dbg_en36_cnt[20];   // PARPADEO ~1.7Hz = enable bus 3.58M vivo
     assign dbg_pmod0[4] = 1'b1;               // apagado
     assign dbg_pmod1[0] = ~dbg_video_w[0];    // LED ON = PAL (OFF = NTSC)
     assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // parpadeo = frames NTSC
