@@ -1,0 +1,21 @@
+// test.cst — constraints minimos del TEST HDMI (Console 60K, GW5AT-60)
+IO_LOC  "ex_clk_27m" V22;
+IO_PORT "ex_clk_27m" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+// HDMI TMDS (estilo nestang: 8 pines individuales LVCMOS33D)
+IO_LOC  "clk_p"     G15; IO_PORT "clk_p"     PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "clk_n"     G16; IO_PORT "clk_n"     PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[0]" J14; IO_PORT "data_p[0]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_n[0]" H14; IO_PORT "data_n[0]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[1]" J15; IO_PORT "data_p[1]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_n[1]" H15; IO_PORT "data_n[1]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_p[2]" K17; IO_PORT "data_p[2]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+IO_LOC  "data_n[2]" J17; IO_PORT "data_n[2]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
+
+// debug PMOD1
+IO_LOC  "dbg_pmod1[0]" W19; IO_PORT "dbg_pmod1[0]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[1]" W20; IO_PORT "dbg_pmod1[1]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[2]" F19; IO_PORT "dbg_pmod1[2]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[3]" F20; IO_PORT "dbg_pmod1[3]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[4]" E22; IO_PORT "dbg_pmod1[4]" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC  "dbg_pmod1[5]" D22; IO_PORT "dbg_pmod1[5]" IO_TYPE=LVCMOS33 DRIVE=8;
