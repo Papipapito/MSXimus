@@ -2899,10 +2899,16 @@ memory_ctrl mem1 (
     always @(posedge clk_54m) begin
         if (clk_enable_3m6_54) dbg_en36_cnt <= dbg_en36_cnt + 1'b1;
     end
-    assign dbg_pmod0[0] = ~flash_idle;        // LED ON = PACK CARGADO de flash
-    assign dbg_pmod0[1] = ~dbg_rambusy_led;   // LED ON = memoria sirviendo accesos
-    assign dbg_pmod0[2] = dbg_dh_cnt[22];     // PARPADEO ~1.6Hz = VideoDHClk (VDP) vivo
-    assign dbg_pmod0[3] = dbg_en36_cnt[20];   // PARPADEO ~1.7Hz = enable bus 3.58M vivo
+    // r5: ¿bucle de soft-reset o recarga colgada? ¿el menu llega a dibujar?
+    wire dbg_vdpwr_led, dbg_cfgrst_led;
+    led_stretch #(.HOLD(1350000)) dbg_st_vdpwr (
+        .clk(clk_27m), .rst_n(1'b1), .trig(~vdp_csw_n), .active(dbg_vdpwr_led));
+    led_stretch #(.HOLD(2000000)) dbg_st_cfgrst (    // ~74ms (max del contador de 21b)
+        .clk(clk_27m), .rst_n(1'b1), .trig(config_reset), .active(dbg_cfgrst_led));
+    assign dbg_pmod0[0] = ~flash_idle;        // LED ON = PACK CARGADO (ciclo visible)
+    assign dbg_pmod0[1] = ~dbg_rambusy_led;   // LED ON = memoria sirviendo
+    assign dbg_pmod0[2] = ~dbg_vdpwr_led;     // LED ON = Z80 ESCRIBIENDO AL VDP (menu dibujando)
+    assign dbg_pmod0[3] = ~dbg_cfgrst_led;    // LED ON = SOFT-RESET disparandose (bucle)
     assign dbg_pmod0[4] = 1'b1;               // apagado
     assign dbg_pmod1[0] = ~dbg_video_w[0];    // LED ON = PAL (OFF = NTSC)
     assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // parpadeo = frames NTSC
