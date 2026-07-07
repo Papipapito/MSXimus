@@ -376,15 +376,26 @@ module v9958_top(
     logic [9:0] cy_pal;
     logic [9:0] cx_pal;
 
-    always_ff@(posedge clk_w) 
+    // GW5A port (bring-up 2026-07-07): la resincronizacion VDP->HDMI original
+    // pulsaba reset al HDMI en CADA origen de frame si los contadores no
+    // estaban EXACTAMENTE en (0, NTSC_Y). En GW5A el desfase de propagacion
+    // cambia respecto al GW2A y la igualdad no se cumple nunca -> reset del
+    // HDMI cada frame -> la TV no engancha ("no signal" con el core vivo; el
+    // test de barras sin esta logica funcionaba). Fix: alinear UNA sola vez
+    // (y re-armar solo con el pulso real de cambio NTSC/PAL del VDP).
+    reg hdmi_aligned = 1'b0;
+    always_ff@(posedge clk_w)
     begin
-        
-        ff_video_reset <= vdp_hdmi_reset;
 
-        if (vdp_cx == 11'd0 && vdp_cy == 11'd0) begin
+        ff_video_reset <= vdp_hdmi_reset;
+        if (vdp_hdmi_reset)
+            hdmi_aligned <= 1'b0;   // cambio de modo real: permitir re-alinear
+
+        if (vdp_cx == 11'd0 && vdp_cy == 11'd0 && !hdmi_aligned) begin
             if ((pal_mode == 1'b0 && (cx_ntsc != 10'd0 || cy_ntsc != NTSC_Y)) ||
                 (pal_mode == 1'b1 && (cx_pal != 10'd0 || cy_pal != PAL_Y)))
                 ff_video_reset <= 1'b1;
+            hdmi_aligned <= 1'b1;   // una resincronizacion y a correr
         end
     end
 

@@ -90,6 +90,15 @@ set_false_path -from [get_clocks {clk_108m}] -to [get_pins {vdp4/u_v9958/U_SPRIT
 set_false_path -from [get_clocks {clk_27m}] -to [get_pins {vdp4/hdmi_ntsc/true_hdmi_output.packet_picker/audio_sample_word_transfer?*?/D}]
 
 # --- Presupuestos de cruce con disciplina de fase (del TN20K) ---
+# RD del T80 (flanco de bajada) -> FSM/latches de memoria (subida): relacion de
+# medio periodo 9.26ns pesimista para una peticion cuasi-estatica (bus 3.58MHz
+# con waits; llegar medio ciclo tarde solo retrasa la aceptacion 1 ciclo de 54).
+# El SDC del TN20K tenia esta constraint experimentada y comentada (alli cerraba
+# sola); en GW5A el placement del T80 varia y falla por ~1ns.
+set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/sdram_seq*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/sdram_addr*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/sdram_seq*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/sdram_addr*/*}] 18.0
 # cpu_din: 18.2 en el TN20K (guia de PnR para su congestion). El requisito real
 # es el protocolo del bus Z80 (3.58MHz + waits, cientos de ns); en GW5A el
 # placement del T80 varia y 18.2 fallaba por ~0.3ns -> 27.0 (1.5 periodos).
