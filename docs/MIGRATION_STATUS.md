@@ -23,6 +23,12 @@ Tracker vivo del port. Ver [PORT_PLAN.md](PORT_PLAN.md) para el plan y [PORT_FIN
 
 Flasheo del pack: `openFPGALoader --external-flash -o 0x400000 goauld_rom_int.bin` (o programmer Gowin a esa dirección). `flash_rw` recibe la dirección por puerto (sin cambios). `/WP`+`/HOLD` de la QSPI conducidos a alto (P21/R21).
 
+### Bring-up en placa (2026-07-07/08) — crónica
+1. **Causa raíz #1 (serial _12)**: botón S1 activo-alto del TN20K + PULL_UP del 60K = core MSX en **reset permanente** desde el primer bitstream. Descubierta gracias a que los módulos PMOD-LED son **activos-bajo** (todas las lecturas de nivel estaban invertidas; los parpadeos eran válidos).
+2. Con `_12`: **señal HDMI + frames** (pantalla negra). Con `_13/_14/_15dbg`: pack carga de flash ✓ (~3s), strobes VDP ✓, bus 3.58 ✓, memoria sirviendo ✓, **el menú LLEGÓ a escribir al VDP al arrancar** y luego se degrada; sin bucle de soft-reset.
+3. Fixes de paso: bucle de resincronización VDP→HDMI (align-once, `_09`) — necesario aunque no suficiente; excepciones SDC RD/WR_n→mem (cuasi-estáticas).
+4. **Auto-test de SDRAM en HW** (`fpga/test_sdram/`, seriales `_16test`/`_17test_inv`): usa el `memory_ctrl` real, veredicto por HDMI (verde/rojo/magenta). Verificado en sim contra el modelo W9825 — la depuración del tester documentó el **contrato implícito del puerto VRAM** (inputs estables la ventana entera; fila fase 0, write fase 1: pre-armar addr antes de write). `memory_ctrl` ganó el parámetro `SDCLK_INVERT` (reloj SDRAM 180°, fix clásico SDR externo) para el A/B.
+
 ### Pendiente inmediato
 - [x] **Re-mapear layout de flash** → hecho (FLASH_START 0x400000, config 0x480000, WP/HOLD altos)
 - [ ] Pines definitivos de `led[2..5]`, `ws2812`, UART ESP (hoy auto-colocados: U8/W16/E18/U9/P6/U21/R19 — no conectar PMODs al probar)

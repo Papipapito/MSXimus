@@ -32,7 +32,14 @@
 //    C64Nano no tiene pin CKE) → O_sdram_cke queda sin constraint en el 60K.
 // ============================================================================
 
-module memory_ctrl (
+module memory_ctrl #(
+    // Console 60K: el chip SDR es EXTERNO (modulo por header). Con el reloj en
+    // fase (como la SDRAM embebida del GW2AR) el viaje pad+traza+tAC+pad puede
+    // dejar el dato de lectura fuera de la ventana del primer latch. Invertir
+    // el reloj reenviado (180 grados) adelanta al chip media T y devuelve el
+    // dato comodo en fase 5 (truco clasico de SDR externo; nand2mario igual).
+    parameter SDCLK_INVERT = 1'b0
+)(
     input wire clk_27m,          // OJO: top.v lo alimenta con clk_54m
 	input wire clk_108m,
 	input wire bus_reset_n,
@@ -67,7 +74,7 @@ module memory_ctrl (
 
 	//`default_nettype none
 
-    assign O_sdram_clk = clk_108m;
+    assign O_sdram_clk = SDCLK_INVERT ? ~clk_108m : clk_108m;
     assign O_sdram_cke = 1;
     assign O_sdram_cs_n = SdrCmd[3];
     assign O_sdram_ras_n = SdrCmd[2];
