@@ -20,7 +20,7 @@ add_file tn_vdp_v3_v9958/src/hdmi/source_product_description_info_frame.sv
 add_file tn_vdp_v3_v9958/src/hdmi/tmds_channel.sv
 
 add_file test_sdram/test.cst
-add_file test_hdmi/test.sdc
+add_file test_sdram/test.sdc
 
 set_option -use_jtag_as_gpio 1 -use_done_as_gpio 1 -use_ready_as_gpio 1 -top_module top -verilog_std sysv2017
 set_option -place_option 2

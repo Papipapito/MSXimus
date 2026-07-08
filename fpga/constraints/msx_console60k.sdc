@@ -99,11 +99,32 @@ set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/sdram_seq*/*}]
 set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/sdram_addr*/*}] 18.0
 set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/sdram_seq*/*}] 18.0
 set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/sdram_addr*/*}] 18.0
+# Misma clase hacia la FSM de waits de top.v y el CE de ram_busy: ver el strobe
+# un ciclo de 54M mas tarde equivale a memoria un pelo mas lenta, y los waits
+# adaptativos (ENABLE_WAIT_ADAPTIVE) lo absorben por diseno. En el TN20K cerraba
+# sola; en GW5A es loteria de placement (build _18inv: WR_n_i->state_wait_0
+# -1.438, ->ram_busy -0.999, ->state_wait_1 -0.966). Matriz completa de ambos
+# strobes para matar la familia entera.
+set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {state_wait_*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {wait_io_ff*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/ram_busy*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {state_wait_*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {wait_io_ff*/*}] 18.0
+set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/ram_busy*/*}] 18.0
 # cpu_din: 18.2 en el TN20K (guia de PnR para su congestion). El requisito real
 # es el protocolo del bus Z80 (3.58MHz + waits, cientos de ns); en GW5A el
 # placement del T80 varia y 18.2 fallaba por ~0.3ns -> 27.0 (1.5 periodos).
 set_max_delay -from [get_clocks {clk_54m}] -to [get_pins {cpu_din_*/D}] 27.0
 set_max_delay -from [get_pins {mem1/vram_dout_*/Q}] -to [get_clocks {clk_27m}] 10.5
+
+# --- Recovery del RESET de los OSER10 (27->135, mismo PLL 1:5) ---
+# s1_n es el reset sincronizado del dominio de video; se suelta UNA vez y los
+# OSER10 se realinean con la logica align-once del pixel clock (estructura
+# identica a nestang, validada en placa con el test de barras). El check de
+# recovery 27[R]->135[F] es pesimista e irrelevante; OJO: estas violaciones NO
+# salen en el resumen por-reloj del tr (solo en la Path Slacks Table, seccion
+# recovery) — revisar esa tabla, no solo el resumen.
+set_false_path -from [get_pins {vdp4/s1_n_s0/Q}] -to [get_pins {vdp4/serializer/gwSer*/RESET}]
 
 # --- SD: registros de comando/sector cuasi-estaticos ---
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_cd_*/D}] -setup -end 2
