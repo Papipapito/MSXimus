@@ -104,8 +104,16 @@ set_false_path -from [get_clocks {clk_27m}] -to [get_pins {vdp4/hdmi_ntsc/true_h
 #   secuenciador tolera +1 ciclo sin ambiguedad (mismo valor).
 # - uwifi/qckbase_cnt = prescaler de baudios (859372 bps, bit de 1.16us):
 #   +18ns de jitter en el CE es ruido; ademas el ESP no tiene pines en el 60K.
-set_max_delay -from [get_pins {cpu1/u0/IStatus*/*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/u0/IStatus*/*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
+# GENERALIZADA (la loteria fue mutando el lanzador: IStatus -> ISet -> ...):
+# TODO el estado por-instruccion del NUCLEO T80 (cpu1/u0/*: PC/IR/IStatus/
+# ISet/registros) hacia secuenciador y waits es cuasi-estatico por protocolo
+# de bus. Los STROBES (RD_s0/WR_n_i_s0) viven en el wrapper cpu1/ (no u0/)
+# y quedan FUERA de esta excepcion: rigor completo (leccion F11).
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/ram_busy*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {state_wait_*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 27.0
 set_false_path -from [get_pins {cpu1/IORQ_n_i_s0/Q}] -to [get_pins {uwifi/qckbase_cnt*/CE}]
 # cpu_din: 18.2 en el TN20K (guia de PnR para su congestion). El requisito real
 # es el protocolo del bus Z80 (3.58MHz + waits, cientos de ns); en GW5A el

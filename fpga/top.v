@@ -714,6 +714,15 @@ assign keyboard_addr = ppi_port_c[3:0];
         end
     end
 
+    // v2.1 60K: declarados AQUI (antes del FSM de waits) para poder alinear la
+    // LIBERACION del wait al tren ACTIVO de la CPU en turbo. En el 60K el tren
+    // 3m6 nace del dominio 27M (CLKDIV, fase arbitraria) y el 5m4 del 108M:
+    // liberar con uno y consumir con el otro = carrera dependiente de fase
+    // (en el TN20K ambos dominios salian ALINEADOS del mismo rPLL).
+    reg  turbo = 1'b0;
+    wire clk_enable_cpu_54;
+    wire clk_falling_cpu_54;
+
 `ifdef ENABLE_WAIT
     wire wait_io;
     reg wait_io_ff = 1;
@@ -724,6 +733,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     localparam WAIT_STATE2 = 7'd3;
     localparam WAIT_STATE3 = 7'd2;
     localparam WAIT_STATE4 = 7'd4;
+    localparam WAIT_RELEASE = 7'd5;
 
     assign wait_io = wait_io_ff;
 
@@ -751,6 +761,15 @@ assign keyboard_addr = ppi_port_c[3:0];
                 // 5m4 swallowed). Validado en HW: juegos/DOS en turbo sin fallos.
                 WAIT_STATE2: begin
                     if ( clk_falling_3m6_54 == 1 ) begin
+                        if (!turbo) begin
+                            wait_io_ff <= 1;
+                            state_wait <= WAIT_STATE3;
+                        end
+                        else state_wait <= WAIT_RELEASE;   // v2.1: alinear al tren 5m4
+                    end
+                end
+                WAIT_RELEASE: begin
+                    if ( clk_falling_cpu_54 == 1 ) begin
                         wait_io_ff <= 1;
                         state_wait <= WAIT_STATE3;
                     end
@@ -790,7 +809,18 @@ assign keyboard_addr = ppi_port_c[3:0];
                     end
                 end
                 WAIT_STATE3: begin
+                    // v2.1 60K: a 3.58 identico a v1.9; en TURBO la liberacion
+                    // se re-alinea al tren 5m4 real de la CPU (WAIT_RELEASE)
                     if ( clk_falling_3m6_54 == 1 ) begin
+                        if (!turbo) begin
+                            wait_io_ff <= 1;
+                            state_wait <= WAIT_STATE4;
+                        end
+                        else state_wait <= WAIT_RELEASE;
+                    end
+                end
+                WAIT_RELEASE: begin
+                    if ( clk_falling_cpu_54 == 1 ) begin
                         wait_io_ff <= 1;
                         state_wait <= WAIT_STATE4;
                     end
@@ -807,11 +837,8 @@ assign keyboard_addr = ppi_port_c[3:0];
 
 `endif
 
-    // v1.9: CPU cadence wires (assigned in the turbo block below). Forward-declared
-    // so the M1-wait FSM tracks the ACTIVE cadence (3.6 normal / 5.37 turbo) instead
-    // of the fixed 3.6 pulses — otherwise the M1 stall would last 1.5 T at 5.37 MHz.
-    wire clk_enable_cpu_54;
-    wire clk_falling_cpu_54;
+    // v1.9: los wires de cadencia de CPU estan declarados ARRIBA (v2.1) junto
+    // al FSM de waits; se asignan en el bloque de turbo de abajo.
 
 `ifdef ENABLE_M1_WAIT
     // ===== STANDALONE M1 wait-state generator (frenado a ~100% MSX) =====
@@ -902,7 +929,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // Toggle survives MSX soft-reset; powers on in real-MSX mode. LED5 shows the state.
     // NOTE: F12 is captured by the BL616 FPGA-Companion firmware (its OSD) and never
     // reaches the FPGA, so F11 (which does reach it, verified on HW) is used instead.
-    reg turbo   = 1'b0;
+    // (reg turbo declarado arriba, v2.1)
     reg turbo_req = 1'b0;   // deseo de turbo; se COMMITEA solo en ventana segura
     reg f11_s0  = 1'b0;
     reg f11_s1  = 1'b0;
