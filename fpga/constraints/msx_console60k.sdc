@@ -90,34 +90,23 @@ set_false_path -from [get_clocks {clk_108m}] -to [get_pins {vdp4/u_v9958/U_SPRIT
 set_false_path -from [get_clocks {clk_27m}] -to [get_pins {vdp4/hdmi_ntsc/true_hdmi_output.packet_picker/audio_sample_word_transfer?*?/D}]
 
 # --- Presupuestos de cruce con disciplina de fase (del TN20K) ---
-# RD del T80 (flanco de bajada) -> FSM/latches de memoria (subida): relacion de
-# medio periodo 9.26ns pesimista para una peticion cuasi-estatica (bus 3.58MHz
-# con waits; llegar medio ciclo tarde solo retrasa la aceptacion 1 ciclo de 54).
-# El SDC del TN20K tenia esta constraint experimentada y comentada (alli cerraba
-# sola); en GW5A el placement del T80 varia y falla por ~1ns.
-# FAMILIA COMPLETA (la loteria de placement fue mutando el lanzador: RD_s0,
-# WR_n_i, IStatus/DO...): CUALQUIER registro del T80 hacia la FSM de memoria
-# y de waits, presupuesto 27.0 ns (1.5 periodos de 54M). Justificacion de
-# protocolo: el Z80 mantiene direccion y peticion estables >100 ns antes del
-# strobe; ver la peticion un ciclo tarde = memoria un pelo mas lenta, que los
-# waits adaptativos absorben. (27.0 RELAJA tanto los half-period F->R de
-# 9.26 como los R->R de 18.52.) Mismo RTL probado en TN20K.
-set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
-# Misma clase hacia la FSM de waits de top.v y el CE de ram_busy: ver el strobe
-# un ciclo de 54M mas tarde equivale a memoria un pelo mas lenta, y los waits
-# adaptativos (ENABLE_WAIT_ADAPTIVE) lo absorben por diseno. En el TN20K cerraba
-# sola; en GW5A es loteria de placement (build _18inv: WR_n_i->state_wait_0
-# -1.438, ->ram_busy -0.999, ->state_wait_1 -0.966). Matriz completa de ambos
-# strobes para matar la familia entera. (ram_busy NO se constrine por patron:
-# el nombre del FF cambia entre sintesis y el TA2003 es error duro — si su
-# violacion reaparece en un build, constrenir el nombre exacto del informe.)
-set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {state_wait_*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {state_wait_*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 27.0
+# ⚠️ LECCION (F11/turbo 60K): los caminos strobes del Z80 -> FSM de waits y
+# secuenciador de memoria DEBEN cumplir su timing de diseño (medio periodo
+# F->R / un periodo R->R). Las relajaciones 18.0/27.0 que hubo aqui dejaban
+# al router servirlos a ~13.7ns = el FSM veia el strobe UN CICLO TARDE: a
+# 3.58 MHz lo absorben los waits adaptativos, con turbo 5.37 (F11) CUELGA.
+# El TN20K cerraba estos caminos SIN excepciones: aqui igual — si una pasada
+# de PnR no cierra (-0.3..-1.4ns de loteria), se itera el placement, NO se
+# relaja la constraint.
+# EXCEPCIONES QUIRURGICAS (clases seguras a turbo, distintas de los strobes):
+# - IStatus (T80) = estado POR-INSTRUCCION (EI/DI/IM), no un strobe de bus:
+#   estable ordenes de magnitud mas que un ciclo; su mux hacia addr/seq del
+#   secuenciador tolera +1 ciclo sin ambiguedad (mismo valor).
+# - uwifi/qckbase_cnt = prescaler de baudios (859372 bps, bit de 1.16us):
+#   +18ns de jitter en el CE es ruido; ademas el ESP no tiene pines en el 60K.
+set_max_delay -from [get_pins {cpu1/u0/IStatus*/*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/IStatus*/*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
+set_false_path -from [get_pins {cpu1/IORQ_n_i_s0/Q}] -to [get_pins {uwifi/qckbase_cnt*/CE}]
 # cpu_din: 18.2 en el TN20K (guia de PnR para su congestion). El requisito real
 # es el protocolo del bus Z80 (3.58MHz + waits, cientos de ns); en GW5A el
 # placement del T80 varia y 18.2 fallaba por ~0.3ns -> 27.0 (1.5 periodos).
