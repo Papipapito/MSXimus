@@ -180,6 +180,13 @@ void SpriteLoop(bool sm1)
 	VDP_EnableSprite(TRUE);
 	while (!WaitFramesOrSpace(1)) MoveBalls(sm1);
 	VDP_DisableSprite();
+	// v5: fuera de pantalla ademas de deshabilitados (los init de modo
+	// re-activan R#8 y mostraban la tabla de atributos vieja al reiniciar)
+	for (u8 i = 0; i < 8; ++i)
+	{
+		if (sm1) VDP_SetSpriteSM1(i, 0, 208, 0, 0);
+		else     VDP_SetSpriteExUniColor(i, 0, 216, 0, 0);
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -549,8 +556,8 @@ void TestScroll()
 {
 	VDP_SetMode(VDP_MODE_SCREEN5);
 	VDP_SetColor(0x00);
-	VDP_CommandHMMV(0, 0, 256, 212, 0x11);
-	VDP_CommandWait();
+	VDP_CommandHMMV(0, 0, 256, 256, 0x11);   // v5: pagina ENTERA (el wrap del
+	VDP_CommandWait();                       // scroll ensenaba lineas 212-255)
 	BitmapPattern(256, 16);
 
 	u8 v = 0; u16 h = 0; u8 phase = 0;
@@ -574,6 +581,8 @@ void TestScreen8()
 {
 	VDP_SetMode(VDP_MODE_SCREEN8);
 	VDP_SetColor(0x00);
+	VDP_CommandHMMV(0, 0, 256, 212, 0x00);   // v5: limpiar (los huecos entre
+	VDP_CommandWait();                       // bandas ensenaban VRAM vieja)
 	// G7: byte de color = GGGRRRBB
 	for (u8 i = 0; i < 8; ++i)
 	{
