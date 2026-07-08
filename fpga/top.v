@@ -150,11 +150,9 @@ end
         .clkin  (ex_clk_27m),   // ⚠ en la Console 60K este pin lleva 50 MHz (V22)
         .clkout0(clk_108m),     // 108.000000 MHz (fraccional, exacto)
         .clkout1(clk_54m),      //  54.000000 MHz
-        .clkout2(clk_27m),      // v2.3: 27 DIRECTO del PLLA (fase alineada con 54/108
-                                //  como el rPLL del TN20K). El CLKDIV/5 (fase arbitraria)
-                                //  causaba PSG mudo y es el candidato del F11; el CLKDIV
-                                //  entro por el no-signal de HDMI que resulto ser el bug
-                                //  de polaridad de S1 (_12) — nunca hizo falta.
+        .clkout2(),             // 27 del PLLA NO usable: el OSER10 exige el par
+                                //  PCLK/FCLK del CLKDIV (verificado en placa: _28 con
+                                //  27-PLLA = HDMI muerto). El CLKDIV vuelve abajo.
         .clkout3(clk_135),      // 135.000000 MHz (TMDS; sustituye al CLK_135 del tn_vdp)
         .lock   (clock_locked),
         .mdclk  (ex_clk_27m)    // reloj de init del PLLA (secuencia mDRP)
@@ -165,9 +163,16 @@ end
     // Dos salidas independientes del PLLA NO garantizan la fase de arranque de
     // sus divisores → serialización TMDS muerta (bring-up 2026-07-07: z8086
     // funcionaba en la placa y nuestro _06 no; este era el delta restante).
-    // v2.3: CLKDIV/5 y clk27_align ELIMINADOS — clk_27m viene del PLLA
-    // (clkout2) con fase deterministica. El OSER10 recibe el par 27/135 del
-    // mismo VCO (PE=0), como el rPLL del TN20K de siempre.
+    // v2.4: CLKDIV/5 RESTAURADO (el OSER10 lo exige; _28 lo demostro en placa).
+    // Su fase vs 54M es arbitraria -> NADA con bus de CPU debe clockear a 27M:
+    // el PSG se movio al dominio 54M (v2.4); el arbitro DH/DL queda como unico
+    // frente de fase pendiente (F11) — plan B: cruce en el linebuffer.
+    CLKDIV #(.DIV_MODE(5)) div5_video (
+        .CLKOUT(clk_27m),
+        .HCLKIN(clk_135),
+        .RESETN(1'b1),
+        .CALIB(1'b0)
+    );
 
     // JTAG→SPI del companion (estilo C64Nano): los pines JTAG se entregan al
     // fabric (SPI del BL616) solo con el PLL en lock y sin petición de JTAG del
@@ -1592,14 +1597,17 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign psgPA =8'h00;
     reg psgPB = 8'hff;
 
+    // v2.4: el PSG vive ENTERO en 54M (su bus BDIR/BC1/I_DA es del dominio 54M;
+    // clockearlo a 27M con la fase arbitraria del CLKDIV lo dejaba MUDO). La
+    // cadencia 1.79M se regenera con los pulsos 3m6 del dominio 54.
     wire clk_enable_1m8;
     reg clk_1m8_prev;
-    always @ (posedge clk_27m) begin
-        if (clk_enable_3m6_27) begin
+    always @ (posedge clk_54m) begin
+        if (clk_enable_3m6_54) begin
             clk_1m8 <= ~clk_1m8;
         end
     end
-    assign clk_enable_1m8 = (clk_enable_3m6_27 == 1 && clk_1m8 == 1);
+    assign clk_enable_1m8 = (clk_enable_3m6_54 == 1 && clk_1m8 == 1);
 
     YM2149 psg1 (
         .I_DA(cpu_dout),
@@ -1621,8 +1629,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         
         .ENA(clk_enable_1m8), // clock enable for higher speed operation
         .RESET_L(bus_reset_n),
-        .CLK(clk_27m),
-        .clkHigh(clk_27m),
+        .CLK(clk_54m),        // v2.4: PSG en 54M (bus mismo dominio)
+        .clkHigh(clk_54m),
         .debug ()
     );
 
@@ -1663,8 +1671,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 
         .ENA(clk_enable_1m8),
         .RESET_L(bus_reset_n),
-        .CLK(clk_27m),
-        .clkHigh(clk_27m),
+        .CLK(clk_54m),        // v2.4: PSG en 54M
+        .clkHigh(clk_54m),
         .debug ()
     );
 
