@@ -903,6 +903,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // NOTE: F12 is captured by the BL616 FPGA-Companion firmware (its OSD) and never
     // reaches the FPGA, so F11 (which does reach it, verified on HW) is used instead.
     reg turbo   = 1'b0;
+    reg turbo_req = 1'b0;   // deseo de turbo; se COMMITEA solo en ventana segura
     reg f11_s0  = 1'b0;
     reg f11_s1  = 1'b0;
     reg f11_prev= 1'b0;
@@ -910,14 +911,27 @@ assign keyboard_addr = ppi_port_c[3:0];
         f11_s0   <= keyboard[68];   // sync HID F11 state into clk_54m domain
         f11_s1   <= f11_s0;
         f11_prev <= f11_s1;
+        // FIX 60K (cuelgue F11): el mux de cadencia NO puede conmutar con un
+        // acceso en vuelo — con la SDRAM externa el dato llega mas tarde que
+        // en la interna del TN20K y el mis-latch pilla basura (menu sobrevivia
+        // por probabilidad; BASIC moria). Los eventos escriben turbo_req y el
+        // cambio se aplica SOLO con el bus Z80 y la memoria en reposo.
+        if (turbo != turbo_req
+            && bus_rd_n && bus_wr_n && bus_mreq_n && ex_bus_iorq_n
+            && ram_busy == 0
+`ifdef ENABLE_WAIT
+            && state_wait == WAIT_IDLE
+`endif
+            )
+            turbo <= turbo_req;
         if (f11_s1 & ~f11_prev)     // rising edge = F11 pressed
-            turbo <= ~turbo;        // toggle real-MSX <-> turbo
+            turbo_req <= ~turbo_req; // toggle real-MSX <-> turbo
         // v1.9: control software Panasonic — OUT &H41,n con el dispositivo 8
         // seleccionado (decode pana41_wr junto al bloque config). bit0 activo-bajo:
         // 0 = turbo 5.37 MHz, 1 = 3.58. Puesto tras el F11: si coinciden en el
         // mismo ciclo gana el software (en el T9769 real el puerto es el unico control).
         if (pana41_wr)
-            turbo <= ~cpu_dout[0];
+            turbo_req <= ~cpu_dout[0];
         // v1.9: "Boot Turbo" persistido (ajuste del menu, puerto #45). Siembra el
         // turbo durante la ventana config_init del stream de flash: config_init y
         // config_sig son dominio clk_54m (sin CDC) y config_sig[4] ya esta cargado
@@ -925,7 +939,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         // bloque: domina sobre F11/puerto durante el boot (no disparan ahi de todos
         // modos). Con S2 (rescate) arranca SIEMPRE a 3.58.
         if (config_init)
-            turbo <= (!s2_press && config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
+            turbo_req <= (!s2_press && config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
     end
 
     // ===== v1.9 Panasonic-WSX turbo: 5.37 MHz CPU cadence =====
@@ -2915,7 +2929,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // sondas en el dominio de 54M: no cargar el arbol de 27M (hold de paleta)
     led_stretch #(.HOLD(2000000)) dbg_st_m1act (
         .clk(clk_54m), .rst_n(1'b1), .trig(~bus_m1_n), .active(dbg_m1act_led));
-    reg [5:0] dbg_intdiv = 0;
+    reg [6:0] dbg_intdiv = 0;   // 7b: parpadeo ~0.5Hz (y nudge de placement)
     reg dbg_int_d = 0;
     always @(posedge clk_54m) begin
         dbg_int_d <= bus_int_n;
@@ -2923,45 +2937,17 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     end
     assign dbg_pmod0[0] = wait_io;            // LED ON = CPU RETENIDA EN WAIT (clavado=malo)
     assign dbg_pmod0[1] = ~ram_busy;          // LED ON = ram_busy activo (fijo=arbitro atascado)
-    assign dbg_pmod0[2] = dbg_intdiv[5];      // PARPADEO ~1Hz = interrupciones VDP vivas
+    assign dbg_pmod0[2] = dbg_intdiv[6];      // PARPADEO ~0.5Hz = interrupciones VDP vivas
     assign dbg_pmod0[3] = ~dbg_m1act_led;     // LED ON = CPU ejecutando (M1); OFF = congelada
     assign dbg_pmod0[4] = bus_int_n;          // LED ON = LINEA INT ASERTADA (fijo=TORMENTA de int)
 
-    // r8 (_24dbg): MEDIDOR DE FASE 27<->54 (riesgo CLKDIV/5: fase no determinista
-    // frente al 54 del PLLA; el arbitro y los waits muestrean DH/DL desde 54M).
-    // PMOD1[1..4] = ventana de 4 muestras de VideoDHClk capturada al flanco de
-    // subida de VideoDLClk (vista desde 54M): el CODIGO de LEDs = la fase real.
-    // Apuntar el codigo y comprobar si CAMBIA entre encendidos.
-    reg [1:0] dbg_dh_s = 0, dbg_dl_s = 0;
-    reg [3:0] dbg_ph_win = 0, dbg_ph_code = 0;
-    reg [1:0] dbg_ph_cnt = 0;
-    reg dbg_ph_run = 0;
-    always @(posedge clk_54m) begin
-        dbg_dh_s <= {dbg_dh_s[0], VideoDHClk};
-        dbg_dl_s <= {dbg_dl_s[0], VideoDLClk};
-        if (dbg_dl_s == 2'b01 && !dbg_ph_run) begin
-            dbg_ph_run <= 1;
-            dbg_ph_cnt <= 0;
-        end
-        else if (dbg_ph_run) begin
-            dbg_ph_win <= {dbg_ph_win[2:0], dbg_dh_s[0]};
-            dbg_ph_cnt <= dbg_ph_cnt + 1'b1;
-            if (dbg_ph_cnt == 2'd3) begin
-                dbg_ph_run  <= 0;
-                dbg_ph_code <= {dbg_ph_win[2:0], dbg_dh_s[0]};
-            end
-        end
-    end
-    // ventanas de aceptacion del arbitro (dl&dh vistos a 54M) vivas
-    wire dbg_accept_led;
-    led_stretch #(.HOLD(1900000)) dbg_st_accept (
-        .clk(clk_54m), .rst_n(1'b1), .trig(dbg_dl_s[0] & dbg_dh_s[0]), .active(dbg_accept_led));
-    assign dbg_pmod1[0] = ~dbg_accept_led;    // LED ON = ventanas CPU (dl&dh) ocurriendo
-    assign dbg_pmod1[1] = ~dbg_ph_code[3];    // codigo de fase bit 3 (ON = 1)
-    assign dbg_pmod1[2] = ~dbg_ph_code[2];    // codigo de fase bit 2
-    assign dbg_pmod1[3] = ~dbg_ph_code[1];    // codigo de fase bit 1
-    assign dbg_pmod1[4] = ~dbg_ph_code[0];    // codigo de fase bit 0
-    assign dbg_pmod1[5] = 1'b1;               // apagado
+    // r8 retirado en _25 (medidor de fase aparcado); PMOD1 apagado
+    assign dbg_pmod1[0] = 1'b1;
+    assign dbg_pmod1[1] = 1'b1;
+    assign dbg_pmod1[2] = 1'b1;
+    assign dbg_pmod1[3] = 1'b1;
+    assign dbg_pmod1[4] = 1'b1;
+    assign dbg_pmod1[5] = 1'b1;
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
