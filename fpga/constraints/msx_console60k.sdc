@@ -95,22 +95,29 @@ set_false_path -from [get_clocks {clk_27m}] -to [get_pins {vdp4/hdmi_ntsc/true_h
 # con waits; llegar medio ciclo tarde solo retrasa la aceptacion 1 ciclo de 54).
 # El SDC del TN20K tenia esta constraint experimentada y comentada (alli cerraba
 # sola); en GW5A el placement del T80 varia y falla por ~1ns.
-set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/sdram_seq*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/sdram_addr*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/sdram_seq*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/sdram_addr*/*}] 18.0
+# FAMILIA COMPLETA (la loteria de placement fue mutando el lanzador: RD_s0,
+# WR_n_i, IStatus/DO...): CUALQUIER registro del T80 hacia la FSM de memoria
+# y de waits, presupuesto 27.0 ns (1.5 periodos de 54M). Justificacion de
+# protocolo: el Z80 mantiene direccion y peticion estables >100 ns antes del
+# strobe; ver la peticion un ciclo tarde = memoria un pelo mas lenta, que los
+# waits adaptativos absorben. (27.0 RELAJA tanto los half-period F->R de
+# 9.26 como los R->R de 18.52.) Mismo RTL probado en TN20K.
+set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
 # Misma clase hacia la FSM de waits de top.v y el CE de ram_busy: ver el strobe
 # un ciclo de 54M mas tarde equivale a memoria un pelo mas lenta, y los waits
 # adaptativos (ENABLE_WAIT_ADAPTIVE) lo absorben por diseno. En el TN20K cerraba
 # sola; en GW5A es loteria de placement (build _18inv: WR_n_i->state_wait_0
 # -1.438, ->ram_busy -0.999, ->state_wait_1 -0.966). Matriz completa de ambos
-# strobes para matar la familia entera.
-set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {state_wait_*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {wait_io_ff*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/RD_s0/Q}] -to [get_pins {mem1/ram_busy*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {state_wait_*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {wait_io_ff*/*}] 18.0
-set_max_delay -from [get_pins {cpu1/WR_n_i_s0/Q}] -to [get_pins {mem1/ram_busy*/*}] 18.0
+# strobes para matar la familia entera. (ram_busy NO se constrine por patron:
+# el nombre del FF cambia entre sintesis y el TA2003 es error duro — si su
+# violacion reaparece en un build, constrenir el nombre exacto del informe.)
+set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {state_wait_*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {state_wait_*/*}] 27.0
+set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 27.0
 # cpu_din: 18.2 en el TN20K (guia de PnR para su congestion). El requisito real
 # es el protocolo del bus Z80 (3.58MHz + waits, cientos de ns); en GW5A el
 # placement del T80 varia y 18.2 fallaba por ~0.3ns -> 27.0 (1.5 periodos).

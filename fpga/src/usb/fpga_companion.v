@@ -15,8 +15,11 @@ module fpga_companion (
     output [7:0] joystick0,
     output [7:0] joystick0_console,
     output [7:0] joystick1,
-    output [23:0] ws2812_color
+    output [23:0] ws2812_color,
+    output dbg_hid_strobe     // sonda bring-up: bytes HID llegando del MCU
 );
+
+assign dbg_hid_strobe = mcu_hid_strobe;
 
 wire mcu_hid_strobe;
 wire mcu_sys_strobe;

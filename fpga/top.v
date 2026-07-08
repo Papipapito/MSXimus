@@ -2907,17 +2907,27 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .clk(clk_27m), .rst_n(1'b1), .trig(~vdp_csw_n), .active(dbg_vdpwr_led));
     led_stretch #(.HOLD(2000000)) dbg_st_cfgrst (    // ~74ms (max del contador de 21b)
         .clk(clk_27m), .rst_n(1'b1), .trig(config_reset), .active(dbg_cfgrst_led));
-    assign dbg_pmod0[0] = ~flash_idle;        // LED ON = PACK CARGADO (ciclo visible)
-    assign dbg_pmod0[1] = ~dbg_rambusy_led;   // LED ON = memoria sirviendo
-    assign dbg_pmod0[2] = ~dbg_vdpwr_led;     // LED ON = Z80 ESCRIBIENDO AL VDP (menu dibujando)
-    assign dbg_pmod0[3] = ~dbg_cfgrst_led;    // LED ON = SOFT-RESET disparandose (bucle)
+    // r6 (_21dbg): CADENA DEL TECLADO companion->SPI->HID->matriz MSX
+    //  Cada LED = una etapa; el primero apagado marca DONDE se corta.
+    wire dbg_hid_strobe_w;
+    wire dbg_spiact_led, dbg_hidev_led, dbg_anykey_led;
+    led_stretch #(.HOLD(1350000)) dbg_st_spiact (
+        .clk(clk_27m), .rst_n(1'b1), .trig(~spi_csn), .active(dbg_spiact_led));
+    led_stretch #(.HOLD(2000000)) dbg_st_hidev (     // ~74ms por byte HID
+        .clk(clk_27m), .rst_n(1'b1), .trig(dbg_hid_strobe_w), .active(dbg_hidev_led));
+    led_stretch #(.HOLD(2000000)) dbg_st_anykey (
+        .clk(clk_27m), .rst_n(1'b1), .trig(|keyboard), .active(dbg_anykey_led));
+    assign dbg_pmod0[0] = bl616_jtagsel;      // LED ON (linea baja) = companion RECLAMO el SPI
+    assign dbg_pmod0[1] = ~dbg_spiact_led;    // LED ON = trafico SPI (companion hablando)
+    assign dbg_pmod0[2] = ~dbg_hidev_led;     // LED ON/parpadeo = mensajes HID llegando
+    assign dbg_pmod0[3] = ~dbg_anykey_led;    // LED ON = tecla llegando a la matriz MSX
     assign dbg_pmod0[4] = 1'b1;               // apagado
-    assign dbg_pmod1[0] = ~dbg_video_w[0];    // LED ON = PAL (OFF = NTSC)
-    assign dbg_pmod1[1] = dbg_fdiv_ntsc[5];   // parpadeo = frames NTSC
-    assign dbg_pmod1[2] = dbg_fdiv_pal[5];    // parpadeo = frames PAL
-    assign dbg_pmod1[3] = dbg_cnt27[23];      // parpadeo = clk_27m (referencia)
-    assign dbg_pmod1[4] = 1'b1;               // apagado
-    assign dbg_pmod1[5] = 1'b1;               // apagado
+    assign dbg_pmod1[0] = 1'b1;               // apagados (no mirar PMOD1)
+    assign dbg_pmod1[1] = 1'b1;
+    assign dbg_pmod1[2] = 1'b1;
+    assign dbg_pmod1[3] = 1'b1;
+    assign dbg_pmod1[4] = 1'b1;
+    assign dbg_pmod1[5] = 1'b1;
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
@@ -2966,7 +2976,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .joystick0 (joystick0),
         .joystick0_console (),
         .joystick1 (joystick1),
-        .ws2812_color ()    // LEDs are discrete; WS2812 not used
+        .ws2812_color (),   // LEDs are discrete; WS2812 not used
+        .dbg_hid_strobe (dbg_hid_strobe_w)
     );
 
     usb_keyboard_msx usb_keyboard_msx
