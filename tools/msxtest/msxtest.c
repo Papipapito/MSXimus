@@ -18,6 +18,10 @@
 #include "draw.h"
 #include "font/font_mgl_sample6.h"
 
+// La fuente se carga con offset 1 -> el ESPACIO real es el codigo 0x21.
+// (Rellenar con 0x20 mostraba la basura de VRAM del patron 0x20 en HW real.)
+#define CHR_BLANK 0x21
+
 //-----------------------------------------------------------------------------
 // Helpers de teclado (lectura directa de fila, sin buffers)
 //-----------------------------------------------------------------------------
@@ -48,7 +52,7 @@ void Screen0()
 {
 	VDP_SetMode(VDP_MODE_SCREEN0);
 	VDP_SetColor2(4, 15);              // fondo azul, texto blanco
-	VDP_FillVRAM_16K(0x20, 0x0000, 0x03C0);
+	VDP_FillVRAM_16K(CHR_BLANK, 0x0000, 0x03C0);
 	Print_SetTextFont(g_Font_MGL_Sample6, 1);
 	Print_SetColor(0x0F, 0x04);
 }
@@ -206,6 +210,108 @@ void TestPSG()
 psg_end:
 	PsgSilence();
 	Print_DrawTextAt(1, 22, "FIN PSG - ESPACIO");
+	WaitSpace();
+}
+
+//-----------------------------------------------------------------------------
+// SCC (la ROM va en mapper KONAMI SCC -> el SCC esta en NUESTRO cartucho).
+// OJO: activar el SCC (0x3F->0x9000) CONMUTA el banco 0x8000-0x9FFF de esta
+// misma ROM, asi que cada acceso se hace desde un THUNK EN RAM que activa,
+// accede y RESTAURA el banco (seg 2) con las interrupciones cerradas.
+//-----------------------------------------------------------------------------
+u8 g_SccThunk[20];
+volatile u8 g_SccVal;
+
+void SccCallThunk() { ((void(*)(void))(u16)&g_SccThunk[0])(); }
+
+void SccPoke(u8 reg, u8 v)   // reg = offset sobre 0x9800 (0x00-0x8F)
+{
+	u16 dst = 0x9800 + reg;
+	u8* t = g_SccThunk; u8 i = 0;
+	t[i++] = 0xF3;                                    // DI
+	t[i++] = 0x3E; t[i++] = 0x3F;                     // LD A,0x3F
+	t[i++] = 0x32; t[i++] = 0x00; t[i++] = 0x90;      // LD (0x9000),A  (SCC on)
+	t[i++] = 0x3E; t[i++] = v;                        // LD A,v
+	t[i++] = 0x32; t[i++] = (u8)dst; t[i++] = dst>>8; // LD (0x98xx),A
+	t[i++] = 0x3E; t[i++] = 0x02;                     // LD A,2
+	t[i++] = 0x32; t[i++] = 0x00; t[i++] = 0x90;      // LD (0x9000),A  (restaura)
+	t[i++] = 0xFB;                                    // EI
+	t[i++] = 0xC9;                                    // RET
+	SccCallThunk();
+}
+
+u8 SccPeek(u8 reg)
+{
+	u16 src = 0x9800 + reg;
+	u16 dst = (u16)&g_SccVal;
+	u8* t = g_SccThunk; u8 i = 0;
+	t[i++] = 0xF3;                                    // DI
+	t[i++] = 0x3E; t[i++] = 0x3F;                     // LD A,0x3F
+	t[i++] = 0x32; t[i++] = 0x00; t[i++] = 0x90;      // LD (0x9000),A
+	t[i++] = 0x3A; t[i++] = (u8)src; t[i++] = src>>8; // LD A,(0x98xx)
+	t[i++] = 0x32; t[i++] = (u8)dst; t[i++] = dst>>8; // LD (g_SccVal),A
+	t[i++] = 0x3E; t[i++] = 0x02;                     // LD A,2
+	t[i++] = 0x32; t[i++] = 0x00; t[i++] = 0x90;      // LD (0x9000),A
+	t[i++] = 0xFB;                                    // EI
+	t[i++] = 0xC9;                                    // RET
+	SccCallThunk();
+	return g_SccVal;
+}
+
+// onda triangular (32 muestras i8)
+const u8 g_SccTriangle[32] = {
+	0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0,
+	0x00, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70,
+	0x70, 0x60, 0x50, 0x40, 0x30, 0x20, 0x10, 0x00,
+	0xF0, 0xE0, 0xD0, 0xC0, 0xB0, 0xA0, 0x90, 0x80,
+};
+
+void TestSCC()
+{
+	u8 ok;
+
+	Screen0();
+	Print_DrawTextAt(1, 1, "SCC (KONAMI) - via megaram");
+	Print_DrawTextAt(1, 3, "Detectando SCC en el cartucho...");
+
+	// deteccion: la wave RAM del SCC se puede leer ademas de escribir
+	SccPoke(0x00, 0xAA);
+	ok = (SccPeek(0x00) == 0xAA);
+	if (ok) { SccPoke(0x00, 0x55); ok = (SccPeek(0x00) == 0x55); }
+
+	if (!ok)
+	{
+		Print_DrawTextAt(1, 5, "NO DETECTADO.");
+		Print_DrawTextAt(1, 7, "Si pasa esto, el menu cargo la ROM");
+		Print_DrawTextAt(1, 8, "con otro mapper: recargala con la");
+		Print_DrawTextAt(1, 9, "tecla M eligiendo KONAMI SCC.");
+		Print_DrawTextAt(1, 22, "ESPACIO para seguir");
+		WaitSpace();
+		return;
+	}
+	Print_DrawTextAt(1, 5, "DETECTADO (megaram SCC OK)");
+	Print_DrawTextAt(1, 7, "Escala de 8 notas x2 con el timbre");
+	Print_DrawTextAt(1, 8, "METALICO caracteristico del SCC");
+	Print_DrawTextAt(1, 9, "(onda triangular, tipo Konami).");
+	Print_DrawTextAt(1, 20, "Sonando... (ESPACIO al acabar)");
+
+	for (u8 w = 0; w < 32; ++w) SccPoke(w, g_SccTriangle[w]);  // wave ch1
+	SccPoke(0x8F, 0x01);                                       // enable ch1
+	for (u8 rep = 0; rep < 2; ++rep)
+		for (u8 n = 0; n < 8; ++n)
+		{
+			u16 p = g_Scale[n] >> 1;      // periodo SCC ~ mitad del PSG
+			SccPoke(0x80, (u8)p);
+			SccPoke(0x81, p >> 8);
+			SccPoke(0x8A, 12);            // volumen ch1
+			if (WaitFramesOrSpace(9)) goto scc_end;
+			SccPoke(0x8A, 0);
+			if (WaitFramesOrSpace(2)) goto scc_end;
+		}
+scc_end:
+	SccPoke(0x8A, 0);
+	SccPoke(0x8F, 0x00);
+	Print_DrawTextAt(1, 22, "FIN SCC - ESPACIO");
 	WaitSpace();
 }
 
@@ -369,7 +475,7 @@ void TestBlink()
 {
 	VDP_SetMode(VDP_MODE_SCREEN0_W80);
 	VDP_SetColor2(4, 15);
-	VDP_FillVRAM_16K(0x20, 0x0000, 0x0800);
+	VDP_FillVRAM_16K(CHR_BLANK, 0x0000, 0x0800);
 	Print_SetTextFont(g_Font_MGL_Sample6, 1);
 	Print_SetColor(0x0F, 0x04);
 	Print_DrawTextAt(2, 2,  "BLINK R#13 (el registro del bug de Metal Gear 2)");
@@ -477,6 +583,8 @@ void main()
 	VDP_SetMode(VDP_MODE_SCREEN1);
 	VDP_SetColor(0x57);
 	Print_SetTextFont(g_Font_MGL_Sample6, 1);
+	VDP_FillVRAM_16K(CHR_BLANK, 0x1800, 0x0300);  // nombres: espacio real
+	VDP_FillVRAM_16K(0xF4, 0x2000, 0x0020);       // colores: blanco/azul
 	Print_SetColor(0x0F, 0x04);
 	for (u8 r = 0; r < 7; ++r)
 	{
@@ -568,6 +676,7 @@ void main()
 
 	// ---- 5. Sonido ----
 	TestPSG();
+	TestSCC();
 	TestOPLL(fmType);
 
 	// ---- 6. Entrada ----
@@ -579,10 +688,10 @@ void main()
 	Print_DrawTextAt(1, 4,  "Si todo salio como se anuncio:");
 	Print_DrawTextAt(1, 6,  "VDP (modos, sprites, comandos,");
 	Print_DrawTextAt(1, 7,  "scroll, blink), PSG+envolventes,");
-	Print_DrawTextAt(1, 8,  "OPLL FM, RTC, turbo F11, teclado");
-	Print_DrawTextAt(1, 9,  "y joystick: VALIDADOS.");
-	Print_DrawTextAt(1, 12, "Manual (ver LEEME): SCC, kanji,");
-	Print_DrawTextAt(1, 13, "WiFi (sin pines aun), Coleco.");
+	Print_DrawTextAt(1, 8,  "SCC, OPLL FM, RTC, turbo F11,");
+	Print_DrawTextAt(1, 9,  "teclado y joystick: VALIDADOS.");
+	Print_DrawTextAt(1, 12, "Manual (ver LEEME): kanji, Coleco,");
+	Print_DrawTextAt(1, 13, "WiFi (sin pines aun), SD caliente.");
 	Print_DrawTextAt(1, 21, "ESPACIO = repetir todo el test");
 	WaitSpace();
 

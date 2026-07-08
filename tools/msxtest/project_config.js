@@ -13,7 +13,7 @@ ProjModules = [ ProjName ];
 LibModules  = [ "system", "bios", "vdp", "print", "input", "memory", "math", "psg", "msx-music", "draw", "clock" ];
 
 Machine = "2P";        // MSX2+ (SCREEN 10/12 = YJK del V9958)
-Target  = "ROM_32K";   // ROM plana de 32K (paginas 1 y 2)
+Target  = "ROM_KONAMI_SCC";  // mapper Konami SCC: prueba megaram + chip SCC
 
 AppSignature = true;
 AppCompany   = "AX";
