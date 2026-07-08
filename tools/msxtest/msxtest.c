@@ -83,13 +83,18 @@ bool AnnounceSkippable(const c8* title, const c8* l1, const c8* l2, const c8* l3
 	if (l1) Print_DrawTextAt(2, 9,  l1);
 	if (l2) Print_DrawTextAt(2, 11, l2);
 	if (l3) Print_DrawTextAt(2, 13, l3);
-	Print_DrawTextAt(1, 21, "ESPACIO = mostrar | S = SALTAR");
-	while (KeyDown(KEY_SPACE) || KeyDown(KEY_S)) Halt();
+	Print_DrawTextAt(1, 20, "ESC o S = SALTAR (recomendado)");
+	Print_DrawTextAt(1, 22, "ESPACIO = mostrar (CUELGA HOY)");
+	while (KeyDown(KEY_SPACE) || KeyDown(KEY_S) || KeyDown(KEY_ESC)) Halt();
 	for (;;)
 	{
 		Halt();
 		if (KeyDown(KEY_SPACE)) { while (KeyDown(KEY_SPACE)) Halt(); return TRUE; }
-		if (KeyDown(KEY_S))     { while (KeyDown(KEY_S)) Halt();     return FALSE; }
+		if (KeyDown(KEY_S) || KeyDown(KEY_ESC))
+		{
+			while (KeyDown(KEY_S) || KeyDown(KEY_ESC)) Halt();
+			return FALSE;
+		}
 	}
 }
 
@@ -645,9 +650,9 @@ void main()
 	SpriteLoop(TRUE);
 
 	if (AnnounceSkippable("SCREEN 3 (multicolor)",
-	         "Mosaico de bloques gordos.",
-	         "OJO - BUG CONOCIDO del MSXnano:",
-	         "HOY CUELGA (20K y 60K). S=saltar."))
+	         "BUG APARCADO #1: este modo CUELGA",
+	         "el MSXnano (20K y 60K) hoy.",
+	         "Casi ningun juego usa SCREEN 3."))
 	{
 		VDP_SetMode(VDP_MODE_SCREEN3);
 		VDP_SetColor(0x01);
