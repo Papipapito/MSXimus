@@ -1513,7 +1513,9 @@ assign keyboard_addr = ppi_port_c[3:0];
 
     assign ram_din = (~flash_idle) ? { rom_dout, rom_dout }  : { cpu_dout, cpu_dout };
 
-memory_ctrl mem1 (
+// SDCLK_INVERT=1 CONFIRMADO EN HW (2026-07-08): con fase normal el auto-test
+// da ROJO (errores CPU) y con 180 grados VERDE; el core arranca (serial _18inv).
+memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .clk_27m(clk_54m),
     .clk_108m(clk_108m),
     .bus_reset_n(bus_reset_n ),
