@@ -149,3 +149,12 @@ set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_cd_*/CE}] 
 #   3) false_paths reales (config estatica, LEDs, ws2812) — NO copiar los viejos.
 #   4) cruce megaram 27MHz->controlador (AUDIT §5.B megaram) si aplica.
 # ============================================================================
+
+# --- clk27_align (v2.2): medidor de fase 27<->54 ---
+# Los toggles t54/t27 entran a sincronizadores 2FF del dominio 135: son
+# muestreadores de fase POR DISEÑO (la cuantizacion es la medida). phase_ok
+# es un flag cuasi-estatico (una transicion por arranque) hacia el gate de
+# reset (que ya pasa por su propia cadena de sincronizacion).
+set_false_path -from [get_pins {u_clk27_align/t54_s0/Q}] -to [get_pins {u_clk27_align/s54*/*}]
+set_false_path -from [get_pins {u_clk27_align/t27_s0/Q}] -to [get_pins {u_clk27_align/s27*/*}]
+set_false_path -from [get_pins {u_clk27_align/phase_ok*/*}]

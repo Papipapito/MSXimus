@@ -294,6 +294,37 @@ void SccPoke(u8 reg, u8 v)   // reg = offset sobre 0x9800 (0x00-0x8F)
 	SccCallThunk();
 }
 
+// v6: NOTA COMPLETA con el SCC MAPEADO todo el rato (la megaram silencia el
+// SCC al desmapear el banco -> los pokes sueltos no sonaban; los juegos lo
+// dejan mapeado). DI + on + freq/vol/mixer + bucle ~130ms + off + EI.
+void SccNote(u16 period, u8 vol)
+{
+	u8* t = g_SccThunk; u8 i = 0;
+	t[i++] = 0xF3;                                    // DI
+	t[i++] = 0x3E; t[i++] = 0x3F;                     // LD A,0x3F
+	t[i++] = 0x32; t[i++] = 0x00; t[i++] = 0x90;      // LD (0x9000),A (SCC on)
+	t[i++] = 0x3E; t[i++] = (u8)period;               // LD A,freqL
+	t[i++] = 0x32; t[i++] = 0x80; t[i++] = 0x98;      // LD (0x9880),A
+	t[i++] = 0x3E; t[i++] = (u8)(period >> 8);        // LD A,freqH
+	t[i++] = 0x32; t[i++] = 0x81; t[i++] = 0x98;      // LD (0x9881),A
+	t[i++] = 0x3E; t[i++] = 0x01;                     // LD A,1
+	t[i++] = 0x32; t[i++] = 0x8F; t[i++] = 0x98;      // LD (0x988F),A (mixer ch1)
+	t[i++] = 0x3E; t[i++] = vol;                      // LD A,vol
+	t[i++] = 0x32; t[i++] = 0x8A; t[i++] = 0x98;      // LD (0x988A),A
+	t[i++] = 0x01; t[i++] = 0xFF; t[i++] = 0xFF;      // LD BC,0xFFFF (~130ms)
+	t[i++] = 0x0B;                                    // bucle: DEC BC
+	t[i++] = 0x78;                                    //        LD A,B
+	t[i++] = 0xB1;                                    //        OR C
+	t[i++] = 0x20; t[i++] = 0xFB;                     //        JR NZ,-5
+	t[i++] = 0xAF;                                    // XOR A
+	t[i++] = 0x32; t[i++] = 0x8A; t[i++] = 0x98;      // LD (0x988A),A (vol 0)
+	t[i++] = 0x3E; t[i++] = 0x02;                     // LD A,2
+	t[i++] = 0x32; t[i++] = 0x00; t[i++] = 0x90;      // LD (0x9000),A (restaura)
+	t[i++] = 0xFB;                                    // EI
+	t[i++] = 0xC9;                                    // RET
+	SccCallThunk();
+}
+
 u8 SccPeek(u8 reg)
 {
 	u16 src = 0x9800 + reg;
@@ -350,16 +381,10 @@ void TestSCC()
 	Print_DrawTextAt(1, 20, "Sonando... (ESPACIO al acabar)");
 
 	for (u8 w = 0; w < 32; ++w) SccPoke(w, g_SccTriangle[w]);  // wave ch1
-	SccPoke(0x8F, 0x01);                                       // enable ch1
 	for (u8 rep = 0; rep < 2; ++rep)
 		for (u8 n = 0; n < 8; ++n)
 		{
-			u16 p = g_Scale[n] >> 1;      // periodo SCC ~ mitad del PSG
-			SccPoke(0x80, (u8)p);
-			SccPoke(0x81, p >> 8);
-			SccPoke(0x8A, 12);            // volumen ch1
-			if (WaitFramesOrSpace(9)) goto scc_end;
-			SccPoke(0x8A, 0);
+			SccNote(g_Scale[n] >> 1, 12); // nota bloqueante ~130ms (DI)
 			if (WaitFramesOrSpace(2)) goto scc_end;
 		}
 scc_end:

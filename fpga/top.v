@@ -121,7 +121,7 @@ end
     // muerto 2026-07-07/08). Normalizamos a "press" activo-alto:
     wire s1_press = ~s1;
     wire s2_press = ~s2;
-    assign ex_bus_reset_n = ~s1_press && clock_locked;   // s1 pulsado = reset
+    assign ex_bus_reset_n = ~s1_press && clock_locked && phase_ok_w;   // s1 pulsado = reset; v2.2: espera fase 27<->54
 
 
     // 108 MHz / 30 = 3.6 MHz internal CPU clock (replaces ex_bus_clk_3m6 pin)
@@ -164,8 +164,24 @@ end
     CLKDIV #(.DIV_MODE(5)) div5_video (
         .CLKOUT(clk_27m),
         .HCLKIN(clk_135),
-        .RESETN(1'b1),
+        .RESETN(div5_rstn_w),
         .CALIB(1'b0)
+    );
+
+    // Alineador de fase del CLKDIV (v2.2 60K): re-lanza el /5 hasta que la
+    // fase 27<->54 sea la del TN20K (flancos coincidentes). PSG mudo y F11
+    // eran victimas de la fase arbitraria (ver clk27_align.v).
+    wire div5_rstn_w, phase_ok_w, phase_gaveup_w;
+    wire [2:0] phase_meas_w;
+    clk27_align #(.TARGET_PHASE(3'd0)) u_clk27_align (
+        .clk_135   (clk_135),
+        .clk_54m   (clk_54m),
+        .clk_27m   (clk_27m),
+        .pll_lock  (clock_locked),
+        .div5_rstn (div5_rstn_w),
+        .phase_ok  (phase_ok_w),
+        .gave_up   (phase_gaveup_w),
+        .phase_meas(phase_meas_w)
     );
 
     // JTAG→SPI del companion (estilo C64Nano): los pines JTAG se entregan al
@@ -761,15 +777,6 @@ assign keyboard_addr = ppi_port_c[3:0];
                 // 5m4 swallowed). Validado en HW: juegos/DOS en turbo sin fallos.
                 WAIT_STATE2: begin
                     if ( clk_falling_3m6_54 == 1 ) begin
-                        if (!turbo) begin
-                            wait_io_ff <= 1;
-                            state_wait <= WAIT_STATE3;
-                        end
-                        else state_wait <= WAIT_RELEASE;   // v2.1: alinear al tren 5m4
-                    end
-                end
-                WAIT_RELEASE: begin
-                    if ( clk_falling_cpu_54 == 1 ) begin
                         wait_io_ff <= 1;
                         state_wait <= WAIT_STATE3;
                     end
@@ -809,18 +816,9 @@ assign keyboard_addr = ppi_port_c[3:0];
                     end
                 end
                 WAIT_STATE3: begin
-                    // v2.1 60K: a 3.58 identico a v1.9; en TURBO la liberacion
-                    // se re-alinea al tren 5m4 real de la CPU (WAIT_RELEASE)
+                    // v2.2: semantica v1.9 restaurada — con la fase 27<->54
+                    // alineada (clk27_align) la disciplina original es valida
                     if ( clk_falling_3m6_54 == 1 ) begin
-                        if (!turbo) begin
-                            wait_io_ff <= 1;
-                            state_wait <= WAIT_STATE4;
-                        end
-                        else state_wait <= WAIT_RELEASE;
-                    end
-                end
-                WAIT_RELEASE: begin
-                    if ( clk_falling_cpu_54 == 1 ) begin
                         wait_io_ff <= 1;
                         state_wait <= WAIT_STATE4;
                     end
@@ -2968,13 +2966,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod0[3] = ~dbg_m1act_led;     // LED ON = CPU ejecutando (M1); OFF = congelada
     assign dbg_pmod0[4] = bus_int_n;          // LED ON = LINEA INT ASERTADA (fijo=TORMENTA de int)
 
-    // r8 retirado en _25 (medidor de fase aparcado); PMOD1 apagado
-    assign dbg_pmod1[0] = 1'b1;
-    assign dbg_pmod1[1] = 1'b1;
-    assign dbg_pmod1[2] = 1'b1;
-    assign dbg_pmod1[3] = 1'b1;
-    assign dbg_pmod1[4] = 1'b1;
-    assign dbg_pmod1[5] = 1'b1;
+    // r9 (_27): estado del ALINEADOR de fase 27<->54 (clk27_align)
+    assign dbg_pmod1[0] = ~phase_ok_w;        // LED ON = fase ALINEADA
+    assign dbg_pmod1[1] = ~phase_gaveup_w;    // LED ON = agoto reintentos (mal)
+    assign dbg_pmod1[2] = ~phase_meas_w[2];   // k medida (bit2)
+    assign dbg_pmod1[3] = ~phase_meas_w[1];   // k medida (bit1)
+    assign dbg_pmod1[4] = ~phase_meas_w[0];   // k medida (bit0)
+    assign dbg_pmod1[5] = 1'b1;               // apagado
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
