@@ -72,6 +72,48 @@ void Announce(const c8* title, const c8* l1, const c8* l2, const c8* l3)
 	WaitSpace();
 }
 
+// Variante con opcion de SALTAR (para pruebas con bug conocido): TRUE=mostrar
+bool AnnounceSkippable(const c8* title, const c8* l1, const c8* l2, const c8* l3)
+{
+	Screen0();
+	Print_DrawTextAt(1, 1,  "MSXUP TEST - VALIDACION 60K");
+	Print_DrawTextAt(1, 2,  "---------------------------");
+	Print_DrawTextAt(1, 4,  title);
+	Print_DrawTextAt(1, 7,  "DEBES VER/OIR:");
+	if (l1) Print_DrawTextAt(2, 9,  l1);
+	if (l2) Print_DrawTextAt(2, 11, l2);
+	if (l3) Print_DrawTextAt(2, 13, l3);
+	Print_DrawTextAt(1, 21, "ESPACIO = mostrar | S = SALTAR");
+	while (KeyDown(KEY_SPACE) || KeyDown(KEY_S)) Halt();
+	for (;;)
+	{
+		Halt();
+		if (KeyDown(KEY_SPACE)) { while (KeyDown(KEY_SPACE)) Halt(); return TRUE; }
+		if (KeyDown(KEY_S))     { while (KeyDown(KEY_S)) Halt();     return FALSE; }
+	}
+}
+
+//-----------------------------------------------------------------------------
+// SCREEN 2/4: dibujo por ESCRITURA DIRECTA a VRAM. (Los comandos del VDP son
+// INDOCUMENTADOS en G2/G3 en el chip real: openMSX los ejecuta, el VDP FPGA
+// no -> en HW quedaba la "pagina vieja" del screen anterior. Leccion v3.)
+//-----------------------------------------------------------------------------
+void DrawG2Direct()
+{
+	// nombres: secuencial 0..255 en los 3 tercios
+	for (u16 i = 0; i < 768; ++i) VDP_Poke_16K((u8)i, 0x1800 + i);
+	// patrones por tercio: solido / rayas verticales / bloques
+	VDP_FillVRAM_16K(0xFF, 0x0000, 0x0800);
+	VDP_FillVRAM_16K(0xAA, 0x0800, 0x0800);
+	VDP_FillVRAM_16K(0x3C, 0x1000, 0x0800);
+	// colores: 16 barras verticales (2 chars por barra), fondo negro
+	for (u16 n = 0; n < 768; ++n)
+	{
+		u8 bar = (u8)((n & 31) >> 1);
+		VDP_FillVRAM_16K((u8)((bar << 4) | 0x01), 0x2000 + n * 8, 8);
+	}
+}
+
 //-----------------------------------------------------------------------------
 // Dibujo comun en modos bitmap (usa el MOTOR DE COMANDOS del VDP)
 //-----------------------------------------------------------------------------
@@ -594,29 +636,32 @@ void main()
 	WaitSpace();
 
 	Announce("SCREEN 2 + SPRITES modo 1",
-	         "Barras de 16 colores, rejilla,",
-	         "circulo y aspas; 8 bloques 16x16",
-	         "rebotando SIN parpadeos raros.");
+	         "3 franjas: barras SOLIDAS arriba,",
+	         "RAYADAS en medio, BLOQUES abajo;",
+	         "8 sprites 16x16 rebotando limpios.");
 	VDP_SetMode(VDP_MODE_SCREEN2);
 	VDP_SetColor(0x07);
-	BitmapPattern(256, 16);
+	DrawG2Direct();
 	SpriteLoop(TRUE);
 
-	Announce("SCREEN 3 (multicolor)",
-	         "Mosaico de bloques gordos de",
-	         "colores (baja resolucion).", NULL);
-	VDP_SetMode(VDP_MODE_SCREEN3);
-	VDP_SetColor(0x01);
-	for (u16 a = 0; a < 0x800; ++a) VDP_Poke_16K((u8)(a * 7), a);
-	WaitSpace();
+	if (AnnounceSkippable("SCREEN 3 (multicolor)",
+	         "Mosaico de bloques gordos.",
+	         "OJO - BUG CONOCIDO del MSXnano:",
+	         "HOY CUELGA (20K y 60K). S=saltar."))
+	{
+		VDP_SetMode(VDP_MODE_SCREEN3);
+		VDP_SetColor(0x01);
+		for (u16 a = 0; a < 0x800; ++a) VDP_Poke_16K((u8)(a * 7), a);
+		WaitSpace();
+	}
 
 	// ---- 3. Modos MSX2 bitmap ----
 	Announce("SCREEN 4 (G3) + SPRITES modo 2",
-	         "Igual que SCREEN 2 pero los",
-	         "sprites en colores DISTINTOS.", NULL);
+	         "Como SCREEN 2 (3 franjas de",
+	         "barras) con sprites modo 2.", NULL);
 	VDP_SetMode(VDP_MODE_SCREEN4);
 	VDP_SetColor(0x07);
-	BitmapPattern(256, 16);
+	DrawG2Direct();
 	SpriteLoop(FALSE);
 
 	Announce("SCREEN 5 (G4, 256px 16 colores)",
