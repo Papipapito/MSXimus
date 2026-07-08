@@ -2907,20 +2907,24 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .clk(clk_27m), .rst_n(1'b1), .trig(~vdp_csw_n), .active(dbg_vdpwr_led));
     led_stretch #(.HOLD(2000000)) dbg_st_cfgrst (    // ~74ms (max del contador de 21b)
         .clk(clk_27m), .rst_n(1'b1), .trig(config_reset), .active(dbg_cfgrst_led));
-    // r6 (_21dbg): CADENA DEL TECLADO companion->SPI->HID->matriz MSX
-    //  Cada LED = una etapa; el primero apagado marca DONDE se corta.
-    wire dbg_hid_strobe_w;
-    wire dbg_spiact_led, dbg_hidev_led, dbg_anykey_led;
-    led_stretch #(.HOLD(1350000)) dbg_st_spiact (
-        .clk(clk_27m), .rst_n(1'b1), .trig(~spi_csn), .active(dbg_spiact_led));
-    led_stretch #(.HOLD(2000000)) dbg_st_hidev (     // ~74ms por byte HID
-        .clk(clk_27m), .rst_n(1'b1), .trig(dbg_hid_strobe_w), .active(dbg_hidev_led));
-    led_stretch #(.HOLD(2000000)) dbg_st_anykey (
-        .clk(clk_27m), .rst_n(1'b1), .trig(|keyboard), .active(dbg_anykey_led));
-    assign dbg_pmod0[0] = bl616_jtagsel;      // LED ON (linea baja) = companion RECLAMO el SPI
-    assign dbg_pmod0[1] = ~dbg_spiact_led;    // LED ON = trafico SPI (companion hablando)
-    assign dbg_pmod0[2] = ~dbg_hidev_led;     // LED ON/parpadeo = mensajes HID llegando
-    assign dbg_pmod0[3] = ~dbg_anykey_led;    // LED ON = tecla llegando a la matriz MSX
+    // r7 (_23dbg): FORENSE DE CUELGUES (SCREEN 3 / F11) — clasifica el cuelgue:
+    //  wait clavado + ram_busy fijo = arbitro de memoria; INT muerto con CPU
+    //  viva = interrupcion del VDP; todo vivo pero sin M1 = CPU en HALT.
+    wire dbg_hid_strobe_w;   // (se mantiene conectado al companion)
+    wire dbg_m1act_led;
+    // sondas en el dominio de 54M: no cargar el arbol de 27M (hold de paleta)
+    led_stretch #(.HOLD(2000000)) dbg_st_m1act (
+        .clk(clk_54m), .rst_n(1'b1), .trig(~bus_m1_n), .active(dbg_m1act_led));
+    reg [5:0] dbg_intdiv = 0;
+    reg dbg_int_d = 0;
+    always @(posedge clk_54m) begin
+        dbg_int_d <= bus_int_n;
+        if (!bus_int_n && dbg_int_d) dbg_intdiv <= dbg_intdiv + 1'b1;  // flanco INT
+    end
+    assign dbg_pmod0[0] = wait_io;            // LED ON = CPU RETENIDA EN WAIT (clavado=malo)
+    assign dbg_pmod0[1] = ~ram_busy;          // LED ON = ram_busy activo (fijo=arbitro atascado)
+    assign dbg_pmod0[2] = dbg_intdiv[5];      // PARPADEO ~1Hz = interrupciones VDP vivas
+    assign dbg_pmod0[3] = ~dbg_m1act_led;     // LED ON = CPU ejecutando (M1); OFF = congelada
     assign dbg_pmod0[4] = 1'b1;               // apagado
     assign dbg_pmod1[0] = 1'b1;               // apagados (no mirar PMOD1)
     assign dbg_pmod1[1] = 1'b1;
