@@ -52,7 +52,6 @@ add_file src/memory.v
 add_file src/ocm/kanji.v
 add_file src/ocm/rtc.v
 add_file src/psg_filter.v
-add_file src/clk27_align.v
 add_file src/ws2812.v
 add_file src/wondertang/crc16.v
 add_file src/wondertang/dpram.v

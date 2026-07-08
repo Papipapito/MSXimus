@@ -21,16 +21,18 @@ create_clock -name clk_in -period 20.000 [get_ports {ex_clk_27m}]
 create_clock -name clk_108m -period 9.260  [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT0}]
 create_clock -name clk_54m  -period 18.520 [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT1}]
 create_clock -name clk_135m -period 7.408  [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT3}]
-# clk_27m nace en el CLKDIV /5 del 135 (alineacion PCLK/FCLK del OSER10)
-create_generated_clock -name clk_27m -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT3}] -master_clock clk_135m -divide_by 5 [get_pins {div5_video/CLKOUT}]
+# v2.3: clk_27m DIRECTO del PLLA (fase deterministica con 54/108/135; el
+# CLKDIV/5 de fase arbitraria causaba PSG mudo — y era innecesario: entro por
+# el no-signal de HDMI cuya causa real fue la polaridad de S1)
+create_clock -name clk_27m -period 37.040 [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}]
 
 # ---- Relojes derivados/gated del diseño (intencion del SDC del TN20K) ----
 # bus_reset_n y clk_audio clockean FFs propios (gated); VideoDH/DLClk (÷2/÷4 de
 # 27) fasan el secuenciador de memoria.
 create_clock -name clock_reset -period 277.778 [get_nets {bus_reset_n}] -add
 create_clock -name clock_audio -period 277.778 [get_nets {vdp4/clk_audio}] -add
-create_generated_clock -name clock_VideoDHClk -source [get_pins {div5_video/CLKOUT}] -master_clock clk_27m -divide_by 2 [get_nets {VideoDHClk}] -add
-create_generated_clock -name clock_VideoDLClk -source [get_pins {div5_video/CLKOUT}] -master_clock clk_27m -divide_by 4 [get_nets {VideoDLClk}] -add
+create_generated_clock -name clock_VideoDHClk -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}] -master_clock clk_27m -divide_by 2 [get_nets {VideoDHClk}] -add
+create_generated_clock -name clock_VideoDLClk -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}] -master_clock clk_27m -divide_by 4 [get_nets {VideoDLClk}] -add
 
 # ---- Reloj SPI del BL616 onboard (resuelve el hueco TA1132 del TN20K) ----
 create_clock -name spi_sclk -period 50.000 [get_ports {spi_sclk}]
@@ -150,11 +152,4 @@ set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_cd_*/CE}] 
 #   4) cruce megaram 27MHz->controlador (AUDIT §5.B megaram) si aplica.
 # ============================================================================
 
-# --- clk27_align (v2.2): medidor de fase 27<->54 ---
-# Los toggles t54/t27 entran a sincronizadores 2FF del dominio 135: son
-# muestreadores de fase POR DISEÑO (la cuantizacion es la medida). phase_ok
-# es un flag cuasi-estatico (una transicion por arranque) hacia el gate de
-# reset (que ya pasa por su propia cadena de sincronizacion).
-set_false_path -from [get_pins {u_clk27_align/t54_s0/Q}] -to [get_pins {u_clk27_align/s54*/*}]
-set_false_path -from [get_pins {u_clk27_align/t27_s0/Q}] -to [get_pins {u_clk27_align/s27*/*}]
-set_false_path -from [get_pins {u_clk27_align/phase_ok*/*}]
+# (v2.3: clk27_align eliminado)

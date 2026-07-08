@@ -359,22 +359,15 @@ void TestSCC()
 	Print_DrawTextAt(1, 1, "SCC (KONAMI) - via megaram");
 	Print_DrawTextAt(1, 3, "Detectando SCC en el cartucho...");
 
-	// deteccion: la wave RAM del SCC se puede leer ademas de escribir
+	// v7: deteccion por lectura de wave RAM SOLO INFORMATIVA — la megaram
+	// real puede no implementar el readback (openMSX si) y bloqueaba el test.
+	// La escala suena INCONDICIONAL: si el mapper es KONAMI SCC, hay SCC.
 	SccPoke(0x00, 0xAA);
 	ok = (SccPeek(0x00) == 0xAA);
 	if (ok) { SccPoke(0x00, 0x55); ok = (SccPeek(0x00) == 0x55); }
 
-	if (!ok)
-	{
-		Print_DrawTextAt(1, 5, "NO DETECTADO.");
-		Print_DrawTextAt(1, 7, "Si pasa esto, el menu cargo la ROM");
-		Print_DrawTextAt(1, 8, "con otro mapper: recargala con la");
-		Print_DrawTextAt(1, 9, "tecla M eligiendo KONAMI SCC.");
-		Print_DrawTextAt(1, 22, "ESPACIO para seguir");
-		WaitSpace();
-		return;
-	}
-	Print_DrawTextAt(1, 5, "DETECTADO (megaram SCC OK)");
+	if (ok) Print_DrawTextAt(1, 5, "readback wave RAM: OK");
+	else    Print_DrawTextAt(1, 5, "readback wave RAM: NO (informativo)");
 	Print_DrawTextAt(1, 7, "Escala de 8 notas x2 con el timbre");
 	Print_DrawTextAt(1, 8, "METALICO caracteristico del SCC");
 	Print_DrawTextAt(1, 9, "(onda triangular, tipo Konami).");
