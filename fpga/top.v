@@ -1609,15 +1609,76 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     end
     assign clk_enable_1m8 = (clk_enable_3m6_54 == 1 && clk_1m8 == 1);
 
+    // ===== r10 (_30dbg): AUTO-TEST del PSG (beeper sin CPU) =====
+    // De t=1s a t=3s tras el reset, un FSM escribe directamente los registros
+    // del psg1 (R7=tono A, R0/R1=periodo ~262Hz, R8=vol 15) y al salir lo
+    // silencia. Si SUENA el pitido: chip+mezcla OK -> el corte esta en el
+    // camino CPU->PSG. Si NO suena: chip/sintesis.
+    reg [27:0] psgtest_cnt = 28'd0;
+    always @(posedge clk_54m) begin
+        if (~bus_reset_n) psgtest_cnt <= 28'd0;
+        else if (psgtest_cnt != 28'hFFFFFFF) psgtest_cnt <= psgtest_cnt + 28'd1;
+    end
+    wire psgtest_win = (psgtest_cnt > 28'd54000000) && (psgtest_cnt < 28'd162000000);
+    // secuencia: 5 escrituras (una cada 64 ciclos: fase addr 24c / data 24c / nop)
+    reg [2:0]  ptst_idx = 3'd0;
+    reg [5:0]  ptst_ph  = 6'd0;
+    reg        ptst_done = 1'b0;
+    reg [7:0]  ptst_da   = 8'd0;
+    reg        ptst_bdir = 1'b0;
+    reg        ptst_bc1  = 1'b0;
+    wire [7:0] ptst_reg = (ptst_idx==3'd0) ? 8'd7 :
+                          (ptst_idx==3'd1) ? 8'd0 :
+                          (ptst_idx==3'd2) ? 8'd1 :
+                          (ptst_idx==3'd3) ? 8'd8 : 8'd8;
+    wire [7:0] ptst_val = (ptst_idx==3'd0) ? 8'hBE :
+                          (ptst_idx==3'd1) ? 8'hAC :
+                          (ptst_idx==3'd2) ? 8'h01 :
+                          (ptst_idx==3'd3) ? 8'h0F : 8'h00;  // idx4 = silencio final
+    reg psgtest_win_d = 1'b0;
+    always @(posedge clk_54m) begin
+        psgtest_win_d <= psgtest_win;
+        if (~bus_reset_n) begin
+            ptst_idx <= 3'd0; ptst_ph <= 6'd0; ptst_done <= 1'b0;
+            ptst_bdir <= 1'b0; ptst_bc1 <= 1'b0; ptst_da <= 8'd0;
+        end
+        else if (psgtest_win && !ptst_done) begin
+            ptst_ph <= ptst_ph + 6'd1;
+            if      (ptst_ph < 6'd24) begin ptst_da <= ptst_reg; ptst_bdir <= 1'b1; ptst_bc1 <= 1'b1; end
+            else if (ptst_ph < 6'd48) begin ptst_da <= ptst_val; ptst_bdir <= 1'b1; ptst_bc1 <= 1'b0; end
+            else begin
+                ptst_bdir <= 1'b0; ptst_bc1 <= 1'b0;
+                if (ptst_ph == 6'd63) begin
+                    if (ptst_idx == 3'd3) ptst_done <= 1'b1;  // beep armado; queda sonando
+                    else ptst_idx <= ptst_idx + 3'd1;
+                end
+            end
+        end
+        else if (!psgtest_win && psgtest_win_d && ptst_done) begin
+            // fin de ventana: re-armar para la escritura de silencio (idx 4)
+            ptst_idx <= 3'd4; ptst_ph <= 6'd0; ptst_done <= 1'b0;
+        end
+        else if (!psgtest_win && !ptst_done && ptst_idx == 3'd4) begin
+            ptst_ph <= ptst_ph + 6'd1;
+            if      (ptst_ph < 6'd24) begin ptst_da <= ptst_reg; ptst_bdir <= 1'b1; ptst_bc1 <= 1'b1; end
+            else if (ptst_ph < 6'd48) begin ptst_da <= ptst_val; ptst_bdir <= 1'b1; ptst_bc1 <= 1'b0; end
+            else begin
+                ptst_bdir <= 1'b0; ptst_bc1 <= 1'b0;
+                if (ptst_ph == 6'd63) ptst_done <= 1'b1;
+            end
+        end
+    end
+    wire ptst_active = (psgtest_win && !ptst_done) || (!psgtest_win && !ptst_done && ptst_idx == 3'd4);
+
     YM2149 psg1 (
-        .I_DA(cpu_dout),
+        .I_DA(ptst_active ? ptst_da : cpu_dout),
         .O_DA(),
         .O_DA_OE_L(),
         .I_A9_L(0),
         .I_A8(1),
-        .I_BDIR(psgBdir),
+        .I_BDIR(ptst_active ? ptst_bdir : psgBdir),
         .I_BC2(1),
-        .I_BC1(psgBc1),
+        .I_BC1(ptst_active ? ptst_bc1 : psgBc1),
         .I_SEL_L(1),
         .O_AUDIO(psgSound1),
         .I_IOA(psgPA),
@@ -2958,11 +3019,16 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod0[3] = ~dbg_m1act_led;     // LED ON = CPU ejecutando (M1); OFF = congelada
     assign dbg_pmod0[4] = bus_int_n;          // LED ON = LINEA INT ASERTADA (fijo=TORMENTA de int)
 
-    // v2.3: alineador eliminado; PMOD1 apagado
-    assign dbg_pmod1[0] = 1'b1;
-    assign dbg_pmod1[1] = 1'b1;
-    assign dbg_pmod1[2] = 1'b1;
-    assign dbg_pmod1[3] = 1'b1;
+    // r10 (_30dbg): CADENA DEL PSG en PMOD1
+    wire dbg_psgwr_led, dbg_psgout_led;
+    led_stretch #(.HOLD(2000000)) dbg_st_psgwr (
+        .clk(clk_54m), .rst_n(1'b1), .trig(psgBdir), .active(dbg_psgwr_led));
+    led_stretch #(.HOLD(2000000)) dbg_st_psgout (
+        .clk(clk_54m), .rst_n(1'b1), .trig(|psgSound1), .active(dbg_psgout_led));
+    assign dbg_pmod1[0] = ~dbg_psgwr_led;     // LED ON = la CPU esta ESCRIBIENDO al PSG
+    assign dbg_pmod1[1] = ~clk_1m8;           // parpadeo rapido (se ve medio-encendido) = ENA vivo
+    assign dbg_pmod1[2] = ~dbg_psgout_led;    // LED ON = el PSG SACA amplitud != 0
+    assign dbg_pmod1[3] = psgtest_win ? 1'b0 : 1'b1;  // ON = ventana de beep (1s-3s tras reset)
     assign dbg_pmod1[4] = 1'b1;
     assign dbg_pmod1[5] = 1'b1;
 
