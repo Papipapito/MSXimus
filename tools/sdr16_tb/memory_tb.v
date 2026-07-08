@@ -331,6 +331,24 @@ module memory_tb;
         end
         $display("T7 MG2/refresh OK (refresh en idle: +%0d)", refc1 - refc0);
 
+        // ---- T8: GUARDIA anti-inanicion del refresh (bug SCREEN 3) ----
+        // vram_write ATASCADO a nivel 1 sostenido (lo que hace el modo
+        // multicolor): sin la guardia, el refresh se moria de hambre y la
+        // SDRAM se descargaba en segundos. Con la guardia debe FORZARSE un
+        // refresh cada <=32 ventanas saltadas.
+        refc0 = sdram.refresh_count;
+        bus_rfsh_n = 0;
+        vram_write = 1;                       // nivel atascado (escenario MC)
+        repeat (4096) @(posedge clk108);      // ~512 ventanas
+        vram_write = 0;
+        bus_rfsh_n = 1;
+        refc1 = sdram.refresh_count;
+        if (refc1 - refc0 < 4) begin
+            errors = errors + 1;
+            $display("FAIL T8: guardia no forzo refresh con vram_write atascado (%0d -> %0d)", refc0, refc1);
+        end
+        $display("T8 guardia anti-inanicion OK (+%0d refresh con vram_write atascado)", refc1 - refc0);
+
         // ---- resumen ----
         $display("---------------------------------------------");
         $display("stats modelo: writes=%0d reads=%0d refresh=%0d",
