@@ -21,6 +21,9 @@
 //  -use_jtag_as_gpio 1). Mecánica C64Nano cableada en top.v: jtagseln =
 //  clock_locked & ~bl616_jtagsel (el BL616 reclama JTAG subiendo su línea;
 //  PULL_UP = sin firmware companion la placa queda reprogramable por JTAG).
+// Reloj SPI del companion en red local (como C64Nano console60k): mcu_spi_new
+// clockea FFs directamente con spi_sclk (13.33 MHz del BL616).
+CLOCK_LOC "spi_sclk" LOCAL_CLOCK;
 NET_LOC   "jtagseln" V_JTAGSELN;
 IO_PORT   "jtagseln" PULL_MODE=DOWN IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
 IO_LOC    "bl616_jtagsel" V14;
