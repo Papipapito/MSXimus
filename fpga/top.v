@@ -2925,13 +2925,43 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod0[1] = ~ram_busy;          // LED ON = ram_busy activo (fijo=arbitro atascado)
     assign dbg_pmod0[2] = dbg_intdiv[5];      // PARPADEO ~1Hz = interrupciones VDP vivas
     assign dbg_pmod0[3] = ~dbg_m1act_led;     // LED ON = CPU ejecutando (M1); OFF = congelada
-    assign dbg_pmod0[4] = 1'b1;               // apagado
-    assign dbg_pmod1[0] = 1'b1;               // apagados (no mirar PMOD1)
-    assign dbg_pmod1[1] = 1'b1;
-    assign dbg_pmod1[2] = 1'b1;
-    assign dbg_pmod1[3] = 1'b1;
-    assign dbg_pmod1[4] = 1'b1;
-    assign dbg_pmod1[5] = 1'b1;
+    assign dbg_pmod0[4] = bus_int_n;          // LED ON = LINEA INT ASERTADA (fijo=TORMENTA de int)
+
+    // r8 (_24dbg): MEDIDOR DE FASE 27<->54 (riesgo CLKDIV/5: fase no determinista
+    // frente al 54 del PLLA; el arbitro y los waits muestrean DH/DL desde 54M).
+    // PMOD1[1..4] = ventana de 4 muestras de VideoDHClk capturada al flanco de
+    // subida de VideoDLClk (vista desde 54M): el CODIGO de LEDs = la fase real.
+    // Apuntar el codigo y comprobar si CAMBIA entre encendidos.
+    reg [1:0] dbg_dh_s = 0, dbg_dl_s = 0;
+    reg [3:0] dbg_ph_win = 0, dbg_ph_code = 0;
+    reg [1:0] dbg_ph_cnt = 0;
+    reg dbg_ph_run = 0;
+    always @(posedge clk_54m) begin
+        dbg_dh_s <= {dbg_dh_s[0], VideoDHClk};
+        dbg_dl_s <= {dbg_dl_s[0], VideoDLClk};
+        if (dbg_dl_s == 2'b01 && !dbg_ph_run) begin
+            dbg_ph_run <= 1;
+            dbg_ph_cnt <= 0;
+        end
+        else if (dbg_ph_run) begin
+            dbg_ph_win <= {dbg_ph_win[2:0], dbg_dh_s[0]};
+            dbg_ph_cnt <= dbg_ph_cnt + 1'b1;
+            if (dbg_ph_cnt == 2'd3) begin
+                dbg_ph_run  <= 0;
+                dbg_ph_code <= {dbg_ph_win[2:0], dbg_dh_s[0]};
+            end
+        end
+    end
+    // ventanas de aceptacion del arbitro (dl&dh vistos a 54M) vivas
+    wire dbg_accept_led;
+    led_stretch #(.HOLD(1900000)) dbg_st_accept (
+        .clk(clk_54m), .rst_n(1'b1), .trig(dbg_dl_s[0] & dbg_dh_s[0]), .active(dbg_accept_led));
+    assign dbg_pmod1[0] = ~dbg_accept_led;    // LED ON = ventanas CPU (dl&dh) ocurriendo
+    assign dbg_pmod1[1] = ~dbg_ph_code[3];    // codigo de fase bit 3 (ON = 1)
+    assign dbg_pmod1[2] = ~dbg_ph_code[2];    // codigo de fase bit 2
+    assign dbg_pmod1[3] = ~dbg_ph_code[1];    // codigo de fase bit 1
+    assign dbg_pmod1[4] = ~dbg_ph_code[0];    // codigo de fase bit 0
+    assign dbg_pmod1[5] = 1'b1;               // apagado
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
