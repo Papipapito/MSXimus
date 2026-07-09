@@ -94,7 +94,9 @@ entity scc_wave2 is
         -- _46dbg: introspeccion de registros internos (¿aterrizan en GW5A?)
         dbg_vol_nz  : out   std_logic;  -- reg_vol_ch_a != 0
         dbg_sel_nz  : out   std_logic;  -- reg_ch_sel != 0
-        dbg_freq_nz : out   std_logic   -- reg_freq_ch_a != 0
+        dbg_freq_nz : out   std_logic;  -- reg_freq_ch_a != 0
+        -- _49dbg: prueba de AVANCE del puntero de onda del canal A
+        dbg_ptr_lsb : out   std_logic   -- LSB de ff_ptr_ch_a (togglea en cada avance)
     );
 end scc_wave2;
 
@@ -247,6 +249,12 @@ begin
     dbg_vol_nz  <= '1' when ( reg_vol_ch_a /= "0000" ) else '0';
     dbg_sel_nz  <= '1' when ( reg_ch_sel /= "00000" ) else '0';
     dbg_freq_nz <= '1' when ( reg_freq_ch_a /= "000000000000" ) else '0';
+
+    -- _49dbg: sonda de AVANCE del puntero ch.A. ff_ptr_ch_a(0) togglea en CADA
+    -- incremento del puntero (prueba freq->contador->puntero completa): con un
+    -- tono de ~440Hz el puntero avanza a ~14 kHz -> un detector de duty en LED
+    -- lo ve al ~50%. Congelado (sintoma de placa) = nivel fijo (duty 0/100%).
+    dbg_ptr_lsb <= ff_ptr_ch_a(0);
 
     ----------------------------------------------------------------
     -- tone generator
