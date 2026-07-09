@@ -1898,18 +1898,67 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // pasaba la sim pero NO sintetiza sonido en placa (panel _42dbg: LED4
     // apagado = chip sin oscilar, clase sim!=sintesis); queda como referencia
     // y para el TB.
+    // ===== _45dbg: BEEPER del SCC (sin CPU, patron del beeper PSG r10) =====
+    // De t=1s a siempre: escribe DIRECTO en los puertos del chip la secuencia
+    // completa (onda sierra ch1 + freq ~440Hz + vol 15 + canal ON) y deja la
+    // nota sostenida. PITA = chip+mixer+audio sanos -> el corte es la ENTREGA
+    // desde el bus (glue/req). MUDO = el chip no sintetiza en GW5A ni en su
+    // config nativa 27M. Escrituras a cadencia clkena real (8 ticks por fase).
+    reg [26:0] sccb_cnt = 27'd0;
+    always @(posedge clk_27m) begin
+        if (~bus_reset_n) sccb_cnt <= 27'd0;
+        else if (sccb_cnt != 27'h7FFFFFF) sccb_cnt <= sccb_cnt + 27'd1;
+    end
+    wire sccb_go = (sccb_cnt > 27'd27000000);   // arranca a t=1s
+    reg [5:0]  sccb_idx  = 6'd0;   // 32 bytes onda + freq(2) + vol + ch_sel = 36 pasos
+    reg [8:0]  sccb_ph   = 9'd0;   // fase por paso (req alto/bajo)
+    reg        sccb_done = 1'b0;
+    reg        sccb_req  = 1'b0;
+    reg [7:0]  sccb_adr  = 8'd0;
+    reg [7:0]  sccb_dat  = 8'd0;
+    wire [7:0] sccb_adr_w = (sccb_idx < 6'd32) ? {3'b000, sccb_idx[4:0]} :   // 9800-981F onda ch1
+                            (sccb_idx == 6'd32) ? 8'h80 :                    // freq ch1 low
+                            (sccb_idx == 6'd33) ? 8'h81 :                    // freq ch1 high
+                            (sccb_idx == 6'd34) ? 8'h8A : 8'h8F;             // vol ch1 / ch_sel
+    wire [7:0] sccb_dat_w = (sccb_idx < 6'd32) ? {sccb_idx[4:0], 3'b000} :   // sierra -128..+120
+                            (sccb_idx == 6'd32) ? 8'hFE :                    // N=0x0FE ~ 440Hz
+                            (sccb_idx == 6'd33) ? 8'h00 :
+                            (sccb_idx == 6'd34) ? 8'h0F : 8'h01;
+    always @(posedge clk_27m) begin
+        if (~bus_reset_n) begin
+            sccb_idx <= 6'd0; sccb_ph <= 9'd0; sccb_done <= 1'b0;
+            sccb_req <= 1'b0; sccb_adr <= 8'd0; sccb_dat <= 8'd0;
+        end
+        else if (sccb_go && !sccb_done) begin
+            sccb_ph <= sccb_ph + 9'd1;
+            if (sccb_ph < 9'd120) begin          // ~16 ticks clkena con req ALTO
+                sccb_adr <= sccb_adr_w; sccb_dat <= sccb_dat_w; sccb_req <= 1'b1;
+            end
+            else begin                            // req BAJO (hueco entre escrituras)
+                sccb_req <= 1'b0;
+                if (sccb_ph == 9'd239) begin
+                    sccb_ph <= 9'd0;
+                    if (sccb_idx == 6'd35) sccb_done <= 1'b1;  // nota queda sonando
+                    else sccb_idx <= sccb_idx + 6'd1;
+                end
+            end
+        end
+        else sccb_req <= 1'b0;
+    end
+    wire sccb_active = sccb_go && !sccb_done;
+
     scc_wave2 SccCh (
         .clk21m (clk_27m),          // v3.4 (_44): config EXACTA del TN20K (27M+cen27),
         .reset (~bus_reset_n),      //  segura desde v3.0 (27 EN FASE con 54, ya sin CLKDIV
         .clkena (clk_enable_3m6_27),//  arbitrario). El pipeline de mezcla del chip corre a
                                     //  reloj pleno SIN clkena: a 54M iba al DOBLE de su
                                     //  ritmo de diseño (panel _43: blips sin sostener).
-        .req ( scc_req),
+        .req (sccb_active ? sccb_req : scc_req),
         .ack (),
-        .wrt (scc_wrt),
-        .adr (bus_addr[7:0]),
+        .wrt (sccb_active ? sccb_req : scc_wrt),
+        .adr (sccb_active ? sccb_adr : bus_addr[7:0]),
         .dbi (scc_dout),
-        .dbo (cpu_dout),
+        .dbo (sccb_active ? sccb_dat : cpu_dout),
         .wave (scc_wav),
         .sccplus (scc_mode_plus)
     );
@@ -3133,10 +3182,26 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .trig(scc_req), .active(scc_dbg_req_act));                       // ~0.5s
     led_stretch #(.HOLD(27000000)) st_sccwrtr (.clk(clk_54m), .rst_n(bus_reset_n),
         .trig(scc_wrt && bus_addr[7]), .active(scc_dbg_wrtreg_act));     // escrituras 9880+ (regs freq/vol)
-    led_stretch #(.HOLD(27000000)) st_sccwav  (.clk(clk_54m), .rst_n(bus_reset_n),
-        .trig(scc_wav != 15'd0), .active(scc_dbg_wav_act));              // el chip oscila
-    led_stretch #(.HOLD(27000000)) st_sccterm (.clk(clk_27m), .rst_n(bus_reset_n),
-        .trig(scc_term != 16'd0), .active(scc_dbg_term_act));            // señal en el mixer
+    // v3.5 (_45dbg): LED4/6 pasan de stretch a DETECTOR DE DUTY — el stretch
+    // de 0.5s no distinguia tono sostenido de blips frecuentes (lectura _44:
+    // "todo iluminado" podia seguir siendo rafagas). ON solo si >50% de las
+    // muestras de la ventana de 0.5s son != 0 (un tono real da ~99%).
+    reg [24:0] sccd_win = 25'd0;
+    reg [24:0] sccd_wav_cnt = 25'd0, sccd_term_cnt = 25'd0;
+    reg sccd_wav_led = 1'b0, sccd_term_led = 1'b0;
+    always @(posedge clk_27m) begin
+        if (sccd_win == 25'd13500000) begin      // ventana 0.5s @27M
+            sccd_wav_led  <= (sccd_wav_cnt  > 25'd6750000);
+            sccd_term_led <= (sccd_term_cnt > 25'd6750000);
+            sccd_win <= 25'd0; sccd_wav_cnt <= 25'd0; sccd_term_cnt <= 25'd0;
+        end else begin
+            sccd_win <= sccd_win + 25'd1;
+            if (scc_wav  != 15'd0) sccd_wav_cnt  <= sccd_wav_cnt  + 25'd1;
+            if (scc_term != 16'd0) sccd_term_cnt <= sccd_term_cnt + 25'd1;
+        end
+    end
+    assign scc_dbg_wav_act  = sccd_wav_led;
+    assign scc_dbg_term_act = sccd_term_led;
     wire scc_dbg_en_act;
     led_stretch #(.HOLD(27000000)) st_sccen (.clk(clk_54m), .rst_n(bus_reset_n),
         .trig(dbg_scc_enable_w), .active(scc_dbg_en_act));   // v3.4: stretch (en juego destella)
