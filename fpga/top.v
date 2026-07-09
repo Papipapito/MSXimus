@@ -1783,7 +1783,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     
     reg x98h;
     reg xb8h;
-    always @ (posedge clk_27m) begin
+    always @ (posedge clk_54m) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
         x98h <= ( bus_addr[15:8] == 8'h98 ) ? 1 : 0;
         xb8h <= ( bus_addr[15:8] == 8'hB8 ) ? 1 : 0;
     end
@@ -1796,13 +1796,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     reg scc_enable_req3;
     reg scc_enable_req12;
     wire scc_enable_req;
-    always @ (posedge clk_27m) begin
+    always @ (posedge clk_54m) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
         scc_enable_req3 <= ( bus_addr[15:11] == 5'b10010 && bus_mreq_n == 0 && bus_wr_n == 0 && pri_slot_num[SD_SLOT] == 1 && exp_slotx_num[3] == 1 ) ? 1 : 0;
         scc_enable_req12 <= ( config_enable_megaram12 == 1 && bus_addr[15:11] == 5'b10010 && bus_mreq_n == 0 && bus_wr_n == 0 && pri_slot == config_megaram_slot ) ? 1 : 0;
     end
     assign scc_enable_req = scc_enable_req3 | scc_enable_req12;
 
-    always @ (posedge clk_27m or negedge bus_reset_n) begin
+    always @ (posedge clk_54m or negedge bus_reset_n) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
         if ( bus_reset_n == 0)
             scc_bank2 <= 8'h00;
         else begin
@@ -1821,7 +1821,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign scc_win = ( scc_mode_plus == 0 ) ? ( scc_enable & x98h )
                                             : ( sccplus_win_en & xb8h & ~scc_sound_disable );
 
-    always @ (posedge clk_27m) begin
+    always @ (posedge clk_54m) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
         scc_req3 <= ( config_enable_megaram3 == 1 && scc_win == 1 && bus_mreq_n == 0 && (bus_wr_n == 0 || bus_rd_n == 0 ) && pri_slot == config_megaram_slot && exp_slotx_num[3] == 1  ) ? 1 : 0;
         scc_req12 <= ( config_enable_megaram12 == 1 && (scc_sound_disable == 0 || scc_mode_plus == 1) && scc_win == 1 && bus_mreq_n == 0 && (bus_wr_n == 0 || bus_rd_n == 0 ) && pri_slot == config_megaram_slot ) ? 1 : 0;
     end
@@ -1917,7 +1917,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc2x_slot_hit;
     assign scc2x_slot_hit = ( config_enable_ghost_scc == 1 && pri_slot == scc2x_slot ) ? 1 : 0;
 
-    always @ (posedge clk_27m or negedge bus_reset_n) begin
+    always @ (posedge clk_54m or negedge bus_reset_n) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
         if (bus_reset_n == 0) begin
             scc2x_bank2 <= 8'h00;
             scc2x_bank3 <= 8'h00;
@@ -1938,7 +1938,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                                                : ( scc2x_bank3[7] & xb8h & ~scc2x_modeb[4] );
 
     reg scc2x_req;
-    always @ (posedge clk_27m) begin
+    always @ (posedge clk_54m) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
         scc2x_req <= ( scc2x_slot_hit == 1 && scc2x_win == 1 && bus_mreq_n == 0 && (bus_wr_n == 0 || bus_rd_n == 0) ) ? 1 : 0;
     end
     wire scc2x_wrt;
