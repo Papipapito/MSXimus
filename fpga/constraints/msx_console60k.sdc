@@ -91,7 +91,8 @@ set_false_path -from [get_clocks {clk_54m}] -to [get_pins {psg1/?*?/?*}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {psg2/?*?/?*}]
 # v3.0 BASE MINIMA: sn1 fuera del netlist -> excepcion retirada
 # set_false_path -from [get_clocks {clk_54m}] -to [get_pins {sn1/?*?/?*}]
-# v3.0 BASE MINIMA: opll fuera del netlist -> excepcion retirada
+# F3 (_38): OPLL de vuelta A 54M+cen (mismo dominio que el bus) -> la
+# excepcion 54->27 ya no aplica; sin excepciones: timing real y estricto.
 # set_false_path -from [get_clocks {clk_54m}] -to [get_pins {opll/?*?/?*?/CE}]
 # set_false_path -from [get_clocks {clk_54m}] -to [get_pins {uwifi/wait_o*/CE}]
 # set_false_path -from [get_clocks {clk_54m}] -to [get_pins {uwifi/my_tx_state*/CE}]

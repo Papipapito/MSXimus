@@ -15,7 +15,7 @@
 // v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
 `define VIDEO720
 //`define ENABLE_WIFI       // BASE MINIMA: WiFi/UART fuera
-//`define ENABLE_OPLL       // BASE MINIMA: OPLL (MSX-Music) fuera
+`define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 //`define ENABLE_SCC        // BASE MINIMA: SCC/SCC-I fuera (aparcado)
 //`define ENABLE_CONSOLE_SN // BASE MINIMA: SN76489 de consola fuera
 //`define ENABLE_TURBO      // BASE MINIMA: turbo F11/WSX fuera (turbo=0 fijo)
@@ -1809,8 +1809,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `ifdef ENABLE_OPLL
     jt2413 opll(
         .rst (~bus_reset_n),        // rst should be at least 6 clk&cen cycles long
-        .clk (clk_27m),        // CPU clock
-        .cen (clk_enable_3m6_27),        // optional clock enable, if not needed leave as 1'b1
+        .clk (clk_54m),        // F3/_38: OPLL a 54M+cen (patron smstang con el MISMO chip:
+        .cen (clk_enable_3m6_54),   //  bus mismo-dominio y fuera del arbol 27M — su carga
+                                    //  re-sorteaba el hold de la paleta del VDP)
         .din (cpu_dout),
         .addr (bus_addr[0]),
         .cs_n (opll_req_n),
