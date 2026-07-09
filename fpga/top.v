@@ -1948,12 +1948,29 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     end
     wire sccb_active = sccb_go && !sccb_done;
 
+    // ===== _49dbg: cen LOCAL para el SCC (bypass de la cadena de 8FF) =====
+    // Sospecha: clk_enable_3m6_27 (sincronizador de 8FF + edge detect) llega
+    // muerto/degenerado al chip en silicio (punteros congelados = salida DC).
+    // Este cen se genera AQUI, en 27M puro, con acumulador Bresenham:
+    // 27e6 * (477/3600) = 3.5775 MHz (jitter 1 ciclo — inaudible en sintesis
+    // de sonido). Si el SCC despierta con este cen, la cadena vieja es la
+    // culpable y este es ademas el FIX.
+    reg [11:0] scc_cen_acc = 12'd0;
+    reg        scc_cen_local = 1'b0;
+    always @(posedge clk_27m) begin
+        if (scc_cen_acc + 12'd477 >= 12'd3600) begin
+            scc_cen_acc   <= scc_cen_acc + 12'd477 - 12'd3600;
+            scc_cen_local <= 1'b1;
+        end else begin
+            scc_cen_acc   <= scc_cen_acc + 12'd477;
+            scc_cen_local <= 1'b0;
+        end
+    end
+
     scc_wave2 SccCh (
         .clk21m (clk_27m),          // v3.4 (_44): config EXACTA del TN20K (27M+cen27),
         .reset (~bus_reset_n),      //  segura desde v3.0 (27 EN FASE con 54, ya sin CLKDIV
-        .clkena (clk_enable_3m6_27),//  arbitrario). El pipeline de mezcla del chip corre a
-                                    //  reloj pleno SIN clkena: a 54M iba al DOBLE de su
-                                    //  ritmo de diseño (panel _43: blips sin sostener).
+        .clkena (scc_cen_local),    // _49dbg: cen LOCAL Bresenham (bypass de la cadena 8FF)
         .req (sccb_active ? sccb_req : scc_req),
         .ack (),
         .wrt (sccb_active ? sccb_req : scc_wrt),
@@ -2077,7 +2094,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     scc_wave2 SccCh2 (   // v3.4: idem SccCh — config TN20K (27M en fase)
         .clk21m (clk_27m),
         .reset (~bus_reset_n),
-        .clkena (clk_enable_3m6_27),
+        .clkena (scc_cen_local),    // _49dbg: cen local
         .req ( scc2x_req),
         .ack (),
         .wrt (scc2x_wrt),
@@ -3212,11 +3229,25 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_dbg_en_act;
     led_stretch #(.HOLD(27000000)) st_sccen (.clk(clk_54m), .rst_n(bus_reset_n),
         .trig(dbg_scc_enable_w), .active(scc_dbg_en_act));   // v3.4: stretch (en juego destella)
-    // _46dbg: LED1-3 ahora miran DENTRO del chip (¿aterrizan los registros?)
-    assign dbg_pmod1[0] = ~scc_dbg_vol_nz;        // LED1 ON = reg_vol_ch_a != 0 (volumen ATERRIZO)
-    assign dbg_pmod1[1] = ~scc_dbg_sel_nz;        // LED2 ON = reg_ch_sel != 0 (canal HABILITADO)
-    assign dbg_pmod1[2] = ~scc_dbg_freq_nz;       // LED3 ON = reg_freq_ch_a != 0 (frecuencia PUESTA)
-    assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = EL CHIP OSCILA sostenido (duty>50%)
+    // _49dbg: LED1/2 = vitalidad de los DOS cen; LED3 = registros; LED6 abajo = transiciones
+    reg [24:0] cenchk_win = 25'd0;
+    reg [21:0] cen27_pulses = 22'd0, cenloc_pulses = 22'd0;
+    reg cen27_alive = 1'b0, cenloc_alive = 1'b0;
+    always @(posedge clk_27m) begin
+        if (cenchk_win == 25'd13500000) begin
+            cen27_alive  <= (cen27_pulses  > 22'd100000);   // esperado ~1.79M/0.5s
+            cenloc_alive <= (cenloc_pulses > 22'd100000);
+            cenchk_win <= 25'd0; cen27_pulses <= 22'd0; cenloc_pulses <= 22'd0;
+        end else begin
+            cenchk_win <= cenchk_win + 25'd1;
+            if (clk_enable_3m6_27 && cen27_pulses  != 22'h3FFFFF) cen27_pulses  <= cen27_pulses + 22'd1;
+            if (scc_cen_local     && cenloc_pulses != 22'h3FFFFF) cenloc_pulses <= cenloc_pulses + 22'd1;
+        end
+    end
+    assign dbg_pmod1[0] = ~cen27_alive;           // LED1 ON = la cadena VIEJA de cen_27 pulsa
+    assign dbg_pmod1[1] = ~cenloc_alive;          // LED2 ON = el cen LOCAL pulsa (control)
+    assign dbg_pmod1[2] = ~scc_dbg_vol_nz;        // LED3 ON = volumen aterrizo (registros ok)
+    assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = duty scc_wav (nivel != 0 sostenido)
 `else
     assign dbg_pmod1[0] = ~dbg_psgwr_led;     // LED ON = la CPU esta ESCRIBIENDO al PSG
     assign dbg_pmod1[1] = ~clk_1m8;           // parpadeo rapido (se ve medio-encendido) = ENA vivo
@@ -3225,7 +3256,23 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `endif
 `ifdef SCC_DEBUG_PANEL
     assign dbg_pmod1[4] = ~sccb_done;             // LED5 ON = el BEEPER completo su secuencia
-    assign dbg_pmod1[5] = ~scc_dbg_term_act;      // LED6 ON = scc_term != 0 (señal EN el mixer)
+    // LED6 = TRANSICIONES de scc_wav: distingue TONO (miles de cambios/s) de
+    // DC CONGELADO (cero cambios) — la ambiguedad que nos tuvo a oscuras
+    reg [14:0] wavtr_prev = 15'd0;
+    reg [24:0] wavtr_win = 25'd0;
+    reg [15:0] wavtr_cnt = 16'd0;
+    reg wavtr_tone = 1'b0;
+    always @(posedge clk_27m) begin
+        wavtr_prev <= scc_wav;
+        if (wavtr_win == 25'd13500000) begin
+            wavtr_tone <= (wavtr_cnt > 16'd500);   // tono real: miles de transiciones/0.5s
+            wavtr_win <= 25'd0; wavtr_cnt <= 16'd0;
+        end else begin
+            wavtr_win <= wavtr_win + 25'd1;
+            if (scc_wav != wavtr_prev && wavtr_cnt != 16'hFFFF) wavtr_cnt <= wavtr_cnt + 16'd1;
+        end
+    end
+    assign dbg_pmod1[5] = ~wavtr_tone;            // LED6 ON = scc_wav CAMBIA (tono de verdad)
 `elsif ENABLE_USB_KBD
     assign dbg_pmod1[4] = ~(usb1_typ == 2'd1 || usb2_typ == 2'd1); // LED ON = teclado USB-A enumerado
     // v3.2: conerr solo con dispositivo enumerado — el puerto VACIO reintenta
