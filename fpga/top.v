@@ -1834,9 +1834,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign scc_rd_r = ( scc_req == 1 && bus_rd_n == 0 ) ? 1 : 0;
 
     scc_wave2 SccCh (
-        .clk21m (clk_27m),
-        .reset (~bus_reset_n),
-        .clkena (clk_enable_3m6_27),
+        .clk21m (clk_54m),          // v2.5: SCC en 54M (bus mismo dominio;
+        .reset (~bus_reset_n),      //  a 27M la fase CLKDIV lo dejaba mudo)
+        .clkena (clk_enable_3m6_54),
         .req ( scc_req),
         .ack (),
         .wrt (scc_wrt),
@@ -1950,9 +1950,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [14:0] scc2x_wav;
 
     scc_wave2 SccCh2 (
-        .clk21m (clk_27m),
+        .clk21m (clk_54m),          // v2.5: idem SccCh
         .reset (~bus_reset_n),
-        .clkena (clk_enable_3m6_27),
+        .clkena (clk_enable_3m6_54),
         .req ( scc2x_req),
         .ack (),
         .wrt (scc2x_wrt),
@@ -1978,8 +1978,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                      (console_mode == 2'b10 && bus_addr[7:5] == 3'b111) ) ) ? 1 : 0;
     wire [13:0] sn_sound;
     sn76489 sn1 (
-        .clk        (clk_27m),
-        .clk_en_3m6 (clk_enable_3m6_27),
+        .clk        (clk_54m),      // v2.5: idem (Coleco/SG-1000)
+        .clk_en_3m6 (clk_enable_3m6_54),
         .reset_n    (bus_reset_n),
         .wr         (sn_wr),
         .din        (cpu_dout),
