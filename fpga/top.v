@@ -1893,12 +1893,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     );
 
 `ifdef ENABLE_SCC
-    // FIX SCC 60K: scc_wave2v (Verilog puro, src/scc_wave2v.v) sustituye al
-    // scc_wave2 VHDL: la sintesis GW5A barria su multiplicador interno u_mul
-    // ("scc_wave_mul ... swept in optimizing", NL0002 x2 en TODOS los builds
-    // _20.._34, con chip a 27M o 54M) => mezclador muerto => mudo con
-    // readback de wave RAM OK. Ver cabecera de src/scc_wave2v.v.
-    scc_wave2v SccCh (
+    // v3.3 (_43): VUELTA al chip VHDL probado del TN20K con el multiplicador
+    // inline (fix del sweep DENTRO de scc_wave2.vhd). El scc_wave2v traducido
+    // pasaba la sim pero NO sintetiza sonido en placa (panel _42dbg: LED4
+    // apagado = chip sin oscilar, clase sim!=sintesis); queda como referencia
+    // y para el TB.
+    scc_wave2 SccCh (
         .clk21m (clk_54m),          // v2.5: SCC en 54M (bus mismo dominio;
         .reset (~bus_reset_n),      //  a 27M la fase CLKDIV lo dejaba mudo)
         .clkena (clk_enable_3m6_54),
@@ -2019,8 +2019,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [14:0] scc2x_wav;
 
 `ifdef ENABLE_SCC
-    // FIX SCC 60K: idem SccCh — chip Verilog puro (ver src/scc_wave2v.v)
-    scc_wave2v SccCh2 (
+    scc_wave2 SccCh2 (   // v3.3: idem SccCh — chip VHDL con producto inline
         .clk21m (clk_54m),          // v2.5: idem SccCh
         .reset (~bus_reset_n),
         .clkena (clk_enable_3m6_54),

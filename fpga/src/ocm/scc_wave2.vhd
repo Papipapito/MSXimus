@@ -75,6 +75,7 @@ end rtl;
 library ieee;
     use ieee.std_logic_1164.all;
     use ieee.std_logic_unsigned.all;
+    use ieee.std_logic_arith.all;   -- FIX GW5A (_43): signed() para el producto inline
 
 entity scc_wave2 is
     port(
@@ -123,6 +124,7 @@ architecture rtl of scc_wave2 is
     signal w_ch_vol         : std_logic_vector(  3 downto 0 );
     signal w_wave           : std_logic_vector(  7 downto 0 );
     signal w_mul            : std_logic_vector( 11 downto 0 );
+    signal w_mul_s          : signed( 12 downto 0 );            -- FIX GW5A (_43)
     signal ram_dbi          : std_logic_vector(  7 downto 0 );
     signal lpf1_wave        : std_logic_vector( 14 downto 0 );
     signal lpf2_wave        : std_logic_vector( 14 downto 0 );
@@ -396,12 +398,16 @@ begin
 
     w_wave  <=  (w_ch_mask and ff_wave_dat);        -- 8bit 二の補数
 
-    u_mul: scc_wave_mul
-    port map (
-        a   => w_wave   ,   -- 8bit 二の補数
-        b   => w_ch_vol ,   -- 4bit バイナリ（符号無し）
-        c   => w_mul        -- 12bit 二の補数
-    );
+    -- FIX GW5A (v3.3/_43): la sintesis de Gowin BARRIA la entity scc_wave_mul
+    -- ("swept in optimizing", NL0002, en TODOS los builds GW5A) => mezclador
+    -- muerto con wave RAM viva (readback OK + mudo). Producto INLINE con la
+    -- semantica EXACTA de la entity (std_logic_signed: a * ('0' & b), 13 bits,
+    -- se toman los 12 LSB). El chip vuelve a ser el VHDL probado del TN20K;
+    -- solo desaparece la frontera de entity que el optimizador barria.
+    -- (senal intermedia tipada SIGNED: desambigua los dos overloads de "*"
+    --  de std_logic_arith — EX4948 si se asigna via conversion directa)
+    w_mul_s     <= signed(w_wave) * signed('0' & w_ch_vol);
+    w_mul       <= std_logic_vector(w_mul_s( 11 downto 0 ));
 
     -- -------------------------------------------------------------
     --  ff_ch_num   X 0   X 1   X 2   X 3   X 4   X 5   X 0
