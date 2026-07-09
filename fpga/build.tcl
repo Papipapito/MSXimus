@@ -123,6 +123,11 @@ add_file tn_vdp_v3_v9958/src/vdp/vdp_vga.vhd
 add_file tn_vdp_v3_v9958/src/vdp/vdp_wait_control.vhd
 add_file tn_vdp_v3_v9958/src/vdp/vencode.vhd
 
+# ----- v3.0 FASE 1-REDUX: video 720p (cadena monitorcore + puente ring-BRAM) -----
+add_file video720/plla/pll_27.v
+add_file video720/plla/pll_74.v
+add_file video720/msx2hdmi.sv
+
 # ----- Constraints (nuevos del 60K — verificar matches>0 tras el 1er PnR) -----
 add_file constraints/msx_console60k.cst
 add_file constraints/msx_console60k.sdc
@@ -131,7 +136,7 @@ add_file constraints/msx_console60k.sdc
 # MSPI+CPU=flash compartida; DONE/READY=los 2 LEDs onboard (como C64Nano).
 set_option -use_sspi_as_gpio 1 -use_mspi_as_gpio 1 -use_jtag_as_gpio 1 -use_cpu_as_gpio 1 -use_done_as_gpio 1 -use_ready_as_gpio 1 -top_module top -verilog_std sysv2017 -include_path src
 set_option -place_option 2
-set_option -route_option 2
+set_option -route_option 1
 
 run syn
 run pnr

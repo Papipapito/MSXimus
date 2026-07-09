@@ -1,11 +1,18 @@
 `define GW_IDE
+// v3.0 FASE 1-REDUX: video 720p por puente ring-BRAM. ⚠ Este define existe
+// TAMBIEN en top.v (unidades de compilacion distintas) — mantener SINCRONIZADOS.
+`define VIDEO720
 
 module v9958_top(
     input   clk,
     input   clk_50,
     input   clk_125,
-    input   clk_135,        // 135 MHz TMDS x5 (GW5A port: fed by a second Gowin_PLL in the top; replaces the internal CLK_135 rPLL)
+    input   clk_135,        // 135 MHz TMDS x5 (legacy 480p; sin uso con VIDEO720)
     input   clk_135_lock,   // lock of that PLL (replaces the old CLK_135 .lock output, used in the reset chain)
+`ifdef VIDEO720
+    input   clk_hdmi,       // v3.0: 74.25 MHz pixel 720p (pll_74 en el top)
+    input   clk_hdmi5,      // v3.0: 371.25 MHz TMDS x5
+`endif
     output  wire [5:0] dbg_video,  // DEBUG bring-up 60K r2: {reset_w, video_reset, tick_pal, tick_ntsc, vdp_hdmi_reset, pal_mode}
  //   input   clk_111,
 
@@ -368,6 +375,38 @@ module v9958_top(
     assign cpuclk = cpuclk_ena_n ? 1'bz :  cpuclk_w;
 //////////
 
+`ifdef VIDEO720
+    // ================================================================
+    // v3.0 FASE 1-REDUX: video 720p desacoplado (video720/msx2hdmi.sv).
+    // El VDP pinta a 27M con sus contadores propios (vdp_cx/vdp_cy) y el
+    // puente captura al ring BRAM dual-clock; el HDMI corre libre a
+    // 74.25/371.25 (dominio asincrono) y NO depende del MSX para dar
+    // señal. El bloque legacy 480p entero queda en el `else.
+    // ================================================================
+    assign cx = 10'd0;      // consumidores legacy (scanlin dvi_*): inertes
+    assign cy = 10'd0;
+    assign dbg_video = {reset_w, 1'b0, 1'b0, 1'b0, vdp_hdmi_reset, pal_mode};
+
+    msx2hdmi u_msx2hdmi (
+        .clk         (clk_w),
+        .resetn      (reset_n_w),
+        .r           (VideoR),
+        .g           (VideoG),
+        .b           (VideoB),
+        .vdp_cx      (vdp_cx),
+        .vdp_cy      (vdp_cy),
+        .pal_mode    (pal_mode),
+        .audio_l     (audio_sample),
+        .audio_r     (audio_sample_r),
+        .clk_pixel   (clk_hdmi),
+        .clk_5x_pixel(clk_hdmi5),
+        .tmds_clk_p  (tmds_clk_p),
+        .tmds_clk_n  (tmds_clk_n),
+        .tmds_d_p    (tmds_data_p),
+        .tmds_d_n    (tmds_data_n)
+    );
+
+`else
     reg ff_video_reset;
 
     localparam NTSC_Y = 525-45;
@@ -521,6 +560,7 @@ module v9958_top(
         .O({tmds_clk_p, tmds_data_p}),
         .OB({tmds_clk_n, tmds_data_n})
     );
+`endif  // VIDEO720 (fin del bloque legacy 480p)
 
 ////////////////////
 

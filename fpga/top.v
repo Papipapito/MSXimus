@@ -9,7 +9,16 @@
 //`define ENABLE_WAIT_ADAPTIVE //wait required
 `define ENABLE_M1_WAIT //STANDALONE: 1 wait-state per M1 opcode fetch (the real-MSX brake). Comment out to disable.
 //`define SWAP23
-`define ENABLE_WIFI
+// ============ v3.0 BASE MINIMA (Fase 1-REDUX, 2026-07-09) ============
+// Video 720p por puente BRAM (video720/msx2hdmi.sv) + subsistemas fuera.
+// IMPORTANTE: VIDEO720 tambien esta `define'd en tn_vdp_v3_v9958/src/
+// v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
+`define VIDEO720
+//`define ENABLE_WIFI       // BASE MINIMA: WiFi/UART fuera
+//`define ENABLE_OPLL       // BASE MINIMA: OPLL (MSX-Music) fuera
+//`define ENABLE_SCC        // BASE MINIMA: SCC/SCC-I fuera (aparcado)
+//`define ENABLE_CONSOLE_SN // BASE MINIMA: SN76489 de consola fuera
+//`define ENABLE_TURBO      // BASE MINIMA: turbo F11/WSX fuera (turbo=0 fijo)
 
 module top
 #(
@@ -150,9 +159,10 @@ end
         .clkin  (ex_clk_27m),   // ⚠ en la Console 60K este pin lleva 50 MHz (V22)
         .clkout0(clk_108m),     // 108.000000 MHz (fraccional, exacto)
         .clkout1(clk_54m),      //  54.000000 MHz
-        .clkout2(),             // 27 del PLLA NO usable: el OSER10 exige el par
-                                //  PCLK/FCLK del CLKDIV (verificado en placa: _28 con
-                                //  27-PLLA = HDMI muerto). El CLKDIV vuelve abajo.
+        .clkout2(clk_27m),      // v3.0: 27M del PLLA (fase CONOCIDA vs 54/108, como el
+                                //  rPLL del TN20K). Ya NO alimenta ningun OSER10 (el
+                                //  TMDS vive a 74.25/371.25 en pll_74) -> la restriccion
+                                //  que motivo el CLKDIV desaparece con el video 720p.
         .clkout3(clk_135),      // 135.000000 MHz (TMDS; sustituye al CLK_135 del tn_vdp)
         .lock   (clock_locked),
         .mdclk  (ex_clk_27m)    // reloj de init del PLLA (secuencia mDRP)
@@ -167,35 +177,27 @@ end
     // Su fase vs 54M es arbitraria -> NADA con bus de CPU debe clockear a 27M:
     // el PSG se movio al dominio 54M (v2.4); el arbitro DH/DL queda como unico
     // frente de fase pendiente (F11) — plan B: cruce en el linebuffer.
-    // v3.0 (fiabilidad HDMI, bug "1 de cada 5 arranques"): el CLKDIV no debe
-    // dividir la basura que saca la PLLA durante el trimming MDRP de PLL_INIT
-    // (~1 ms). Patron nestang (console60k): CLKDIV en reset hasta lock
-    // FILTRADO + 255 ciclos de 135M; si el lock cae (PLL_INIT reintenta con
-    // otro trim), vuelve a reset y rearranca -> PCLK/FCLK nacen limpios
-    // SIEMPRE. El RESET de los OSER10 pasa a 0 fijo (serializer.sv), como en
-    // nestang y z8086: el realineado del gearbox 1:5 lo provoca este reset
-    // del CLKDIV, no el pin RESET del serializador.
-    reg [1:0] lock_s135       = 2'b00;   // 2FF: lock (dominio mdclk 50M) -> 135M
-    reg [7:0] clkdiv_boot_cnt = 8'd0;
-    reg       clkdiv_resetn   = 1'b0;
-    always @(posedge clk_135) begin
-        lock_s135 <= {lock_s135[0], clock_locked};
-        if (!lock_s135[1]) begin
-            clkdiv_boot_cnt <= 8'd0;
-            clkdiv_resetn   <= 1'b0;
-        end else if (clkdiv_boot_cnt != 8'hFF) begin
-            clkdiv_boot_cnt <= clkdiv_boot_cnt + 8'd1;
-            clkdiv_resetn   <= 1'b0;
-        end else begin
-            clkdiv_resetn   <= 1'b1;
-        end
-    end
-
-    CLKDIV #(.DIV_MODE(5)) div5_video (
-        .CLKOUT(clk_27m),
-        .HCLKIN(clk_135),
-        .RESETN(clkdiv_resetn),
-        .CALIB(1'b0)
+    // ================================================================
+    // v3.0 FASE 1-REDUX: cadena de video 720p CALCADA de monitorcore
+    // (la plantilla oficial de nand2mario para esta placa, validada por
+    // Albert 10/10 arranques compilada con NUESTRA toolchain). Cascada
+    // 50(pad) -> pll_27 -> 27 -> pll_74 -> 74.25 (pixel) + 371.25 (x5
+    // TMDS), PLLA crudas identicas a las suyas. El CLKDIV desaparece:
+    // clk_27m del MSX sale ahora del PLLA principal (clkout2, arriba) y
+    // el HDMI ya no comparte NADA con el arbol del MSX — el cruce es
+    // solo el ring BRAM dual-clock + toggles 2FF de msx2hdmi.
+    // ================================================================
+    wire clk27_video;           // 27M intermedio de la cascada (SOLO alimenta pll_74)
+    wire clk_hdmi;              // 74.25 MHz pixel 720p
+    wire clk_hdmi5;             // 371.25 MHz TMDS x5
+    pll_27 pll27_video (
+        .clkin  (ex_clk_27m),   // pad 50 MHz
+        .clkout0(clk27_video)
+    );
+    pll_74 pll74_video (
+        .clkin  (clk27_video),
+        .clkout0(clk_hdmi),
+        .clkout1(clk_hdmi5)
     );
 
     // JTAG→SPI del companion (estilo C64Nano): los pines JTAG se entregan al
@@ -962,22 +964,28 @@ assign keyboard_addr = ppi_port_c[3:0];
 `endif
             )
             turbo <= turbo_req;
+`ifdef ENABLE_TURBO
         if (f11_s1 & ~f11_prev)     // rising edge = F11 pressed
             turbo_req <= ~turbo_req; // toggle real-MSX <-> turbo
+`endif
         // v1.9: control software Panasonic — OUT &H41,n con el dispositivo 8
         // seleccionado (decode pana41_wr junto al bloque config). bit0 activo-bajo:
         // 0 = turbo 5.37 MHz, 1 = 3.58. Puesto tras el F11: si coinciden en el
         // mismo ciclo gana el software (en el T9769 real el puerto es el unico control).
+`ifdef ENABLE_TURBO
         if (pana41_wr)
             turbo_req <= ~cpu_dout[0];
+`endif
         // v1.9: "Boot Turbo" persistido (ajuste del menu, puerto #45). Siembra el
         // turbo durante la ventana config_init del stream de flash: config_init y
         // config_sig son dominio clk_54m (sin CDC) y config_sig[4] ya esta cargado
         // cuando la ventana abre (se carga con last_bytes_cnt==2). Va el ULTIMO del
         // bloque: domina sobre F11/puerto durante el boot (no disparan ahi de todos
         // modos). Con S2 (rescate) arranca SIEMPRE a 3.58.
+`ifdef ENABLE_TURBO
         if (config_init)
             turbo_req <= (!s2_press && config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
+`endif
     end
 
     // ===== v1.9 Panasonic-WSX turbo: 5.37 MHz CPU cadence =====
@@ -1281,6 +1289,7 @@ assign keyboard_addr = ppi_port_c[3:0];
 
 `endif
 
+    //logo ROM: SIEMPRE (v3.0 — estaba atrapado en ENABLE_WIFI; es del menu, no del WiFi)
 `ifdef ENABLE_WIFI
 
     //wifi driver
@@ -1288,6 +1297,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     always @ (posedge clk_54m) begin
         wifi_req <= ( console_mode == 2'b00 && bus_mreq_n == 0 && bus_rd_n == 0 && page_num[1] == 1 && pri_slot_num[0] == 1 && exp_slot0_num[2] == 1 ) ? 1 : 0;
     end
+`endif
 
     //logo ROM (FREE16KB del pack @0x7C000) en slot 0-3 pagina 1: pantalla de
     //marca del menu (rutina+imagen autocontenidas; el menu la llama con CALLF)
@@ -1296,6 +1306,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         logo_req <= ( console_mode == 2'b00 && bus_mreq_n == 0 && bus_rd_n == 0 && page_num[1] == 1 && pri_slot_num[0] == 1 && exp_slot0_num[3] == 1 ) ? 1 : 0;
     end
 
+`ifdef ENABLE_WIFI
     //uart
     wire uart_req;
     wire wait_uart;
@@ -1359,8 +1370,12 @@ assign keyboard_addr = ppi_port_c[3:0];
 
     v9958_top vdp4 (
         .clk (clk_27m),
-        .clk_135 (clk_135),           // TMDS x5 desde el Gowin_PLL (CLKOUT3)
+        .clk_135 (clk_135),           // legado (sin uso con VIDEO720)
         .clk_135_lock (clock_locked), // mismo PLL -> mismo lock (antes: lock del CLK_135 propio)
+`ifdef VIDEO720
+        .clk_hdmi  (clk_hdmi),        // v3.0: pixel 720p 74.25 (pll_74, cascada monitorcore)
+        .clk_hdmi5 (clk_hdmi5),       // v3.0: TMDS x5 371.25
+`endif
         .dbg_video (dbg_video_w),     // sondas de video del bring-up
         .s1 (0),
         .clk_50 (0),
@@ -1518,8 +1533,10 @@ assign keyboard_addr = ppi_port_c[3:0];
                         (kanji_data_ram_req == 1 ) ? { 5'b11100, kanji_data_ram_addr[17:0] } : //bank D
                 `ifdef ENABLE_WIFI
                         (wifi_req == 1 ) ? { 9'b111011110, bus_addr[13:0] } : //bank D
-                        (logo_req == 1 ) ? { 9'b111011111, bus_addr[13:0] } : //bank D (pack 0x7C000)
                 `endif
+                        // logo SIEMPRE (v3.0): estaba atrapado en ENABLE_WIFI y sin WiFi
+                        // se perdia la pantalla de marca del menu
+                        (logo_req == 1 ) ? { 9'b111011111, bus_addr[13:0] } : //bank D (pack 0x7C000)
                         23'h7fffff; 
     
     assign ram_read = (~flash_idle) ? 0 : 
@@ -1692,7 +1709,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             end
         end
     end
-    wire ptst_active = (psgtest_win && !ptst_done) || (!psgtest_win && !ptst_done && ptst_idx == 3'd4);
+    // v3.0 BASE MINIMA: beeper de diagnostico DESARMADO (el PSG quedo absuelto
+    // en la ronda 9; el FSM queda arriba por si hiciera falta re-armarlo).
+    wire ptst_active = 1'b0;
+    // wire ptst_active = (psgtest_win && !ptst_done) || (!psgtest_win && !ptst_done && ptst_idx == 3'd4);
 
     YM2149 psg1 (
         .I_DA(ptst_active ? ptst_da : cpu_dout),
@@ -1782,6 +1802,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 
     assign opll_req_n = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b0111110  &&  bus_wr_n == 1'b0 )  ? 1'b0 : 1'b1;    // I/O:7C-7Dh   / OPLL (YM2413)
   
+`ifdef ENABLE_OPLL
     jt2413 opll(
         .rst (~bus_reset_n),        // rst should be at least 6 clk&cen cycles long
         .clk (clk_27m),        // CPU clock
@@ -1793,7 +1814,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         // combined output
         .snd (jt2413_wav),
         .sample   ( )
-    ); 
+    );
+`else
+    assign jt2413_wav = 16'd0;      // BASE MINIMA v3.0: OPLL fuera
+`endif
 
     //scc & ghost scc
     wire [14:0] scc_wav;
@@ -1857,6 +1881,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_rd_r;
     assign scc_rd_r = ( scc_req == 1 && bus_rd_n == 0 ) ? 1 : 0;
 
+`ifdef ENABLE_SCC
     scc_wave2 SccCh (
         .clk21m (clk_54m),          // v2.5: SCC en 54M (bus mismo dominio;
         .reset (~bus_reset_n),      //  a 27M la fase CLKDIV lo dejaba mudo)
@@ -1870,6 +1895,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wave (scc_wav),
         .sccplus (scc_mode_plus)
     );
+`else
+    assign scc_wav  = 15'd0;        // BASE MINIMA v3.0: SCC fuera (aparcado)
+    assign scc_dout = 8'hFF;
+`endif
 
     reg scc2_req3;
     reg scc2_req12;
@@ -1973,6 +2002,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0] scc2x_dout;
     wire [14:0] scc2x_wav;
 
+`ifdef ENABLE_SCC
     scc_wave2 SccCh2 (
         .clk21m (clk_54m),          // v2.5: idem SccCh
         .reset (~bus_reset_n),
@@ -1986,6 +2016,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wave (scc2x_wav),
         .sccplus (scc2x_modeb[5])
     );
+`else
+    assign scc2x_wav  = 15'd0;      // BASE MINIMA v3.0: SCC-I fuera
+    assign scc2x_dout = 8'hFF;
+`endif
 
     //mixer (L = PSG1+SCC1+OPLL, R = PSG2+SCC2+OPLL; mono = everything on both sides)
 	reg [15:0] audio_sample;
@@ -2001,6 +2035,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                      (console_mode == 2'b01 && bus_addr[7:1] == 7'b0111111) ||
                      (console_mode == 2'b10 && bus_addr[7:5] == 3'b111) ) ) ? 1 : 0;
     wire [13:0] sn_sound;
+`ifdef ENABLE_CONSOLE_SN
     sn76489 sn1 (
         .clk        (clk_54m),      // v2.5: idem (Coleco/SG-1000)
         .clk_en_3m6 (clk_enable_3m6_54),
@@ -2009,6 +2044,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .din        (cpu_dout),
         .sound      (sn_sound)
     );
+`else
+    assign sn_sound = 14'd0;        // BASE MINIMA v3.0: SN76489 consola fuera
+`endif
     wire [15:0] sn_term;
     assign sn_term = (console_mode != 2'b00) ? { 1'b0, sn_sound, 1'b0 } : 16'd0;
 
@@ -3062,7 +3100,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire kana_on  = keyboard[106];                        // CODE/KANA key held (Left Alt)
     wire joy_on   = (|joystick0[5:0]) | (|joystick1[5:0]);
     wire kbd_raw  = |keyboard;                            // any key held
+`ifdef ENABLE_WIFI
     wire wifi_raw = ~uart_tx | ~uart_rx;                  // WiFi UART active (idle = high)
+`else
+    wire wifi_raw = 1'b0;                                 // BASE MINIMA: WiFi fuera
+`endif
 
     wire disk_act, wifi_act, kbd_act;
     led_stretch #(.HOLD(1350000)) st_disk (.clk(clk_27m), .rst_n(bus_reset_n), .trig(sd_busy_w), .active(disk_act)); // ~50ms

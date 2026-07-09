@@ -21,17 +21,28 @@ create_clock -name clk_in -period 20.000 [get_ports {ex_clk_27m}]
 create_clock -name clk_108m -period 9.260  [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT0}]
 create_clock -name clk_54m  -period 18.520 [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT1}]
 create_clock -name clk_135m -period 7.408  [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT3}]
-# v2.4: clk_27m del CLKDIV/5 otra vez (el OSER10 exige ese par; _28 en placa
-# lo demostro). Su fase vs 54M es ARBITRARIA: nada con bus de CPU a 27M.
-create_generated_clock -name clk_27m -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT3}] -master_clock clk_135m -divide_by 5 [get_pins {div5_video/CLKOUT}]
+# v3.0: clk_27m del PLLA (CLKOUT2) — fase CONOCIDA vs 54/108 (mismo VCO, como
+# el rPLL del TN20K). El CLKDIV desaparecio con el video 720p: ya no hay OSER10
+# a 27M. La STA asume flancos alineados en t=0 entre los base clocks del PLLA,
+# que es la realidad fisica tras el lock de PLL_INIT (disciplina TN20K).
+create_clock -name clk_27m -period 37.040 [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}]
+
+# ---- v3.0 relojes de VIDEO 720p (cascada monitorcore, dominio propio) ----
+create_clock -name clk27_video -period 37.037 [get_pins {pll27_video/PLLA_inst/CLKOUT0}]
+create_clock -name clk_hdmi    -period 13.468 [get_pins {pll74_video/PLLA_inst/CLKOUT0}]
+create_clock -name clk_hdmi5   -period  2.694 [get_pins {pll74_video/PLLA_inst/CLKOUT1}]
 
 # ---- Relojes derivados/gated del diseño (intencion del SDC del TN20K) ----
 # bus_reset_n y clk_audio clockean FFs propios (gated); VideoDH/DLClk (÷2/÷4 de
 # 27) fasan el secuenciador de memoria.
 create_clock -name clock_reset -period 277.778 [get_nets {bus_reset_n}] -add
-create_clock -name clock_audio -period 277.778 [get_nets {vdp4/clk_audio}] -add
-create_generated_clock -name clock_VideoDHClk -source [get_pins {div5_video/CLKOUT}] -master_clock clk_27m -divide_by 2 [get_nets {VideoDHClk}] -add
-create_generated_clock -name clock_VideoDLClk -source [get_pins {div5_video/CLKOUT}] -master_clock clk_27m -divide_by 4 [get_nets {VideoDLClk}] -add
+# v3.0 VIDEO720: clk_audio = divisor a 44.1 kHz dentro de msx2hdmi. El
+# packet_picker de hdl-util cruza clk_audio<->clk_pixel con SU PROPIO handshake
+# (audio_sample_word_transfer) tolerante a fase — mismo caso que la false_path
+# del SDC viejo. Se declara y se agrupa ASINCRONO (ambas direcciones).
+create_clock -name clock_audio -period 22675.737 [get_nets {vdp4/u_msx2hdmi/clk_audio}] -add
+create_generated_clock -name clock_VideoDHClk -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}] -master_clock clk_27m -divide_by 2 [get_nets {VideoDHClk}] -add
+create_generated_clock -name clock_VideoDLClk -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}] -master_clock clk_27m -divide_by 4 [get_nets {VideoDLClk}] -add
 
 # ---- Reloj SPI del BL616 onboard (resuelve el hueco TA1132 del TN20K) ----
 create_clock -name spi_sclk -period 50.000 [get_ports {spi_sclk}]
@@ -40,7 +51,10 @@ create_clock -name spi_sclk -period 50.000 [get_ports {spi_sclk}]
 # por este clock-group (el mux spi_ext del dock ya no existe). clock_audio se
 # queda SIN agrupar (sincrono a 27, como en el TN20K; su unico path critico
 # tiene false_path abajo).
-set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m clock_VideoDHClk clock_VideoDLClk}] -group [get_clocks {clock_reset}]
+set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m clock_VideoDHClk clock_VideoDLClk}] -group [get_clocks {clock_reset}] -group [get_clocks {clk27_video clk_hdmi clk_hdmi5}] -group [get_clocks {clock_audio}]
+# v3.0: el grupo de video 720p es ASINCRONO al arbol del MSX por construccion:
+# los unicos cruces son la BRAM dual-clock del ring, los toggles 2FF y el audio
+# 2FF de msx2hdmi (patron smstang/486tang).
 
 # ============================================================================
 #  EXCEPCIONES portadas del Z80_goauld.sdc del TN20K (misma justificacion de
@@ -75,10 +89,12 @@ set_false_path -from [get_clocks {clk_54m}] -to [get_pins {ocm_ports/?*?/CE}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {ocm_ports/?*?/D}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {psg1/?*?/?*}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {psg2/?*?/?*}]
-set_false_path -from [get_clocks {clk_54m}] -to [get_pins {sn1/?*?/?*}]
-set_false_path -from [get_clocks {clk_54m}] -to [get_pins {opll/?*?/?*?/CE}]
-set_false_path -from [get_clocks {clk_54m}] -to [get_pins {uwifi/wait_o*/CE}]
-set_false_path -from [get_clocks {clk_54m}] -to [get_pins {uwifi/my_tx_state*/CE}]
+# v3.0 BASE MINIMA: sn1 fuera del netlist -> excepcion retirada
+# set_false_path -from [get_clocks {clk_54m}] -to [get_pins {sn1/?*?/?*}]
+# v3.0 BASE MINIMA: opll fuera del netlist -> excepcion retirada
+# set_false_path -from [get_clocks {clk_54m}] -to [get_pins {opll/?*?/?*?/CE}]
+# set_false_path -from [get_clocks {clk_54m}] -to [get_pins {uwifi/wait_o*/CE}]
+# set_false_path -from [get_clocks {clk_54m}] -to [get_pins {uwifi/my_tx_state*/CE}]
 
 # --- Sprite engine del VDP: cruce 108->27 protegido por fase (dh/dl) ---
 set_false_path -from [get_clocks {clk_108m}] -to [get_pins {vdp4/u_v9958/U_SPRITE/SPRENDERPLANES*/CE}]
@@ -89,7 +105,8 @@ set_false_path -from [get_clocks {clk_108m}] -to [get_pins {vdp4/u_v9958/U_SPRIT
 set_false_path -from [get_clocks {clk_108m}] -to [get_pins {vdp4/u_v9958/U_SPRITE/FF_Y_TEST_LISTUP_ADDR_*/CE}]
 
 # --- HDMI audio packet (transferencia con handshake propio) ---
-set_false_path -from [get_clocks {clk_27m}] -to [get_pins {vdp4/hdmi_ntsc/true_hdmi_output.packet_picker/audio_sample_word_transfer?*?/D}]
+# v3.0 VIDEO720: el audio cruza 54M->74.25 dentro de msx2hdmi (grupo asincrono) -> retirada
+# set_false_path -from [get_clocks {clk_27m}] -to [get_pins {vdp4/hdmi_ntsc/...audio_sample_word_transfer.../D}]
 
 # --- Presupuestos de cruce con disciplina de fase (del TN20K) ---
 # ⚠️ LECCION (F11/turbo 60K): los caminos strobes del Z80 -> FSM de waits y
@@ -116,7 +133,8 @@ set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_addr*/
 set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/ram_busy*/*}] 27.0
 set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {state_wait_*/*}] 27.0
 set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 27.0
-set_false_path -from [get_pins {cpu1/IORQ_n_i_s0/Q}] -to [get_pins {uwifi/qckbase_cnt*/CE}]
+# v3.0 BASE MINIMA: uwifi fuera -> excepcion retirada
+# set_false_path -from [get_pins {cpu1/IORQ_n_i_s0/Q}] -to [get_pins {uwifi/qckbase_cnt*/CE}]
 # cpu_din: 18.2 en el TN20K (guia de PnR para su congestion). El requisito real
 # es el protocolo del bus Z80 (3.58MHz + waits, cientos de ns); en GW5A el
 # placement del T80 varia y 18.2 fallaba por ~0.3ns -> 27.0 (1.5 periodos).
@@ -129,7 +147,8 @@ set_max_delay -from [get_pins {mem1/vram_dout_*/Q}] -to [get_clocks {clk_27m}] 1
 # reset del CLKDIV (div5_video), gated por el lock filtrado de PLL_INIT.
 # lock_s135 es un sincronizador 2FF: clock_locked (dominio mdclk 50M del
 # PLL_INIT) -> dominio 135M. Cruce asincrono por construccion.
-set_false_path -to [get_pins {lock_s135_0_*/D}]
+# v3.0: lock_s135 eliminado con el CLKDIV -> retirada
+# set_false_path -to [get_pins {lock_s135_0_*/D}]
 
 # --- SD: registros de comando/sector cuasi-estaticos ---
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_cd_*/D}] -setup -end 2
