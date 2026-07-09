@@ -47,6 +47,7 @@ add_file jtopl/jtopll_reg.v
 add_file jtopl/jtopll_reg_ch.v
 add_file src/flash_rw.v
 add_file src/megaram.v
+add_file src/scc_wave2_ghdl.v
 add_file src/scc_glue.v
 add_file src/scc_wave2v.v
 add_file src/sn76489.v
@@ -100,7 +101,9 @@ add_file denoise/denoise.vhd
 add_file monostable/monostable.vhd
 add_file src/ocm/fifo.vhd
 add_file src/ocm/lpf.vhd
-add_file src/ocm/scc_wave2.vhd
+# v3.6 (_47): scc_wave2 ahora entra como VERILOG generado por GHDL (abajo);
+# el .vhd queda en el arbol como fuente de verdad (regenerar con GHDL al tocarlo)
+# add_file src/ocm/scc_wave2.vhd
 add_file src/ocm/swioports.vhd
 add_file src/ocm/uart_lite.vhd
 add_file src/ocm/wifi_lite.vhd
