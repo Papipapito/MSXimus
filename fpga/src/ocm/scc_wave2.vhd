@@ -89,8 +89,12 @@ entity scc_wave2 is
         dbi         : out   std_logic_vector( 7 downto 0 );
         dbo         : in    std_logic_vector( 7 downto 0 );
         wave        : out   std_logic_vector( 14 downto 0 );
-        sccplus     : in    std_logic   -- 0 = SCC compat (regs at x80-x9F, ch.E mirrors ch.D)
+        sccplus     : in    std_logic;  -- 0 = SCC compat (regs at x80-x9F, ch.E mirrors ch.D)
                                         -- 1 = SCC+ (ch.E own wave at x80-x9F, regs at xA0-xBF)
+        -- _46dbg: introspeccion de registros internos (¿aterrizan en GW5A?)
+        dbg_vol_nz  : out   std_logic;  -- reg_vol_ch_a != 0
+        dbg_sel_nz  : out   std_logic;  -- reg_ch_sel != 0
+        dbg_freq_nz : out   std_logic   -- reg_freq_ch_a != 0
     );
 end scc_wave2;
 
@@ -238,6 +242,11 @@ begin
     w_wave_ce   <= '1'  when( req = '1' and ff_req_dl = '0' )else '0';
     w_wave_we   <= wrt  when( req = '1' and ff_req_dl = '0' )else '0';
     ack     <= ff_req_dl;
+
+    -- _46dbg: espejos de estado interno para el panel de LEDs
+    dbg_vol_nz  <= '1' when ( reg_vol_ch_a /= "0000" ) else '0';
+    dbg_sel_nz  <= '1' when ( reg_ch_sel /= "00000" ) else '0';
+    dbg_freq_nz <= '1' when ( reg_freq_ch_a /= "000000000000" ) else '0';
 
     ----------------------------------------------------------------
     -- tone generator

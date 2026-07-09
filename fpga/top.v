@@ -1868,6 +1868,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_gate_req12;
     wire scc_snd_dis_w;
     wire dbg_scc_enable_w;   // panel _42dbg (declarado ANTES del uso — leccion EX3638)
+    wire scc_dbg_vol_nz, scc_dbg_sel_nz, scc_dbg_freq_nz;   // _46dbg (idem)
     scc_glue sccglue1 (
         .clk (clk_54m),             // v2.6: glue SCC a 54M (bus mismo dominio)
         .reset_n (bus_reset_n),
@@ -1960,7 +1961,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .dbi (scc_dout),
         .dbo (sccb_active ? sccb_dat : cpu_dout),
         .wave (scc_wav),
-        .sccplus (scc_mode_plus)
+        .sccplus (scc_mode_plus),
+        .dbg_vol_nz (scc_dbg_vol_nz),
+        .dbg_sel_nz (scc_dbg_sel_nz),
+        .dbg_freq_nz (scc_dbg_freq_nz)
     );
 `else
     assign scc_wav  = 15'd0;        // BASE MINIMA v3.0: SCC fuera (aparcado)
@@ -2081,7 +2085,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .dbi (scc2x_dout),
         .dbo (cpu_dout),
         .wave (scc2x_wav),
-        .sccplus (scc2x_modeb[5])
+        .sccplus (scc2x_modeb[5]),
+        .dbg_vol_nz (),
+        .dbg_sel_nz (),
+        .dbg_freq_nz ()
     );
 `else
     assign scc2x_wav  = 15'd0;      // BASE MINIMA v3.0: SCC-I fuera
@@ -3205,10 +3212,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_dbg_en_act;
     led_stretch #(.HOLD(27000000)) st_sccen (.clk(clk_54m), .rst_n(bus_reset_n),
         .trig(dbg_scc_enable_w), .active(scc_dbg_en_act));   // v3.4: stretch (en juego destella)
-    assign dbg_pmod1[0] = ~scc_dbg_en_act;        // LED1 ON = ventana SCC abierta (bank2==3F, ~0.5s)
-    assign dbg_pmod1[1] = ~scc_dbg_req_act;       // LED2 ON = accesos llegando a la ventana
-    assign dbg_pmod1[2] = ~scc_dbg_wrtreg_act;    // LED3 ON = escrituras de REGISTROS (freq/vol)
-    assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = EL CHIP OSCILA (scc_wav != 0)
+    // _46dbg: LED1-3 ahora miran DENTRO del chip (¿aterrizan los registros?)
+    assign dbg_pmod1[0] = ~scc_dbg_vol_nz;        // LED1 ON = reg_vol_ch_a != 0 (volumen ATERRIZO)
+    assign dbg_pmod1[1] = ~scc_dbg_sel_nz;        // LED2 ON = reg_ch_sel != 0 (canal HABILITADO)
+    assign dbg_pmod1[2] = ~scc_dbg_freq_nz;       // LED3 ON = reg_freq_ch_a != 0 (frecuencia PUESTA)
+    assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = EL CHIP OSCILA sostenido (duty>50%)
 `else
     assign dbg_pmod1[0] = ~dbg_psgwr_led;     // LED ON = la CPU esta ESCRIBIENDO al PSG
     assign dbg_pmod1[1] = ~clk_1m8;           // parpadeo rapido (se ve medio-encendido) = ENA vivo
@@ -3216,7 +3224,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod1[3] = psgtest_win ? 1'b0 : 1'b1;  // ON = ventana de beep (1s-3s tras reset)
 `endif
 `ifdef SCC_DEBUG_PANEL
-    assign dbg_pmod1[4] = ~(map_sel == 2'b10);    // LED5 ON = gate del mixer abierto (modo SCC)
+    assign dbg_pmod1[4] = ~sccb_done;             // LED5 ON = el BEEPER completo su secuencia
     assign dbg_pmod1[5] = ~scc_dbg_term_act;      // LED6 ON = scc_term != 0 (señal EN el mixer)
 `elsif ENABLE_USB_KBD
     assign dbg_pmod1[4] = ~(usb1_typ == 2'd1 || usb2_typ == 2'd1); // LED ON = teclado USB-A enumerado
