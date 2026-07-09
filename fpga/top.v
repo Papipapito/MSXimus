@@ -17,7 +17,7 @@
 //`define ENABLE_WIFI       // BASE MINIMA: WiFi/UART fuera
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
-//`define ENABLE_SCC        // BASE MINIMA: SCC/SCC-I fuera (aparcado)
+`define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 //`define ENABLE_CONSOLE_SN // BASE MINIMA: SN76489 de consola fuera
 //`define ENABLE_TURBO      // BASE MINIMA: turbo F11/WSX fuera (turbo=0 fijo)
 
@@ -1839,66 +1839,51 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [14:0] scc_wav;
     wire [7:0] scc_dout;
     wire scc_req;
-    reg scc_req3;
     wire scc_req3_r;
-    reg scc_req12;
-
     wire scc_wrt;
-    
-    reg x98h;
-    reg xb8h;
-    always @ (posedge clk_54m) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
-        x98h <= ( bus_addr[15:8] == 8'h98 ) ? 1 : 0;
-        xb8h <= ( bus_addr[15:8] == 8'hB8 ) ? 1 : 0;
-    end
+    wire x98h;
+    wire xb8h;
+    wire scc_rd_r;
 
     // SCC-I mode signals (from megaram1, declared here as they gate the sound window)
     wire scc_mode_plus;     // BFFE bit5: 1 = SCC+ layout active
     wire sccplus_win_en;    // SCC+ window enabled (mode bit5 + bank3 bit7)
 
-    reg [7:0] scc_bank2;
-    reg scc_enable_req3;
-    reg scc_enable_req12;
-    wire scc_enable_req;
-    always @ (posedge clk_54m) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
-        scc_enable_req3 <= ( bus_addr[15:11] == 5'b10010 && bus_mreq_n == 0 && bus_wr_n == 0 && pri_slot_num[SD_SLOT] == 1 && exp_slotx_num[3] == 1 ) ? 1 : 0;
-        scc_enable_req12 <= ( config_enable_megaram12 == 1 && bus_addr[15:11] == 5'b10010 && bus_mreq_n == 0 && bus_wr_n == 0 && pri_slot == config_megaram_slot ) ? 1 : 0;
-    end
-    assign scc_enable_req = scc_enable_req3 | scc_enable_req12;
-
-    always @ (posedge clk_54m or negedge bus_reset_n) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
-        if ( bus_reset_n == 0)
-            scc_bank2 <= 8'h00;
-        else begin
-            if (scc_enable_req == 1 ) begin
-                scc_bank2 <= cpu_dout;
-            end
-        end
-    end
-
-    wire scc_enable;
-    assign scc_enable = ( scc_bank2 == 8'h3f ) ? 1 : 0;
-
-    // Sound window: compat = 9800-98FF (bank2==3F, mode bit5=0);
-    // SCC+ = B800-B8FF (mode bit5=1 + bank3 bit7, sound not disabled)
-    wire scc_win;
-    assign scc_win = ( scc_mode_plus == 0 ) ? ( scc_enable & x98h )
-                                            : ( sccplus_win_en & xb8h & ~scc_sound_disable );
-
-    always @ (posedge clk_54m) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
-        scc_req3 <= ( config_enable_megaram3 == 1 && scc_win == 1 && bus_mreq_n == 0 && (bus_wr_n == 0 || bus_rd_n == 0 ) && pri_slot == config_megaram_slot && exp_slotx_num[3] == 1  ) ? 1 : 0;
-        scc_req12 <= ( config_enable_megaram12 == 1 && (scc_sound_disable == 0 || scc_mode_plus == 1) && scc_win == 1 && bus_mreq_n == 0 && (bus_wr_n == 0 || bus_rd_n == 0 ) && pri_slot == config_megaram_slot ) ? 1 : 0;
-    end
-    assign scc_req = scc_req3 | scc_req12;
-    assign scc_req3_r = ( scc_req3 == 1 && bus_rd_n == 0 ) ? 1 : 0;
-    assign scc_wrt = ( scc_req == 1 && bus_wr_n == 0 ) ? 1 : 0;
-
-    // Wave-RAM read-back (SCC detection by trackers/SCC+ software). Any-window read strobe.
-    wire scc_rd_r;
-    assign scc_rd_r = ( scc_req == 1 && bus_rd_n == 0 ) ? 1 : 0;
+    // Glue de ventana/banco/strobes EXTRAIDO VERBATIM a src/scc_glue.v (fix
+    // SCC): mismo fichero compartido con tools/scc_tb, semantica identica al
+    // bloque inline v2.6 que habia aqui (solo los terminos de config/slot
+    // pasan como entradas). Siempre instanciado, como antes (con ENABLE_SCC
+    // off el chip queda fuera pero la ventana sigue respondiendo FF).
+    scc_glue sccglue1 (
+        .clk (clk_54m),             // v2.6: glue SCC a 54M (bus mismo dominio)
+        .reset_n (bus_reset_n),
+        .bus_addr (bus_addr),
+        .cpu_dout (cpu_dout),
+        .bus_mreq_n (bus_mreq_n),
+        .bus_wr_n (bus_wr_n),
+        .bus_rd_n (bus_rd_n),
+        .gate_bank2_wr3 ( pri_slot_num[SD_SLOT] == 1 && exp_slotx_num[3] == 1 ),
+        .gate_bank2_wr12 ( config_enable_megaram12 == 1 && pri_slot == config_megaram_slot ),
+        .gate_req3 ( config_enable_megaram3 == 1 && pri_slot == config_megaram_slot && exp_slotx_num[3] == 1 ),
+        .gate_req12 ( config_enable_megaram12 == 1 && pri_slot == config_megaram_slot ),
+        .scc_mode_plus (scc_mode_plus),
+        .sccplus_win_en (sccplus_win_en),
+        .scc_sound_disable (scc_sound_disable),
+        .scc_req (scc_req),
+        .scc_wrt (scc_wrt),
+        .scc_req3_r (scc_req3_r),
+        .scc_rd_r (scc_rd_r),
+        .x98h (x98h),
+        .xb8h (xb8h)
+    );
 
 `ifdef ENABLE_SCC
-    scc_wave2 SccCh (
+    // FIX SCC 60K: scc_wave2v (Verilog puro, src/scc_wave2v.v) sustituye al
+    // scc_wave2 VHDL: la sintesis GW5A barria su multiplicador interno u_mul
+    // ("scc_wave_mul ... swept in optimizing", NL0002 x2 en TODOS los builds
+    // _20.._34, con chip a 27M o 54M) => mezclador muerto => mudo con
+    // readback de wave RAM OK. Ver cabecera de src/scc_wave2v.v.
+    scc_wave2v SccCh (
         .clk21m (clk_54m),          // v2.5: SCC en 54M (bus mismo dominio;
         .reset (~bus_reset_n),      //  a 27M la fase CLKDIV lo dejaba mudo)
         .clkena (clk_enable_3m6_54),
@@ -2019,7 +2004,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [14:0] scc2x_wav;
 
 `ifdef ENABLE_SCC
-    scc_wave2 SccCh2 (
+    // FIX SCC 60K: idem SccCh — chip Verilog puro (ver src/scc_wave2v.v)
+    scc_wave2v SccCh2 (
         .clk21m (clk_54m),          // v2.5: idem SccCh
         .reset (~bus_reset_n),
         .clkena (clk_enable_3m6_54),
@@ -3118,7 +3104,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod1[3] = psgtest_win ? 1'b0 : 1'b1;  // ON = ventana de beep (1s-3s tras reset)
 `ifdef ENABLE_USB_KBD
     assign dbg_pmod1[4] = ~(usb1_typ == 2'd1 || usb2_typ == 2'd1); // LED ON = teclado USB-A enumerado
-    assign dbg_pmod1[5] = ~(usb1_conerr | usb2_conerr);            // LED ON = error de protocolo USB
+    // v3.2: conerr solo con dispositivo enumerado — el puerto VACIO reintenta
+    // cada 200ms y parpadeaba el LED sin que fuera un error (veredicto _39)
+    assign dbg_pmod1[5] = ~((usb1_conerr && usb1_typ != 2'd0) | (usb2_conerr && usb2_typ != 2'd0));
 `else
     assign dbg_pmod1[4] = 1'b1;
     assign dbg_pmod1[5] = 1'b1;

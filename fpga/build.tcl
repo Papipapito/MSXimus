@@ -47,6 +47,8 @@ add_file jtopl/jtopll_reg.v
 add_file jtopl/jtopll_reg_ch.v
 add_file src/flash_rw.v
 add_file src/megaram.v
+add_file src/scc_glue.v
+add_file src/scc_wave2v.v
 add_file src/sn76489.v
 add_file src/memory.v
 add_file src/ocm/kanji.v
