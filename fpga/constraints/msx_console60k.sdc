@@ -32,6 +32,9 @@ create_clock -name clk27_video -period 37.037 [get_pins {pll27_video/PLLA_inst/C
 create_clock -name clk_hdmi    -period 13.468 [get_pins {pll74_video/PLLA_inst/CLKOUT0}]
 create_clock -name clk_hdmi5   -period  2.694 [get_pins {pll74_video/PLLA_inst/CLKOUT1}]
 
+# ---- F3 (_39): reloj del soft-host USB (teclado USB-A directo) ----
+create_clock -name clk_usb12 -period 83.333 [get_pins {pll12_usb/PLLA_inst/CLKOUT0}]
+
 # ---- Relojes derivados/gated del diseño (intencion del SDC del TN20K) ----
 # bus_reset_n y clk_audio clockean FFs propios (gated); VideoDH/DLClk (÷2/÷4 de
 # 27) fasan el secuenciador de memoria.
@@ -51,7 +54,7 @@ create_clock -name spi_sclk -period 50.000 [get_ports {spi_sclk}]
 # por este clock-group (el mux spi_ext del dock ya no existe). clock_audio se
 # queda SIN agrupar (sincrono a 27, como en el TN20K; su unico path critico
 # tiene false_path abajo).
-set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m clock_VideoDHClk clock_VideoDLClk}] -group [get_clocks {clock_reset}] -group [get_clocks {clk27_video clk_hdmi clk_hdmi5}] -group [get_clocks {clock_audio}]
+set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m clock_VideoDHClk clock_VideoDLClk}] -group [get_clocks {clock_reset}] -group [get_clocks {clk27_video clk_hdmi clk_hdmi5}] -group [get_clocks {clock_audio}] -group [get_clocks {clk_usb12}]
 # v3.0: el grupo de video 720p es ASINCRONO al arbol del MSX por construccion:
 # los unicos cruces son la BRAM dual-clock del ring, los toggles 2FF y el audio
 # 2FF de msx2hdmi (patron smstang/486tang).

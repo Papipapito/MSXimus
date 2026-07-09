@@ -171,3 +171,10 @@ IO_LOC  "IO_sdram_dq[15]" B16; IO_PORT "IO_sdram_dq[15]" IO_TYPE=LVCMOS33;
 //  ---- DDR3 onboard (SK Hynix H5TQ4G63EFR, 512MB) — FASE 2 (framebuffer) ----
 //  Hard-IP: sin IO_LOC. Se generará su IP cuando toque el frontend gráfico
 //  (estilo nand2mario/ddr3_framebuffer_gowin, 297MHz/refresh-off). Ver DDR3_WRAPPER.md.
+
+// ===== F3 (_39): USB-A directos al fabric (verificado en tangcore console.cst;
+// el esquematico de Sipeed esta MAL — la verdad es el .cst). Pulldowns 15K en placa.
+IO_LOC "usb1_dp" H13; IO_PORT "usb1_dp" IO_TYPE=LVCMOS33;
+IO_LOC "usb1_dn" G13; IO_PORT "usb1_dn" IO_TYPE=LVCMOS33;
+IO_LOC "usb2_dp" M15; IO_PORT "usb2_dp" IO_TYPE=LVCMOS33;
+IO_LOC "usb2_dn" M16; IO_PORT "usb2_dn" IO_TYPE=LVCMOS33;

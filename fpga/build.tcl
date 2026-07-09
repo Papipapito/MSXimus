@@ -128,6 +128,11 @@ add_file video720/plla/pll_27.v
 add_file video720/plla/pll_74.v
 add_file video720/msx2hdmi.sv
 
+# ----- F3 (_39): teclado USB-A directo (usb_hid_host de nand2mario + decoder) -----
+add_file src/usb_direct/usb_hid_host.v
+add_file src/usb_direct/pll_12.v
+add_file src/usb_direct/usb_kbd_decode.v
+
 # ----- Constraints (nuevos del 60K — verificar matches>0 tras el 1er PnR) -----
 add_file constraints/msx_console60k.cst
 add_file constraints/msx_console60k.sdc

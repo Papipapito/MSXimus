@@ -16,6 +16,7 @@
 `define VIDEO720
 //`define ENABLE_WIFI       // BASE MINIMA: WiFi/UART fuera
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
+`define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 //`define ENABLE_SCC        // BASE MINIMA: SCC/SCC-I fuera (aparcado)
 //`define ENABLE_CONSOLE_SN // BASE MINIMA: SN76489 de consola fuera
 //`define ENABLE_TURBO      // BASE MINIMA: turbo F11/WSX fuera (turbo=0 fijo)
@@ -89,6 +90,16 @@ module top
 
     //usb uart
     output wire usb_uart_tx,
+
+`ifdef ENABLE_USB_KBD
+    // F3 (_39): los 2 USB-A de la Console 60K van DIRECTOS al fabric
+    // (H13/G13, M15/M16 — verificado en los .cst de TangCore; el esquematico
+    // de Sipeed esta mal). Soft-host low-speed 1.5Mbps por puerto.
+    inout wire usb1_dp,
+    inout wire usb1_dn,
+    inout wire usb2_dp,
+    inout wire usb2_dn,
+`endif
 
     // Magic ports for SDRAM to be inferred
     output wire O_sdram_clk,
@@ -3105,8 +3116,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod1[1] = ~clk_1m8;           // parpadeo rapido (se ve medio-encendido) = ENA vivo
     assign dbg_pmod1[2] = ~dbg_psgout_led;    // LED ON = el PSG SACA amplitud != 0
     assign dbg_pmod1[3] = psgtest_win ? 1'b0 : 1'b1;  // ON = ventana de beep (1s-3s tras reset)
+`ifdef ENABLE_USB_KBD
+    assign dbg_pmod1[4] = ~(usb1_typ == 2'd1 || usb2_typ == 2'd1); // LED ON = teclado USB-A enumerado
+    assign dbg_pmod1[5] = ~(usb1_conerr | usb2_conerr);            // LED ON = error de protocolo USB
+`else
     assign dbg_pmod1[4] = 1'b1;
     assign dbg_pmod1[5] = 1'b1;
+`endif
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
@@ -3144,6 +3160,73 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 
     // ===== STANDALONE MERGE: USB host (BL616 FPGA Companion) — from MSXnano =====
     wire [127:0] keyboard;
+`ifdef ENABLE_USB_KBD
+    // F3 (_39): teclado por USB-A directo (usb_hid_host de nand2mario, la
+    // version 2025 de snestang/tangcore con retry). Un host por puerto A;
+    // el bitmap resultante se OR-ea con el del companion BL616 (que sigue
+    // funcionando por su USB-C+hub): las dos fuentes conviven, como en
+    // gbatang. Solo teclado en esta pieza; gamepads USB-A = pieza futura.
+    wire        clk_usb12;
+    wire        pll12_lock;
+    pll_12 pll12_usb (
+        .clkin  (ex_clk_27m),       // pad 50 MHz
+        .clkout0(clk_usb12),        // 12.000 MHz (VCO 900, generada para GW5AT-60)
+        .lock   (pll12_lock)
+    );
+    wire [1:0] usb1_typ, usb2_typ;
+    wire       usb1_report, usb2_report;
+    wire       usb1_conerr, usb2_conerr;
+    wire [7:0] usb1_mods, usb1_k1, usb1_k2, usb1_k3, usb1_k4;
+    wire [7:0] usb2_mods, usb2_k1, usb2_k2, usb2_k3, usb2_k4;
+    usb_hid_host usb_host1 (
+        .usbclk (clk_usb12), .usbrst_n (pll12_lock),
+        .usb_dm (usb1_dn), .usb_dp (usb1_dp),
+        .typ (usb1_typ), .report (usb1_report), .conerr (usb1_conerr),
+        .key_modifiers (usb1_mods),
+        .key1 (usb1_k1), .key2 (usb1_k2), .key3 (usb1_k3), .key4 (usb1_k4),
+        .mouse_btn (), .mouse_dx (), .mouse_dy (),
+        .game_snes (), .game_l (), .game_r (), .game_u (), .game_d (),
+        .game_a (), .game_b (), .game_x (), .game_y (), .game_sel (), .game_sta (),
+        .game_lb (), .game_rb (),
+        .dbg_hid_report ()
+    );
+    usb_hid_host usb_host2 (
+        .usbclk (clk_usb12), .usbrst_n (pll12_lock),
+        .usb_dm (usb2_dn), .usb_dp (usb2_dp),
+        .typ (usb2_typ), .report (usb2_report), .conerr (usb2_conerr),
+        .key_modifiers (usb2_mods),
+        .key1 (usb2_k1), .key2 (usb2_k2), .key3 (usb2_k3), .key4 (usb2_k4),
+        .mouse_btn (), .mouse_dx (), .mouse_dy (),
+        .game_snes (), .game_l (), .game_r (), .game_u (), .game_d (),
+        .game_a (), .game_b (), .game_x (), .game_y (), .game_sel (), .game_sta (),
+        .game_lb (), .game_rb (),
+        .dbg_hid_report ()
+    );
+    wire [127:0] kbd_usb1, kbd_usb2;
+    usb_kbd_decode dec_usb1 (
+        .clk12 (clk_usb12), .rst_n (pll12_lock),
+        .typ (usb1_typ), .report (usb1_report), .mods (usb1_mods),
+        .k1 (usb1_k1), .k2 (usb1_k2), .k3 (usb1_k3), .k4 (usb1_k4),
+        .bitmap (kbd_usb1)
+    );
+    usb_kbd_decode dec_usb2 (
+        .clk12 (clk_usb12), .rst_n (pll12_lock),
+        .typ (usb2_typ), .report (usb2_report), .mods (usb2_mods),
+        .k1 (usb2_k1), .k2 (usb2_k2), .k3 (usb2_k3), .k4 (usb2_k4),
+        .bitmap (kbd_usb2)
+    );
+    // cruce 12M -> 27M: bits cuasi-estaticos (pulsaciones de ms), 2FF por bit
+    reg [127:0] kbd_usb_s1 = 128'd0, kbd_usb_s2 = 128'd0;
+    always @(posedge clk_27m) begin
+        kbd_usb_s1 <= kbd_usb1 | kbd_usb2;
+        kbd_usb_s2 <= kbd_usb_s1;
+    end
+    wire [127:0] keyboard_spi;
+    assign keyboard = keyboard_spi | kbd_usb_s2;
+`else
+    wire [127:0] keyboard_spi;
+    assign keyboard = keyboard_spi;
+`endif
     fpga_companion fpga_companion_inst
     (
         .clk (clk_27m),
@@ -3155,7 +3238,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .spi_dat (spi_dat),
         .spi_irqn (spi_irqn),
 
-        .keyboard (keyboard),
+        .keyboard (keyboard_spi),
         .joystick0 (joystick0),
         .joystick0_console (),
         .joystick1 (joystick1),
