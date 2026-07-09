@@ -1867,6 +1867,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_gate_req3;
     wire scc_gate_req12;
     wire scc_snd_dis_w;
+    wire dbg_scc_enable_w;   // panel _42dbg (declarado ANTES del uso — leccion EX3638)
     scc_glue sccglue1 (
         .clk (clk_54m),             // v2.6: glue SCC a 54M (bus mismo dominio)
         .reset_n (bus_reset_n),
@@ -1887,7 +1888,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .scc_req3_r (scc_req3_r),
         .scc_rd_r (scc_rd_r),
         .x98h (x98h),
-        .xb8h (xb8h)
+        .xb8h (xb8h),
+        .dbg_scc_enable (dbg_scc_enable_w)
     );
 
 `ifdef ENABLE_SCC
@@ -3121,11 +3123,33 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .clk(clk_54m), .rst_n(1'b1), .trig(psgBdir), .active(dbg_psgwr_led));
     led_stretch #(.HOLD(2000000)) dbg_st_psgout (
         .clk(clk_54m), .rst_n(1'b1), .trig(|psgSound1), .active(dbg_psgout_led));
+`define SCC_DEBUG_PANEL   // _42dbg: PMOD1 = cadena del SCC (quitar al resolver)
+`ifdef SCC_DEBUG_PANEL
+    // ===== PANEL SCC (_42dbg) — cada LED un eslabon; el primero APAGADO
+    // señala el corte (LEDs activo-bajo: ON = eslabon vivo) =====
+    wire scc_dbg_req_act, scc_dbg_wrtreg_act, scc_dbg_wav_act, scc_dbg_term_act;
+    led_stretch #(.HOLD(27000000)) st_sccreq  (.clk(clk_54m), .rst_n(bus_reset_n),
+        .trig(scc_req), .active(scc_dbg_req_act));                       // ~0.5s
+    led_stretch #(.HOLD(27000000)) st_sccwrtr (.clk(clk_54m), .rst_n(bus_reset_n),
+        .trig(scc_wrt && bus_addr[7]), .active(scc_dbg_wrtreg_act));     // escrituras 9880+ (regs freq/vol)
+    led_stretch #(.HOLD(27000000)) st_sccwav  (.clk(clk_54m), .rst_n(bus_reset_n),
+        .trig(scc_wav != 15'd0), .active(scc_dbg_wav_act));              // el chip oscila
+    led_stretch #(.HOLD(27000000)) st_sccterm (.clk(clk_27m), .rst_n(bus_reset_n),
+        .trig(scc_term != 16'd0), .active(scc_dbg_term_act));            // señal en el mixer
+    assign dbg_pmod1[0] = ~dbg_scc_enable_w;      // LED1 ON = ventana SCC abierta (bank2==3F)
+    assign dbg_pmod1[1] = ~scc_dbg_req_act;       // LED2 ON = accesos llegando a la ventana
+    assign dbg_pmod1[2] = ~scc_dbg_wrtreg_act;    // LED3 ON = escrituras de REGISTROS (freq/vol)
+    assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = EL CHIP OSCILA (scc_wav != 0)
+`else
     assign dbg_pmod1[0] = ~dbg_psgwr_led;     // LED ON = la CPU esta ESCRIBIENDO al PSG
     assign dbg_pmod1[1] = ~clk_1m8;           // parpadeo rapido (se ve medio-encendido) = ENA vivo
     assign dbg_pmod1[2] = ~dbg_psgout_led;    // LED ON = el PSG SACA amplitud != 0
     assign dbg_pmod1[3] = psgtest_win ? 1'b0 : 1'b1;  // ON = ventana de beep (1s-3s tras reset)
-`ifdef ENABLE_USB_KBD
+`endif
+`ifdef SCC_DEBUG_PANEL
+    assign dbg_pmod1[4] = ~(map_sel == 2'b10);    // LED5 ON = gate del mixer abierto (modo SCC)
+    assign dbg_pmod1[5] = ~scc_dbg_term_act;      // LED6 ON = scc_term != 0 (señal EN el mixer)
+`elsif ENABLE_USB_KBD
     assign dbg_pmod1[4] = ~(usb1_typ == 2'd1 || usb2_typ == 2'd1); // LED ON = teclado USB-A enumerado
     // v3.2: conerr solo con dispositivo enumerado — el puerto VACIO reintenta
     // cada 200ms y parpadeaba el LED sin que fuera un error (veredicto _39)

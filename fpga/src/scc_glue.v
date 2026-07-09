@@ -42,7 +42,8 @@ module scc_glue (
     output wire        scc_req3_r,
     output wire        scc_rd_r,
     output reg         x98h,              // decode registrado (lo comparte el 2o SCC-I)
-    output reg         xb8h
+    output reg         xb8h,
+    output wire        dbg_scc_enable     // diagnostico _42dbg: bank2==0x3F (ventana abierta)
 );
 
     always @ (posedge clk) begin   // v2.6: glue SCC a 54M (bus mismo dominio)
@@ -72,6 +73,7 @@ module scc_glue (
 
     wire scc_enable;
     assign scc_enable = ( scc_bank2 == 8'h3f ) ? 1 : 0;
+    assign dbg_scc_enable = scc_enable;
 
     // Sound window: compat = 9800-98FF (bank2==3F, mode bit5=0);
     // SCC+ = B800-B8FF (mode bit5=1 + bank3 bit7, sound not disabled)
