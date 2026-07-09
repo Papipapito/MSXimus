@@ -123,14 +123,13 @@ set_false_path -from [get_pins {cpu1/IORQ_n_i_s0/Q}] -to [get_pins {uwifi/qckbas
 set_max_delay -from [get_clocks {clk_54m}] -to [get_pins {cpu_din_*/D}] 27.0
 set_max_delay -from [get_pins {mem1/vram_dout_*/Q}] -to [get_clocks {clk_27m}] 10.5
 
-# --- Recovery del RESET de los OSER10 (27->135, mismo PLL 1:5) ---
-# s1_n es el reset sincronizado del dominio de video; se suelta UNA vez y los
-# OSER10 se realinean con la logica align-once del pixel clock (estructura
-# identica a nestang, validada en placa con el test de barras). El check de
-# recovery 27[R]->135[F] es pesimista e irrelevante; OJO: estas violaciones NO
-# salen en el resumen por-reloj del tr (solo en la Path Slacks Table, seccion
-# recovery) — revisar esa tabla, no solo el resumen.
-set_false_path -from [get_pins {vdp4/s1_n_s0/Q}] -to [get_pins {vdp4/serializer/gwSer*/RESET}]
+# --- v3.0: OSER10 con RESET=0 fijo (nestang/z8086) ---
+# La false_path antigua s1_n->gwSer*/RESET se ELIMINA: los OSER10 ya no
+# reciben reset de fabric (serializer.sv). El realineado 1:5 lo provoca el
+# reset del CLKDIV (div5_video), gated por el lock filtrado de PLL_INIT.
+# lock_s135 es un sincronizador 2FF: clock_locked (dominio mdclk 50M del
+# PLL_INIT) -> dominio 135M. Cruce asincrono por construccion.
+set_false_path -to [get_pins {lock_s135_0_*/D}]
 
 # --- SD: registros de comando/sector cuasi-estaticos ---
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_cd_*/D}] -setup -end 2

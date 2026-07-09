@@ -112,7 +112,12 @@ module serializer
             endgenerate
         `endif
     `elsif GW_IDE
-        OSER10 gwSer0( 
+        // GW5A (Console 60K): RESET=0 fijo, como nestang y z8086. El OSER10 no
+        // debe resetearse desde fabric: su realineado 1:5 lo provoca el reset
+        // del CLKDIV que genera PCLK (top.v div5_video), gated por el lock
+        // filtrado de PLL_INIT. Un reset aqui, soltado con relojes aun sucios,
+        // deja el gearbox desalineado = HDMI muerto hasta el power-cycle.
+        OSER10 gwSer0(
             .Q( tmds[ 0 ] ),
             .D0( tmds_internal[ 0 ][ 0 ] ),
             .D1( tmds_internal[ 0 ][ 1 ] ),
@@ -126,7 +131,7 @@ module serializer
             .D9( tmds_internal[ 0 ][ 9 ] ),
             .PCLK( clk_pixel ),
             .FCLK( clk_pixel_x5 ),
-            .RESET( reset ) );
+            .RESET( 1'b0 ) );
 
         OSER10 gwSer1( 
           .Q( tmds[ 1 ] ),
@@ -142,7 +147,7 @@ module serializer
           .D9( tmds_internal[ 1 ][ 9 ] ),
           .PCLK( clk_pixel ),
           .FCLK( clk_pixel_x5 ),
-          .RESET( reset ) );
+          .RESET( 1'b0 ) );
 
         OSER10 gwSer2( 
           .Q( tmds[ 2 ] ),
@@ -158,7 +163,7 @@ module serializer
           .D9( tmds_internal[ 2 ][ 9 ] ),
           .PCLK( clk_pixel ),
           .FCLK( clk_pixel_x5 ),
-          .RESET( reset ) );
+          .RESET( 1'b0 ) );
           
         assign tmds_clock = clk_pixel;
   

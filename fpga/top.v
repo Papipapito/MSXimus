@@ -167,10 +167,34 @@ end
     // Su fase vs 54M es arbitraria -> NADA con bus de CPU debe clockear a 27M:
     // el PSG se movio al dominio 54M (v2.4); el arbitro DH/DL queda como unico
     // frente de fase pendiente (F11) — plan B: cruce en el linebuffer.
+    // v3.0 (fiabilidad HDMI, bug "1 de cada 5 arranques"): el CLKDIV no debe
+    // dividir la basura que saca la PLLA durante el trimming MDRP de PLL_INIT
+    // (~1 ms). Patron nestang (console60k): CLKDIV en reset hasta lock
+    // FILTRADO + 255 ciclos de 135M; si el lock cae (PLL_INIT reintenta con
+    // otro trim), vuelve a reset y rearranca -> PCLK/FCLK nacen limpios
+    // SIEMPRE. El RESET de los OSER10 pasa a 0 fijo (serializer.sv), como en
+    // nestang y z8086: el realineado del gearbox 1:5 lo provoca este reset
+    // del CLKDIV, no el pin RESET del serializador.
+    reg [1:0] lock_s135       = 2'b00;   // 2FF: lock (dominio mdclk 50M) -> 135M
+    reg [7:0] clkdiv_boot_cnt = 8'd0;
+    reg       clkdiv_resetn   = 1'b0;
+    always @(posedge clk_135) begin
+        lock_s135 <= {lock_s135[0], clock_locked};
+        if (!lock_s135[1]) begin
+            clkdiv_boot_cnt <= 8'd0;
+            clkdiv_resetn   <= 1'b0;
+        end else if (clkdiv_boot_cnt != 8'hFF) begin
+            clkdiv_boot_cnt <= clkdiv_boot_cnt + 8'd1;
+            clkdiv_resetn   <= 1'b0;
+        end else begin
+            clkdiv_resetn   <= 1'b1;
+        end
+    end
+
     CLKDIV #(.DIV_MODE(5)) div5_video (
         .CLKOUT(clk_27m),
         .HCLKIN(clk_135),
-        .RESETN(1'b1),
+        .RESETN(clkdiv_resetn),
         .CALIB(1'b0)
     );
 
