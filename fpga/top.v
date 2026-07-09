@@ -1899,9 +1899,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // apagado = chip sin oscilar, clase sim!=sintesis); queda como referencia
     // y para el TB.
     scc_wave2 SccCh (
-        .clk21m (clk_54m),          // v2.5: SCC en 54M (bus mismo dominio;
-        .reset (~bus_reset_n),      //  a 27M la fase CLKDIV lo dejaba mudo)
-        .clkena (clk_enable_3m6_54),
+        .clk21m (clk_27m),          // v3.4 (_44): config EXACTA del TN20K (27M+cen27),
+        .reset (~bus_reset_n),      //  segura desde v3.0 (27 EN FASE con 54, ya sin CLKDIV
+        .clkena (clk_enable_3m6_27),//  arbitrario). El pipeline de mezcla del chip corre a
+                                    //  reloj pleno SIN clkena: a 54M iba al DOBLE de su
+                                    //  ritmo de diseño (panel _43: blips sin sostener).
         .req ( scc_req),
         .ack (),
         .wrt (scc_wrt),
@@ -2019,10 +2021,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [14:0] scc2x_wav;
 
 `ifdef ENABLE_SCC
-    scc_wave2 SccCh2 (   // v3.3: idem SccCh — chip VHDL con producto inline
-        .clk21m (clk_54m),          // v2.5: idem SccCh
+    scc_wave2 SccCh2 (   // v3.4: idem SccCh — config TN20K (27M en fase)
+        .clk21m (clk_27m),
         .reset (~bus_reset_n),
-        .clkena (clk_enable_3m6_54),
+        .clkena (clk_enable_3m6_27),
         .req ( scc2x_req),
         .ack (),
         .wrt (scc2x_wrt),
@@ -3135,7 +3137,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .trig(scc_wav != 15'd0), .active(scc_dbg_wav_act));              // el chip oscila
     led_stretch #(.HOLD(27000000)) st_sccterm (.clk(clk_27m), .rst_n(bus_reset_n),
         .trig(scc_term != 16'd0), .active(scc_dbg_term_act));            // señal en el mixer
-    assign dbg_pmod1[0] = ~dbg_scc_enable_w;      // LED1 ON = ventana SCC abierta (bank2==3F)
+    wire scc_dbg_en_act;
+    led_stretch #(.HOLD(27000000)) st_sccen (.clk(clk_54m), .rst_n(bus_reset_n),
+        .trig(dbg_scc_enable_w), .active(scc_dbg_en_act));   // v3.4: stretch (en juego destella)
+    assign dbg_pmod1[0] = ~scc_dbg_en_act;        // LED1 ON = ventana SCC abierta (bank2==3F, ~0.5s)
     assign dbg_pmod1[1] = ~scc_dbg_req_act;       // LED2 ON = accesos llegando a la ventana
     assign dbg_pmod1[2] = ~scc_dbg_wrtreg_act;    // LED3 ON = escrituras de REGISTROS (freq/vol)
     assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = EL CHIP OSCILA (scc_wav != 0)

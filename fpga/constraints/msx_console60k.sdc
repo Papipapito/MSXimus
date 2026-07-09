@@ -92,6 +92,10 @@ set_false_path -from [get_clocks {clk_54m}] -to [get_pins {ocm_ports/?*?/CE}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {ocm_ports/?*?/D}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {psg1/?*?/?*}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {psg2/?*?/?*}]
+# v3.4 (_44): chips SCC de vuelta a 27M (config TN20K, fase alineada v3.0) —
+# misma clase cuasi-estatica por protocolo de bus que rtc/kanji/psg
+set_false_path -from [get_clocks {clk_54m}] -to [get_pins {SccCh/?*?/?*}]
+set_false_path -from [get_clocks {clk_54m}] -to [get_pins {SccCh2/?*?/?*}]
 # v3.0 BASE MINIMA: sn1 fuera del netlist -> excepcion retirada
 # set_false_path -from [get_clocks {clk_54m}] -to [get_pins {sn1/?*?/?*}]
 # F3 (_38): OPLL de vuelta A 54M+cen (mismo dominio que el bus) -> la
