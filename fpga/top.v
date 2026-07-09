@@ -2189,12 +2189,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
             if (config_enable_stereo == 1) begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + sn_term;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + { scc_wav, 1'b0 } /* _48dbg: SCC SIN gate — diagnostico por oido */ + jt2413_wav + sn_term;
                 audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + sn_term;
             end
             else begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + sn_term;
-                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + sn_term;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc_wav, 1'b0 } /* _48dbg: SCC SIN gate — diagnostico por oido */ + { scc2x_wav, 1'b0 } + jt2413_wav + sn_term;
+                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc_wav, 1'b0 } /* _48dbg: SCC SIN gate — diagnostico por oido */ + { scc2x_wav, 1'b0 } + jt2413_wav + sn_term;
             end
         end
     end
