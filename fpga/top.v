@@ -1970,7 +1970,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     scc_wave2 SccCh (
         .clk21m (clk_27m),          // v3.4 (_44): config EXACTA del TN20K (27M+cen27),
         .reset (~bus_reset_n),      //  segura desde v3.0 (27 EN FASE con 54, ya sin CLKDIV
-        .clkena (scc_cen_local),    // _49dbg: cen LOCAL Bresenham (bypass de la cadena 8FF)
+        .clkena (clk_enable_3m6_27),// _50dbg: cen ORIGINAL con el PINFILTER ya sin z (fix de raiz)
         .req (sccb_active ? sccb_req : scc_req),
         .ack (),
         .wrt (sccb_active ? sccb_req : scc_wrt),
@@ -2094,7 +2094,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     scc_wave2 SccCh2 (   // v3.4: idem SccCh — config TN20K (27M en fase)
         .clk21m (clk_27m),
         .reset (~bus_reset_n),
-        .clkena (scc_cen_local),    // _49dbg: cen local
+        .clkena (clk_enable_3m6_27),// _50dbg: cen original (pinfilter fixed)
         .req ( scc2x_req),
         .ack (),
         .wrt (scc2x_wrt),
