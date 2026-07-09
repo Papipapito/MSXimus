@@ -1854,6 +1854,19 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // bloque inline v2.6 que habia aqui (solo los terminos de config/slot
     // pasan como entradas). Siempre instanciado, como antes (con ENABLE_SCC
     // off el chip queda fuera pero la ventana sigue respondiendo FF).
+    // v3.2 FIX REGRESION _40: los gates se DECLARAN aqui (antes del uso) y se
+    // ASIGNAN tras el bloque de config (linea ~2420), donde todas sus señales
+    // ya estan declaradas. En la _40 las expresiones iban directamente en los
+    // puertos ANTES de las declaraciones y Gowin creaba config_megaram_slot
+    // IMPLICITO DE 1 BIT (el real es [1:0]) -> comparacion de slot TRUNCADA ->
+    // el SCC respondia en slots equivocados (distorsion al bootear la BIOS,
+    // lecturas de CPU secuestradas) y callaba en el suyo (mudo). EX3638 en el
+    // log fue el delator; solo es benigno con señales de 1 bit.
+    wire scc_gate_bank2_wr3;
+    wire scc_gate_bank2_wr12;
+    wire scc_gate_req3;
+    wire scc_gate_req12;
+    wire scc_snd_dis_w;
     scc_glue sccglue1 (
         .clk (clk_54m),             // v2.6: glue SCC a 54M (bus mismo dominio)
         .reset_n (bus_reset_n),
@@ -1862,13 +1875,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .bus_mreq_n (bus_mreq_n),
         .bus_wr_n (bus_wr_n),
         .bus_rd_n (bus_rd_n),
-        .gate_bank2_wr3 ( pri_slot_num[SD_SLOT] == 1 && exp_slotx_num[3] == 1 ),
-        .gate_bank2_wr12 ( config_enable_megaram12 == 1 && pri_slot == config_megaram_slot ),
-        .gate_req3 ( config_enable_megaram3 == 1 && pri_slot == config_megaram_slot && exp_slotx_num[3] == 1 ),
-        .gate_req12 ( config_enable_megaram12 == 1 && pri_slot == config_megaram_slot ),
+        .gate_bank2_wr3 (scc_gate_bank2_wr3),
+        .gate_bank2_wr12 (scc_gate_bank2_wr12),
+        .gate_req3 (scc_gate_req3),
+        .gate_req12 (scc_gate_req12),
         .scc_mode_plus (scc_mode_plus),
         .sccplus_win_en (sccplus_win_en),
-        .scc_sound_disable (scc_sound_disable),
+        .scc_sound_disable (scc_snd_dis_w),
         .scc_req (scc_req),
         .scc_wrt (scc_wrt),
         .scc_req3_r (scc_req3_r),
@@ -2414,6 +2427,16 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign config_enable_16_9 = 0;
 
 `endif
+
+    // v3.2 FIX REGRESION _40: gates del scc_glue calculados AQUI, con todas
+    // sus señales ya declaradas (config_megaram_slot es [1:0] — ver el
+    // comentario en la instancia sccglue1). Expresiones VERBATIM del glue
+    // inline v2.6.
+    assign scc_gate_bank2_wr3  = ( pri_slot_num[SD_SLOT] == 1 && exp_slotx_num[3] == 1 );
+    assign scc_gate_bank2_wr12 = ( config_enable_megaram12 == 1 && pri_slot == config_megaram_slot );
+    assign scc_gate_req3       = ( config_enable_megaram3 == 1 && pri_slot == config_megaram_slot && exp_slotx_num[3] == 1 );
+    assign scc_gate_req12      = ( config_enable_megaram12 == 1 && pri_slot == config_megaram_slot );
+    assign scc_snd_dis_w       = scc_sound_disable;
 
     /// FLASH ROM LOADER - BIOS
     // ------------------------------------------------------------------
