@@ -130,7 +130,12 @@ set_false_path -from [get_clocks {clk_108m}] -to [get_pins {vdp4/u_v9958/U_SPRIT
 # y quedan FUERA de esta excepcion: rigor completo (leccion F11).
 set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_seq*/*}] 27.0
 set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/sdram_addr*/*}] 27.0
-set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/ram_busy*/*}] 27.0
+# ram_busy = patron FRAGIL, RETIRADO (leccion: TA2003 tres veces — la loteria
+# del netlist lo renombra/fusiona segun seed, y el parser SDC de Gowin no
+# soporta catch). Sus paths van a timing por defecto (18.52ns, MAS estricto);
+# si algun dia no cierran, check_timing.py dara el nombre real del FF y se
+# constriñe ESE. NUNCA re-anclar por 'ram_busy*'.
+# set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {mem1/ram_busy*/*}] 27.0
 set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {state_wait_*/*}] 27.0
 set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 27.0
 # v3.0 BASE MINIMA: uwifi fuera -> excepcion retirada

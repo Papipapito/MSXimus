@@ -12,6 +12,7 @@ module v9958_top(
 `ifdef VIDEO720
     input   clk_hdmi,       // v3.0: 74.25 MHz pixel 720p (pll_74 en el top)
     input   clk_hdmi5,      // v3.0: 371.25 MHz TMDS x5
+    output  wire [5:0] dbg_bridge, // v3.1: diagnostico del puente {rd_act,hdmi_rst,lock_tgl,nonblack,wr_act,vs_tick}
 `endif
     output  wire [5:0] dbg_video,  // DEBUG bring-up 60K r2: {reset_w, video_reset, tick_pal, tick_ntsc, vdp_hdmi_reset, pal_mode}
  //   input   clk_111,
@@ -387,14 +388,20 @@ module v9958_top(
     assign cy = 10'd0;
     assign dbg_video = {reset_w, 1'b0, 1'b0, 1'b0, vdp_hdmi_reset, pal_mode};
 
+    // v3.1: captura AUTO-CRONOMETRADA con las señales de video reales del VDP
+    // (HS/VS/blank). Los contadores CX/CY del VDP NO sirven de ventana: CX =
+    // H_CNT [0,1716) del raster interno 15kHz y CY = V_CNT en medias lineas
+    // (vdp_ssg/vdp_package CLOCKS_PER_LINE=1716) — el alineamiento legacy solo
+    // usaba su ORIGEN. Leccion de la _36 (pantalla sin contenido).
     msx2hdmi u_msx2hdmi (
         .clk         (clk_w),
         .resetn      (reset_n_w),
         .r           (VideoR),
         .g           (VideoG),
         .b           (VideoB),
-        .vdp_cx      (vdp_cx),
-        .vdp_cy      (vdp_cy),
+        .hs_n        (VideoHS_n),
+        .vs_n        (VideoVS_n),
+        .blank       (blank_o),
         .pal_mode    (pal_mode),
         .audio_l     (audio_sample),
         .audio_r     (audio_sample_r),
@@ -403,7 +410,13 @@ module v9958_top(
         .tmds_clk_p  (tmds_clk_p),
         .tmds_clk_n  (tmds_clk_n),
         .tmds_d_p    (tmds_data_p),
-        .tmds_d_n    (tmds_data_n)
+        .tmds_d_n    (tmds_data_n),
+        .dbg_vs_tick (dbg_bridge[0]),
+        .dbg_wr_act  (dbg_bridge[1]),
+        .dbg_nonblack(dbg_bridge[2]),
+        .dbg_lock_tgl(dbg_bridge[3]),
+        .dbg_hdmi_rst(dbg_bridge[4]),
+        .dbg_rd_act  (dbg_bridge[5])
     );
 
 `else

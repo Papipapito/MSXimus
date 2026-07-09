@@ -210,6 +210,9 @@ end
     //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
     // ================================================================
     wire [5:0] dbg_video_w;   // sondas de video r2: {reset_w, video_reset, tick_pal, tick_ntsc, vdp_hdmi_reset, pal_mode}
+`ifdef VIDEO720
+    wire [5:0] dbg_bridge_w;  // v3.1: diagnostico del puente msx2hdmi (a PMOD0)
+`endif
     reg [24:0] dbg_cnt50  = 0;  always @(posedge ex_clk_27m) dbg_cnt50  <= dbg_cnt50  + 1'b1;  // XO 50MHz REAL (independiente del PLL)
     reg [23:0] dbg_cnt27  = 0;  always @(posedge clk_27m)    dbg_cnt27  <= dbg_cnt27  + 1'b1;
     reg [24:0] dbg_cnt54  = 0;  always @(posedge clk_54m)    dbg_cnt54  <= dbg_cnt54  + 1'b1;
@@ -1375,6 +1378,7 @@ assign keyboard_addr = ppi_port_c[3:0];
 `ifdef VIDEO720
         .clk_hdmi  (clk_hdmi),        // v3.0: pixel 720p 74.25 (pll_74, cascada monitorcore)
         .clk_hdmi5 (clk_hdmi5),       // v3.0: TMDS x5 371.25
+        .dbg_bridge(dbg_bridge_w),    // v3.1: diagnostico del puente -> PMOD0
 `endif
         .dbg_video (dbg_video_w),     // sondas de video del bring-up
         .s1 (0),
@@ -3075,11 +3079,20 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         dbg_int_d <= bus_int_n;
         if (!bus_int_n && dbg_int_d) dbg_intdiv <= dbg_intdiv + 1'b1;  // flanco INT
     end
+`ifdef VIDEO720
+    // v3.1: PMOD0 = diagnostico del puente de video (LEDs activo-bajo: ON=activo)
+    assign dbg_pmod0[0] = ~dbg_bridge_w[0];   // LED1 parpadeo = VS del VDP vivo (frames saliendo)
+    assign dbg_pmod0[1] = ~dbg_bridge_w[1];   // LED2 ON = el puente CAPTURA pixeles (ventana activa)
+    assign dbg_pmod0[2] = ~dbg_bridge_w[2];   // LED3 ON = contenido NO-negro capturado (imagen real)
+    assign dbg_pmod0[3] = ~dbg_bridge_w[4];   // LED4 ON = hdmi_rst llegando al lado 74.25 (lock OK)
+    assign dbg_pmod0[4] = ~dbg_bridge_w[5];   // LED5 ON = ventana de lectura activa en el 720p
+`else
     assign dbg_pmod0[0] = wait_io;            // LED ON = CPU RETENIDA EN WAIT (clavado=malo)
     assign dbg_pmod0[1] = ~ram_busy;          // LED ON = ram_busy activo (fijo=arbitro atascado)
     assign dbg_pmod0[2] = dbg_intdiv[6];      // PARPADEO ~0.5Hz = interrupciones VDP vivas
     assign dbg_pmod0[3] = ~dbg_m1act_led;     // LED ON = CPU ejecutando (M1); OFF = congelada
     assign dbg_pmod0[4] = bus_int_n;          // LED ON = LINEA INT ASERTADA (fijo=TORMENTA de int)
+`endif
 
     // r10 (_30dbg): CADENA DEL PSG en PMOD1
     wire dbg_psgwr_led, dbg_psgout_led;

@@ -6,38 +6,54 @@
 // VDP (27 MHz) a través de un ring buffer BRAM dual-clock de 32 líneas
 // nativas (720 px × 18 bits).
 //
-//  - Escritura (clk 27M): captura solo la scanline PAR de cada par
-//    line-doubled del VDP → línea nativa n = (vdp_cy - y0) >> 1
-//    (y0 = 45 NTSC / 60 PAL). Slot del ring = n mod 32.
-//  - Lock de frame: frame_tgl se invierte en (vdp_cy==LOCK_Y, vdp_cx==0);
-//    cruzado con 2FF a clk_pixel, su flanco genera hdmi_rst (1 ciclo) que
-//    realinea los contadores cx/cy de los hdmi a (0, 720) = inicio del
-//    vblank de 720p (720 activas, 750 totales).
-//  - Lectura (clk_pixel 74.25M): ventana activa 960×720 centrada
-//    (X ∈ [160,1120)); escalado fraccional por acumuladores:
-//    horizontal 720→960 (×4/3), vertical 240→720 (×3) / 288→720 (×2.5).
-//  - Salida: dos hdmi (VIC 4 = 720p60 para NTSC, VIC 19 = 720p50 para PAL),
-//    mux de tmds_internal por pal_mode sincronizado, UN serializer externo
-//    (OSER10 con RESET=1'b0 constante dentro) y ELVDS_OBUF con clk_pixel
-//    crudo — patrón idéntico a v9958_top.v (tn_vdp_v3_v9958).
+// CAPTURA AUTO-CRONOMETRADA (v2): en lugar de los contadores internos del VDP
+// (vdp_cx/vdp_cy, cuya semántica real — H_CNT 0..1715, V_CNT en medias
+// líneas — no coincidía con la asumida), la escritura se auto-alinea con las
+// señales de vídeo reales del VDP: hs_n, vs_n y blank. Es inmune al offset
+// horizontal/vertical del área activa.
 //
-// LOCK_Y = 50 (mismo valor NTSC y PAL). Justificación numérica:
-//   El lector arranca en (0,720) → 30 líneas HDMI de vblank antes de leer.
-//   NTSC: línea HDMI = 22.22 µs, par de scanlines VDP = 63.56 µs. En el
-//     toggle (vdp_cy=50) ya hay 3 líneas nativas escritas (vdp_cy 45/47/49).
-//     lag(yy) ≈ 12.5 + 0.049·yy → [12, 25] líneas  (medido en sim: 12..25).
-//   PAL:  línea HDMI = 26.67 µs, par VDP = 64 µs. En el toggle (50 < 60) aún
-//     no hay líneas escritas; el lector tarda 800 µs en llegar a yy=0.
-//     lag(yy) ≈ 8 + 0.042·yy → [8, 20] líneas      (medido en sim: 8..20).
-//   Ambos modos quedan dentro de [1,31] con margen ≥ 2 por ambos lados.
+// POLARIDADES (verificadas en el VHDL del core, fork tn_vdp_v3_v9958):
+//  - hs_n = PVIDEOHS_N: ACTIVO BAJO. vdp_vga.vhd:229-241 (FF_HSYNC_N <= '0'
+//    en HCOUNTERIN=0 y =858, <= '1' en 40/898; 2 pulsos por línea H_CNT de
+//    1716 clocks = raster 31 kHz del doubler). vdp.vhd:1101 lo saca tal cual
+//    con DISPMODEVGA=1 (v9958_top instancia el VDP con DISPRESO=1).
+//  - vs_n = PVIDEOVS_N: ACTIVO BAJO. vdp_vga.vhd:243-281 (FF_VSYNC_N <= '0'
+//    durante 3 líneas de salida, p.ej. V_CNT 18..24 NTSC no interlace).
+//  - blank = BLANK_o: 1 = blanking. OJO (vdp_vga.vhd:318 + 298-312): en este
+//    fork VIDEOOUTX está clavado a '1' (el gate horizontal está comentado),
+//    así que BLANK_o == "VS activo" y NO delimita los 720 px. El diseño lo
+//    tolera: sin blanking horizontal, x=0 queda ~1 clk tras el flanco de HS,
+//    que con DISP_START_X=0 (vdp_vga.vhd:166) coincide con el píxel 0 real
+//    (±2 px constantes). Con blanking de píxel real se auto-alinea exacto.
+//  Los detectores son parametrizables (HS_ACTIVE_LOW/VS_ACTIVE_LOW) por si
+//  en placa hubiera que invertir.
 //
-// NOTA PAL (inconsistencia de la spec de entrada, documentada): la ventana
-// visible teórica [60, 60+576) no cabe en un frame de 625 líneas
-// (vdp_cy 0..624). Solo se escriben las líneas nativas 0..282; las líneas
-// nativas 283..287 del lector (las 12 últimas líneas de pantalla) leen el
-// contenido de la línea n-32 del MISMO frame (alias determinista del ring,
-// slots 27..31). En el MSX real esas líneas son borde inferior, así que el
-// alias es invisible. Verificado explícitamente en el testbench.
+// Lado ESCRITURA (clk 27M):
+//  - out_line: 0 en el flanco activo de VS, +1 en cada flanco activo de HS.
+//  - x_cnt: 0 en el primer ciclo no-blank tras HS, +1 por ciclo no-blank.
+//  - y0: primera out_line con píxeles no-blank tras VS (latch por frame).
+//  - línea nativa n = (out_line - y0) >> 1; se captura SOLO la scanline PAR
+//    del par line-doubled; clamp n < 288; slot del ring = n mod 32.
+//  - frame_tgl (lock) se invierte al INICIO de out_line == y0 + LOCK_LINES.
+//
+// LOCK_LINES = 6, RELATIVO A y0 (¡no a VS!). Justificación:
+//  * En el toggle hay exactamente 3 líneas nativas escritas (rel 0,2,4) sea
+//    cual sea el offset vertical → misma geometría validada del diseño _36:
+//    rampa de lag ≈ 13 + 0.049·yy (NTSC) / 15.5 + 0.042·yy (PAL); dentro de
+//    [3,29] con margen ≥2 por ambos lados (valores medidos: ver TB).
+//  * Un LOCK absoluto desde VS NO puede valer a la vez para el TB (activo en
+//    línea 40/46) y para el HW real (activo en línea 3, porque el VS del core
+//    dura 3 líneas y blank=VS): con lock=50 absoluto, en HW habría ~23
+//    nativas escritas en el toggle → lag(yy=0) ≈ 34 > 32 → overrun del ring.
+//    Relativo a y0, TB y HW quedan con geometría idéntica.
+//
+// Lado LECTURA (clk_pixel 74.25M) — sin cambios respecto a la versión
+// validada en placa (señal 720p OK): ventana activa 960×720 centrada
+// (X ∈ [160,1120)), escalado fraccional 720→960 (×4/3) y 240→720 (×3) /
+// 288→720 (×2.5), dos hdmi (VIC 4 = 720p60, VIC 19 = 720p50) reseteados a
+// (0,720) por el lock cruzado 2FF, mux de tmds_internal por pal_mode
+// sincronizado, UN serializer externo (OSER10 RESET=0) y ELVDS_OBUF con
+// clk_pixel crudo — patrón v9958_top.v.
 //
 // `define SIM_NO_HDMI sustituye hdmi/serializer/ELVDS por contadores cx/cy
 // conductuales para simular SOLO la lógica del puente con Icarus.
@@ -49,8 +65,9 @@ module msx2hdmi (
     input  wire [5:0]  r,            // color del VDP
     input  wire [5:0]  g,
     input  wire [5:0]  b,
-    input  wire [10:0] vdp_cx,       // 0..857 (NTSC) / 0..863 (PAL)
-    input  wire [10:0] vdp_cy,       // 0..524 (NTSC) / 0..624 (PAL)
+    input  wire        hs_n,         // VideoHS_n del VDP (raster 31kHz)
+    input  wire        vs_n,         // VideoVS_n del VDP
+    input  wire        blank,        // blank_o del VDP (1 = blanking)
     input  wire        pal_mode,     // cuasi-estático
     input  wire [15:0] audio_l,      // muestras del core (cruce 2FF)
     input  wire [15:0] audio_r,
@@ -59,11 +76,20 @@ module msx2hdmi (
     output wire        tmds_clk_n,
     output wire        tmds_clk_p,
     output wire [2:0]  tmds_d_n,
-    output wire [2:0]  tmds_d_p
+    output wire [2:0]  tmds_d_p,
+    // ---- diagnóstico (polaridad: activo = 1; el top pone la del LED) ----
+    output wire        dbg_vs_tick,  // clk: stretch ~39ms del flanco de VS
+    output wire        dbg_wr_act,   // clk: stretch de mem_we (hay captura)
+    output wire        dbg_nonblack, // clk: stretch de mem_we con dato != 0
+    output wire        dbg_lock_tgl, // clk: frame_tgl tal cual (~30 Hz NTSC)
+    output wire        dbg_hdmi_rst, // clk_pixel: stretch del pulso hdmi_rst
+    output wire        dbg_rd_act    // clk_pixel: nivel ventana activa lectura
 );
 
-    localparam LOCK_Y          = 50;            // ver cuenta en la cabecera
-    localparam CLKFRQ          = 74250;         // kHz de clk_pixel
+    localparam HS_ACTIVE_LOW   = 1;  // ver polaridades en la cabecera
+    localparam VS_ACTIVE_LOW   = 1;
+    localparam LOCK_LINES      = 6;  // líneas de salida DESDE y0 (ver cabecera)
+    localparam CLKFRQ          = 74250;   // kHz de clk_pixel
     localparam AUDIO_RATE      = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
     localparam NUM_CHANNELS    = 3;
@@ -71,18 +97,80 @@ module msx2hdmi (
     localparam XSTOP           = (1280+960)/2;  // 1120
 
     // ========================================================================
-    // Dominio clk (27 MHz): captura al ring buffer
+    // Dominio clk (27 MHz): captura auto-cronometrada al ring buffer
     // ========================================================================
 
     // Ring buffer BRAM dual-clock inferida (mismo patrón que sms2hdmi):
     // escritura en always @(posedge clk), lectura registrada en clk_pixel.
     logic [17:0] mem [0:32*720-1];
 
-    wire [10:0] y_off    = vdp_cy - (pal_mode ? 11'd60 : 11'd45);
-    wire        line_vis = pal_mode ? (vdp_cy >= 11'd60 && vdp_cy < 11'd636)
-                                    : (vdp_cy >= 11'd45 && vdp_cy < 11'd525);
-    wire        cap_line = line_vis && ~y_off[0];   // solo scanline PAR del par
-    wire [9:0]  n_native = y_off[10:1];             // línea nativa 0..239/287
+    wire hs_act = HS_ACTIVE_LOW ? ~hs_n : hs_n;
+    wire vs_act = VS_ACTIVE_LOW ? ~vs_n : vs_n;
+
+    // Registro de entradas (una etapa uniforme: syncs, blank y color alineados)
+    reg        hs_q, hs_qq, vs_q, vs_qq, blank_q;
+    reg [5:0]  r_q, g_q, b_q;
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            hs_q <= 1'b0; hs_qq <= 1'b0;
+            vs_q <= 1'b0; vs_qq <= 1'b0;
+            blank_q <= 1'b1;
+            r_q <= 6'd0; g_q <= 6'd0; b_q <= 6'd0;
+        end else begin
+            hs_q  <= hs_act;  hs_qq <= hs_q;
+            vs_q  <= vs_act;  vs_qq <= vs_q;
+            blank_q <= blank;
+            r_q <= r; g_q <= g; b_q <= b;
+        end
+    end
+    wire hs_lead = hs_q & ~hs_qq;   // inicio de línea de salida (31kHz)
+    wire vs_lead = vs_q & ~vs_qq;   // inicio de frame
+
+    reg  [9:0] out_line;      // línea de salida desde VS (0..624 máx)
+    reg  [9:0] x_cnt;         // píxel dentro de la línea (satura)
+    reg  [9:0] y0;            // primera línea con píxeles no-blank del frame
+    reg        y0_valid;
+    reg        frame_started; // hubo ya un VS tras reset
+
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            out_line      <= 10'd0;
+            x_cnt         <= 10'h3FF;
+            y0            <= 10'd0;
+            y0_valid      <= 1'b0;
+            frame_started <= 1'b0;
+        end else begin
+            // x_cnt: 0 en el primer no-blank tras hs_lead; para en blank
+            if (hs_lead)
+                x_cnt <= 10'd0;
+            else if (!blank_q && x_cnt != 10'h3FF)
+                x_cnt <= x_cnt + 10'd1;
+
+            // contador de líneas de salida + re-arme de y0 por frame
+            if (vs_lead) begin
+                out_line      <= 10'd0;
+                y0_valid      <= 1'b0;
+                frame_started <= 1'b1;
+            end else if (hs_lead)
+                out_line <= out_line + 10'd1;
+
+            // latch de la primera línea activa del frame
+            if (!vs_lead && frame_started && !blank_q && !y0_valid) begin
+                y0       <= out_line;
+                y0_valid <= 1'b1;
+            end
+        end
+    end
+
+    // y0 efectivo: durante la primera línea activa (antes del latch) vale
+    // out_line, así el primer píxel del frame ya se captura con n = 0.
+    wire [9:0] y0_eff = y0_valid ? y0 : out_line;
+    wire [9:0] rel    = out_line - y0_eff;      // línea de salida relativa
+    wire [8:0] n_nat  = rel[9:1];               // línea nativa 0..287
+    wire cap_ok = frame_started && !blank_q &&
+                  ~rel[0] &&                    // solo scanline PAR del par
+                  (n_nat < 9'd288) &&           // clamp
+                  (x_cnt < 10'd720);
 
     reg  [14:0] wr_addr;
     reg  [17:0] wr_data;
@@ -95,13 +183,13 @@ module msx2hdmi (
             wr_data <= 18'd0;
         end else begin
             wr_en <= 1'b0;
-            if (cap_line && vdp_cx < 11'd720) begin
+            if (cap_ok) begin
                 wr_en   <= 1'b1;
-                wr_data <= {r, g, b};
+                wr_data <= {r_q, g_q, b_q};
                 // *720 solo al inicio de línea (constante, shift+add);
                 // por píxel solo incremento.
-                wr_addr <= (vdp_cx == 11'd0) ? n_native[4:0] * 15'd720
-                                             : wr_addr + 15'd1;
+                wr_addr <= (x_cnt == 10'd0) ? rel[5:1] * 15'd720
+                                            : wr_addr + 15'd1;
             end
         end
     end
@@ -111,12 +199,13 @@ module msx2hdmi (
             mem[wr_addr] <= wr_data;
     end
 
-    // Toggle de frame: invierte en (LOCK_Y, 0), mismo valor NTSC y PAL.
+    // Toggle de frame: al INICIO de la línea y0 + LOCK_LINES (relativo a y0)
     reg frame_tgl = 1'b0;
     always @(posedge clk or negedge resetn) begin
         if (!resetn)
             frame_tgl <= 1'b0;
-        else if (vdp_cy == LOCK_Y && vdp_cx == 11'd0)
+        else if (hs_lead && !vs_lead && y0_valid &&
+                 (out_line == y0 + LOCK_LINES - 1))
             frame_tgl <= ~frame_tgl;
     end
 
@@ -238,6 +327,39 @@ module msx2hdmi (
         audio_sample_word[1]  <= audio_sample_word0[1];
     end
 
+    // ========================================================================
+    // Diagnóstico (stretchers retriggerables; activo = 1)
+    // ========================================================================
+
+    localparam DBG_W_CLK = 20;  // 2^20 @ 27 MHz  ≈ 38.8 ms
+    localparam DBG_W_PIX = 21;  // 2^21 @ 74.25 MHz ≈ 28.2 ms
+
+    reg [DBG_W_CLK-1:0] str_vs = '0, str_wr = '0, str_nb = '0;
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            str_vs <= '0; str_wr <= '0; str_nb <= '0;
+        end else begin
+            if (vs_lead)                  str_vs <= {DBG_W_CLK{1'b1}};
+            else if (str_vs != 0)         str_vs <= str_vs - 1'b1;
+            if (wr_en)                    str_wr <= {DBG_W_CLK{1'b1}};
+            else if (str_wr != 0)         str_wr <= str_wr - 1'b1;
+            if (wr_en && wr_data != 0)    str_nb <= {DBG_W_CLK{1'b1}};
+            else if (str_nb != 0)         str_nb <= str_nb - 1'b1;
+        end
+    end
+    assign dbg_vs_tick  = (str_vs != 0);
+    assign dbg_wr_act   = (str_wr != 0);
+    assign dbg_nonblack = (str_nb != 0);
+    assign dbg_lock_tgl = frame_tgl;
+
+    reg [DBG_W_PIX-1:0] str_rst = '0;
+    always @(posedge clk_pixel) begin
+        if (hdmi_rst)          str_rst <= {DBG_W_PIX{1'b1}};
+        else if (str_rst != 0) str_rst <= str_rst - 1'b1;
+    end
+    assign dbg_hdmi_rst = (str_rst != 0);
+    assign dbg_rd_act   = win_next;
+
 `ifndef SIM_NO_HDMI
 
     // ========================================================================
@@ -265,7 +387,7 @@ module msx2hdmi (
           .rgb(rgb),
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),
-          .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i; 720p ya es 16:9
+          .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_ntsc),
           .cy(cy_ntsc),
           .tmds_internal(tmds_ntsc)
@@ -291,7 +413,7 @@ module msx2hdmi (
           .rgb(rgb),
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),
-          .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i; 720p ya es 16:9
+          .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_pal),
           .cy(cy_pal),
           .tmds_internal(tmds_pal)
