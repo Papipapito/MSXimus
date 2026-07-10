@@ -691,10 +691,10 @@ assign keyboard_addr = ppi_port_c[3:0];
                      ( kanji_data_req_r == 1 ) ? ram_dout :
                 `ifdef ENABLE_WIFI
                      ( wifi_req == 1 ) ? ram_dout :
-                     ( logo_req == 1 ) ? ram_dout :
                      ( f2_req_r == 1 ) ? f2_port :
                      ( uart_req == 1 ) ? uart_dout :
                 `endif
+                     ( logo_req == 1 ) ? ram_dout :
                      ( rtc_req_r == 1 ) ? rtc_dout :
                      ( ppi_req_r == 1 ) ? ppi_port_a :
                      ( slot0_req_r == 1 ) ? 8'hff :
@@ -1563,8 +1563,8 @@ assign keyboard_addr = ppi_port_c[3:0];
                       (kanji_data_ram_req == 1) ? ~bus_rd_n :
                 `ifdef ENABLE_WIFI
                       (wifi_req == 1) ? ~bus_rd_n :
-                      (logo_req == 1) ? ~bus_rd_n :
                 `endif
+                      (logo_req == 1) ? ~bus_rd_n :
                       0;
     
     assign ram_write = (~flash_idle) ? rom_write : 
@@ -1586,8 +1586,8 @@ assign keyboard_addr = ppi_port_c[3:0];
                      (kanji_data_ram_req == 1) ? kanji_data_ram_req:
                 `ifdef ENABLE_WIFI
                      (wifi_req == 1) ? wifi_req:
-                     (logo_req == 1) ? logo_req:
                 `endif
+                     (logo_req == 1) ? logo_req:
                       0;
 
     assign ram_din = (~flash_idle) ? { rom_dout, rom_dout }  : { cpu_dout, cpu_dout };
