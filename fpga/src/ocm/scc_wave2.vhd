@@ -104,7 +104,9 @@ entity scc_wave2 is
         dbg_wavlatch: out   std_logic;  -- togglea cada vez que ff_wave captura ff_mix
         -- _53dbg: ¿QUE captura el latch y llega al registro de salida?
         dbg_capnz   : out   std_logic;  -- '1' = la ULTIMA captura fue con ff_mix /= 0
-        dbg_wave_nz : out   std_logic   -- '1' = ff_wave (registro INTERNO de salida) /= 0
+        dbg_wave_nz : out   std_logic;  -- '1' = ff_wave (registro INTERNO de salida) /= 0
+        -- _54dbg: ¿ff_mix conserva la suma en el ULTIMO slot de acumulacion?
+        dbg_mix5_nz : out   std_logic   -- '1' = ff_mix /= 0 muestreado en dl=="101"
     );
 end scc_wave2;
 
@@ -179,6 +181,7 @@ architecture rtl of scc_wave2 is
     signal ff_wave          : std_logic_vector( 14 downto 0 );
     signal ff_wavlatch_tgl  : std_logic;    -- _52dbg: togglea en cada captura de ff_wave
     signal ff_capnz         : std_logic;    -- _53dbg: la ultima captura fue /= 0
+    signal ff_mix5_nz       : std_logic;    -- _54dbg: ff_mix /= 0 en el slot dl==101
 begin
 
     ----------------------------------------------------------------
@@ -501,20 +504,56 @@ begin
     end process;
 
     --  mixer
+    --  _54 FIX "carga en dl==1, sin reset en dl==0" (sintoma _53dbg en placa:
+    --  el latch de salida capturaba CEROS puros — el valor de ff_mix se
+    --  desvanecia entre el ultimo slot de acumulacion y el instante de
+    --  captura). ANTES: dl==000 -> mix <= 0 (reset) en el MISMO flanco en que
+    --  ff_wave captura mix (dependencia lee-valor-viejo NBA que la sintesis
+    --  GW5A parece romper). AHORA: en dl=="001" mix CARGA el primer producto
+    --  de la vuelta (chA — verificado contra el diagrama de timing de arriba:
+    --  ff_wave_dat lleva chA cuando dl==001, el 'X a' del diagrama); en
+    --  dl=="010".."101" acumula; en dl=="000" HOLD (sin reset). La suma es
+    --  IDENTICA (la carga sustituye reset+primer-acumulado) y la captura de
+    --  ff_wave en dl==000 lee un valor ESTABLE desde el flanco de dl==5
+    --  (>=1 ciclo de antiguedad): cero interaccion captura/reset por
+    --  construccion. El guard ce_dl se conserva tal cual.
     process( reset, clk21m )
     begin
         if( reset = '1' )then
             ff_mix  <= (others => '0');
         elsif( clk21m'event and clk21m = '1' )then
             if( ff_wave_ce_dl = '0' )then
-                if( ff_ch_num_dl = "000" )then
-                    ff_mix  <=  (others => '0');
+                if( ff_ch_num_dl = "001" )then
+                    ff_mix  <=  (w_mul(11) & w_mul(11) & w_mul(11) & w_mul);            -- CARGA (primer producto, ch.A)
+                elsif( ff_ch_num_dl /= "000" )then
+                    ff_mix  <=  (w_mul(11) & w_mul(11) & w_mul(11) & w_mul) + ff_mix;   -- acumula (15bit 二の補数)
+                end if;
+                -- dl=="000": HOLD — ff_wave captura un valor estable
+            end if;
+        end if;
+    end process;
+
+    -- _54dbg: sonda del desvanecimiento dl5->dl0. FF actualizado SOLO en el
+    -- flanco del slot dl=="101" (ultimo slot de acumulacion): '1' si ff_mix
+    -- (la suma parcial a-d; con el beeper solo ch.A) es /= 0 en ese instante.
+    -- Con tono: ~97-100% ON. Caso no-cura: mix5_nz ON + capnz OFF =
+    -- confirmacion de que el valor se pierde entre dl==5 y la captura dl==0.
+    process( reset, clk21m )
+    begin
+        if( reset = '1' )then
+            ff_mix5_nz <= '0';
+        elsif( clk21m'event and clk21m = '1' )then
+            if( ff_ch_num_dl = "101" )then
+                if( ff_mix /= "000000000000000" )then
+                    ff_mix5_nz <= '1';
                 else
-                    ff_mix  <=  (w_mul(11) & w_mul(11) & w_mul(11) & w_mul) + ff_mix;   -- 15bit 二の補数
+                    ff_mix5_nz <= '0';
                 end if;
             end if;
         end if;
     end process;
+
+    dbg_mix5_nz <= ff_mix5_nz;      -- _54dbg
 
     --  wave out
     --  _52 EXPERIMENTO (¿miscompilacion GW5A del latch final?): el guard

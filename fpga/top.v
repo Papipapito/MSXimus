@@ -1871,6 +1871,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_dbg_vol_nz, scc_dbg_sel_nz, scc_dbg_freq_nz;   // _46dbg (idem)
     wire scc_dbg_ptr_lsb, scc_dbg_scan_lsb, scc_dbg_mix_nz;  // _51dbg (idem)
     wire scc_dbg_wavlatch, scc_dbg_capnz, scc_dbg_wave_nz;   // _52/_53dbg (idem)
+    wire scc_dbg_mix5_nz;                                    // _54dbg (idem)
     scc_glue sccglue1 (
         .clk (clk_54m),             // v2.6: glue SCC a 54M (bus mismo dominio)
         .reset_n (bus_reset_n),
@@ -1989,7 +1990,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .dbg_mix_nz (scc_dbg_mix_nz),
         .dbg_wavlatch (scc_dbg_wavlatch),
         .dbg_capnz (scc_dbg_capnz),
-        .dbg_wave_nz (scc_dbg_wave_nz)
+        .dbg_wave_nz (scc_dbg_wave_nz),
+        .dbg_mix5_nz (scc_dbg_mix5_nz)
     );
 `else
     assign scc_wav  = 15'd0;        // BASE MINIMA v3.0: SCC fuera (aparcado)
@@ -3270,7 +3272,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod1[0] = ~scc_dbg_wave_nz;       // LED1 ON = ff_wave INTERNO tiene valor (~97% con tono)
     assign dbg_pmod1[1] = ~scc_dbg_capnz;         // LED2 ON = la ULTIMA CAPTURA fue != 0 (OFF = captura CEROS)
     assign dbg_pmod1[2] = ~(scc_wav != 15'd0);    // LED3 ON = el PUERTO de salida (scc_wav) tiene valor
-    assign dbg_pmod1[3] = 1'b1;                   // LED4 APAGADO (sin uso esta ronda)
+    assign dbg_pmod1[3] = ~scc_dbg_mix5_nz;       // LED4 ON = la suma estaba VIVA en el ultimo slot
+                                                  //  (mix5 ON + capnz OFF = desvanecimiento dl5->dl0)
 `else
     assign dbg_pmod1[0] = ~dbg_psgwr_led;     // LED ON = la CPU esta ESCRIBIENDO al PSG
     assign dbg_pmod1[1] = ~clk_1m8;           // parpadeo rapido (se ve medio-encendido) = ENA vivo

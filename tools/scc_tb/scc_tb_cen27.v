@@ -166,6 +166,7 @@ module scc_tb_cen27;
     wire        dbg_wavlatch_w;     // _52dbg: togglea en cada captura de ff_wave
     wire        dbg_capnz_w;        // _53dbg: la ultima captura fue con ff_mix /= 0
     wire        dbg_wave_nz_w;      // _53dbg: ff_wave (registro interno) /= 0
+    wire        dbg_mix5_nz_w;      // _54dbg: ff_mix /= 0 en el slot dl==101
 
     scc_wave2 SccCh (
         .clk21m (clk27),
@@ -184,7 +185,8 @@ module scc_tb_cen27;
         .dbg_mix_nz (dbg_mix_nz_w),
         .dbg_wavlatch (dbg_wavlatch_w),
         .dbg_capnz (dbg_capnz_w),
-        .dbg_wave_nz (dbg_wave_nz_w)
+        .dbg_wave_nz (dbg_wave_nz_w),
+        .dbg_mix5_nz (dbg_mix5_nz_w)
         // dbg_vol_nz / dbg_sel_nz / dbg_freq_nz sin conectar
     );
 
@@ -324,7 +326,7 @@ module scc_tb_cen27;
     integer mix_nz_cnt, mon_cycles27;
     integer wavlatch_toggles;
     reg wavlatch_prev;
-    integer capnz_cnt, wave_nz_cnt;
+    integer capnz_cnt, wave_nz_cnt, mix5_nz_cnt;
     always @(posedge clk27) begin
         if (mon_en) begin
             mon_cycles27 = mon_cycles27 + 1;
@@ -337,6 +339,7 @@ module scc_tb_cen27;
             wavlatch_prev = dbg_wavlatch_w;
             if (dbg_capnz_w === 1'b1) capnz_cnt = capnz_cnt + 1;
             if (dbg_wave_nz_w === 1'b1) wave_nz_cnt = wave_nz_cnt + 1;
+            if (dbg_mix5_nz_w === 1'b1) mix5_nz_cnt = mix5_nz_cnt + 1;
         end
     end
 
@@ -348,7 +351,7 @@ module scc_tb_cen27;
         scan_toggles = 0; scan_prev = dbg_scan_lsb_w;
         mix_nz_cnt = 0; mon_cycles27 = 0;
         wavlatch_toggles = 0; wavlatch_prev = dbg_wavlatch_w;
-        capnz_cnt = 0; wave_nz_cnt = 0;
+        capnz_cnt = 0; wave_nz_cnt = 0; mix5_nz_cnt = 0;
         term_viol = 0;
         mon_en = 1;
     end endtask
@@ -497,6 +500,15 @@ module scc_tb_cen27;
                  (wave_nz_cnt * 100) / mon_cycles27);
         check("N5 la captura LLEVA senal y ff_wave la retiene (capnz+wave_nz)",
               (capnz_cnt > (mon_cycles27 * 9) / 10) && (wave_nz_cnt > (mon_cycles27 * 9) / 10));
+
+        // NUEVO (_54dbg): la suma sigue viva en el ULTIMO slot de acumulacion
+        // (dl==101). Con la onda cuadrada del TB: ~100% (sierra en placa
+        // ~97%). Caso no-cura del fix _54: mix5_nz ON + capnz OFF confirma el
+        // desvanecimiento dl5 -> dl0.
+        $display("  sonda _54dbg: mix5_nz=%0d%% del tiempo (esperado ~100%% con tono cuadrado)",
+                 (mix5_nz_cnt * 100) / mon_cycles27);
+        check("N6 suma viva en dl==101 (dbg_mix5_nz activo con el tono)",
+              mix5_nz_cnt > (mon_cycles27 * 9) / 10);
 
         // volumen a 0 -> salida plana a 0 (camino reg_vol -> multiplicador)
         mem_write(16'h988A, 8'h00);
