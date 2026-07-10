@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo/msximus.svg" alt="MSXimus" width="480"/></p>
 
-# MSXimus — MSX2+ standalone en la Tang Console 60K
+# MSXimus — MSX2+ standalone en la Tang Console 60K · v1.0-beta1
 
 **MSXimus** es el hermano mayor del [**MSXnano**](https://github.com/Papipapito/MSXnano): el mismo linaje de core MSX2+ (goauld → MSXnano), portado y ampliado sobre la **Tang Console 60K** (SOM Tang Mega 60K = Gowin **GW5AT-60**, GW5AT-LV60PG484, DDR3 512 MB, BL616 onboard, 2× USB-A host, HDMI, microSD). *Nano* era el pequeño; *Maximus* es el grande.
 
@@ -16,7 +16,7 @@ Base v3.0 estable + **Fase 3 completa**, todo validado en hardware:
 - **Modos consola** SG-1000 / ColecoVision (SN76489).
 - Nextor + microSD, megaram (Konami4/Konami-SCC/ASCII8/16), menú de arranque propio.
 
-En cocina (F4+): turbo Panasonic 5.37 MHz, gamepads USB→joystick MSX, MSX-Audio Y8950, y la pista **V9968**/V9990. Plan vivo en [fpga/BASE_MINIMA_60K_PLAN.md](fpga/BASE_MINIMA_60K_PLAN.md).
+En cocina (F4+): turbo Panasonic 5.37 MHz, gamepads USB→joystick MSX, MSX-Audio Y8950, y la pista **V9968**/V9990. Ruta del proyecto en [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Base de partida
 
