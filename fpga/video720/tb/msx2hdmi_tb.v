@@ -57,6 +57,7 @@ module msx2hdmi_tb;
     reg        resetn   = 1'b0;
     reg        pal_mode = 1'b0;
     reg        aspect   = 1'b0;    // _56: 0 = 4:3, 1 = 16:9
+    reg        scanln   = 1'b0;    // _58: fases 0-1 OFF (passthrough), 2-4 ON
     wire       hs_n, vs_n, blank;
     reg  [5:0] r, g, b;
 
@@ -71,6 +72,7 @@ module msx2hdmi_tb;
         .blank        (blank),
         .pal_mode     (pal_mode),
         .aspect_wide  (aspect),
+        .scanlines    (scanln),
         .audio_l      (16'h1234),
         .audio_r      (16'h5678),
         .clk_pixel    (clk_pixel),
@@ -224,6 +226,33 @@ module msx2hdmi_tb;
     reg [5:0]  xr6, nr6;
     reg [23:0] exp_rgb;
 
+    // -------- d) _58 scanlines: rgb_out del DUT vs referencia cerrada --------
+    // Se comprueba en TODOS los ciclos activos (cy<720), no solo el muestreo
+    // %7: dim_ref = f(cy) es independiente del dim_r registrado del DUT.
+    // Fases 0-1 (scanln=0) verifican passthrough exacto rgb_out === rgb.
+    integer scan_err = 0, scan_checks = 0, scan_dim_checks = 0;
+    reg        dim_ref;
+    reg [23:0] exp_out;
+
+    always @(negedge clk_pixel) begin
+        if (checking && locks_mode >= 2 && rbase >= 0 && dut.cy < 720) begin
+            dim_ref = scanln && (pal_mode ? ((dut.cy % 5 == 2) || (dut.cy % 5 == 4))
+                                          : ((dut.cy % 3) == 2));
+            exp_out = dim_ref ? {1'b0, dut.rgb[23:17],
+                                 1'b0, dut.rgb[15:9],
+                                 1'b0, dut.rgb[7:1]}
+                              : dut.rgb;
+            if (dut.rgb_out !== exp_out) begin
+                scan_err = scan_err + 1;
+                if (scan_err <= 10)
+                    $display("SCAN ERR @%0t ns: fase=%0d cx=%0d cy=%0d dim_ref=%b rgb=%h exp=%h got=%h",
+                             $time, phase, dut.cx, dut.cy, dim_ref, dut.rgb, exp_out, dut.rgb_out);
+            end
+            scan_checks = scan_checks + 1;
+            if (dim_ref) scan_dim_checks = scan_dim_checks + 1;
+        end
+    end
+
     always @(negedge clk_pixel) begin
         if (checking && locks_mode >= 2 && rbase >= 0) begin
             cxv = dut.cx;
@@ -333,6 +362,7 @@ module msx2hdmi_tb;
         vdp_restart  = 1'b1;
         phase        = 2;
         pal_mode     = 1'b1;
+        scanln       = 1'b1;   // _58: scanlines ON de la fase 2 en adelante
         LINE_CLKS    = 864; LINES = 625; HOFF = 100; VOFF = 46; NAT = 288;
         toggles_mode = 0; locks_mode = 0; rbase = -1; base_pending = -1000000;
         @(negedge clk); @(negedge clk);
@@ -395,6 +425,13 @@ module msx2hdmi_tb;
                      geo_err, race_err, border_err);
             $fatal(1, "TB FAILED");
         end
+        // _58: scanlines — cero errores y suficientes checks con dim activo
+        // (cubre NTSC 1-de-3, PAL 3-2, passthrough OFF y el x=0 del 16:9)
+        if (scan_err > 0 || scan_dim_checks < 100000) begin
+            $display("FAIL: scan_err=%0d scan_dim_checks=%0d (checks=%0d)",
+                     scan_err, scan_dim_checks, scan_checks);
+            $fatal(1, "TB FAILED");
+        end
         // margen >=2 por ambos lados de [1,31] sobre el lag de rampa (lo que
         // controla LOCK_LINES; el minimo absoluto satura a fin de frame con
         // el escritor ya parado = caso seguro, verificado por el check de slot)
@@ -414,6 +451,8 @@ module msx2hdmi_tb;
         $display("  _56 16:9 verificado: NTSC rampa=[%0d..%0d], PAL rampa=[%0d..%0d]; geometria estricta 720->1280 con XW=0 (incl. x=0..3 de cada linea).",
                  rlagmin[3], rlagmax[3], rlagmin[4], rlagmax[4]);
         $display("  No-regresion 4:3: las fases 0-2 corren con aspect_wide=0 y los checks originales intactos.");
+        $display("  _58 scanlines verificado: %0d checks (%0d con dim), 0 errores; OFF=passthrough exacto (fases 0-1), ON en PAL 4:3 + NTSC/PAL 16:9.",
+                 scan_checks, scan_dim_checks);
         $finish;
     end
 

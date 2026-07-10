@@ -73,6 +73,10 @@ module msx2hdmi (
                                      // (720→1280 estirado). Cuasi-estático
                                      // desde la config del menú; el cambio en
                                      // caliente puede dar 1 frame feo.
+    input  wire        scanlines,    // _58: 1 = atenuar al 50% la última
+                                     // repetición de cada línea nativa
+                                     // (1 de 3 NTSC ×3; patrón 3-2 PAL ×2.5).
+                                     // Cuasi-estático desde la config del menú.
     input  wire [15:0] audio_l,      // muestras del core (cruce 2FF)
     input  wire [15:0] audio_r,
     input  wire        clk_pixel,    // 74.25 MHz
@@ -236,6 +240,12 @@ module msx2hdmi (
         aspect_sync <= {aspect_sync[0], aspect_wide};
     wire wide_x = aspect_sync[1];
 
+    // _58: scanlines cuasi-estático desde la config del menú (2FF por higiene)
+    reg [1:0] scan_sync = 2'b00;
+    always @(posedge clk_pixel)
+        scan_sync <= {scan_sync[0], scanlines};
+    wire scan_x = scan_sync[1];
+
     // ========================================================================
     // Contadores HDMI (reales o conductuales) y mux NTSC/PAL
     // ========================================================================
@@ -380,6 +390,44 @@ module msx2hdmi (
     end
 
     // ========================================================================
+    // _58: scanlines — atenuación al 50% (el look del core 480p original:
+    // {1'b0, Video, 1'b0} = mitad) de la ÚLTIMA repetición de cada línea
+    // nativa. Con el acumulador vertical arrancando en ycnt=0 en cy=0, la
+    // fase de repetición es una función cerrada de cy:
+    //   NTSC ×3:  dim ⟺ cy mod 3 == 2            (1 línea oscura de cada 3)
+    //   PAL ×2.5: dim ⟺ cy mod 5 ∈ {2,4}         (patrón 3-2: última de cada
+    //                                              grupo de 3 y de 2)
+    // dim es constante por línea de salida → se calcula con contadores de
+    // fase registrados y se LATCHEA al FINAL de la línea anterior
+    // (cx == wlast): válido desde el cx==0 de su línea (cubre el x=0 del
+    // 16:9) y fuera de todo camino crítico (nada de esto toca el cono del
+    // ADB de la BRAM que dio el TNS -341 de la _56). Con scanlines=0,
+    // dim_r=0 y rgb_out ≡ rgb (cero cambio).
+    // ========================================================================
+    reg [1:0] ph3   = 2'd0;      // fase NTSC 0..2 de la línea ACTUAL
+    reg [2:0] ph5   = 3'd0;      // fase PAL  0..4 de la línea ACTUAL
+    reg       dim_r = 1'b0;
+
+    wire [1:0] ph3_nx = (cy >= 10'd749) ? 2'd0
+                                        : ((ph3 == 2'd2) ? 2'd0 : ph3 + 2'd1);
+    wire [2:0] ph5_nx = (cy >= 10'd749) ? 3'd0
+                                        : ((ph5 == 3'd4) ? 3'd0 : ph5 + 3'd1);
+
+    always @(posedge clk_pixel) begin
+        if (cx == wlast) begin
+            ph3   <= ph3_nx;
+            ph5   <= ph5_nx;
+            dim_r <= scan_x && (pal_x ? (ph5_nx == 3'd2 || ph5_nx == 3'd4)
+                                      : (ph3_nx == 2'd2));
+        end
+    end
+
+    wire [23:0] rgb_out = dim_r ? {1'b0, rgb[23:17],
+                                   1'b0, rgb[15:9],
+                                   1'b0, rgb[7:1]}
+                                : rgb;
+
+    // ========================================================================
     // Audio: divisor a 44100 Hz desde clk_pixel + cruce 2FF (como sms2hdmi)
     // ========================================================================
 
@@ -461,7 +509,7 @@ module msx2hdmi (
     hdmi_ntsc ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
           .clk_audio(clk_audio),
-          .rgb(rgb),
+          .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
@@ -487,7 +535,7 @@ module msx2hdmi (
     hdmi_pal ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
           .clk_audio(clk_audio),
-          .rgb(rgb),
+          .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i

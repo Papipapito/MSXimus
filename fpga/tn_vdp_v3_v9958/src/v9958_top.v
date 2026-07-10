@@ -406,6 +406,7 @@ module v9958_top(
         .audio_l     (audio_sample),
         .audio_r     (audio_sample_r),
         .aspect_wide (aspect_16_9),   // _56: 4:3 (960 centrado) / 16:9 (1280 estirado) desde el menu
+        .scanlines   (scanlin),       // _58: scanlines desde el menu (config1[3] via scanlin_n)
         .clk_pixel   (clk_hdmi),
         .clk_5x_pixel(clk_hdmi5),
         .tmds_clk_p  (tmds_clk_p),
