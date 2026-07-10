@@ -161,6 +161,8 @@ module scc_tb_cen27;
     wire [7:0]  scc_dout;
     wire [14:0] scc_wav;
     wire        dbg_ptr_lsb_w;      // _49dbg: LSB del puntero de onda ch.A
+    wire        dbg_scan_lsb_w;     // _51dbg: ff_ch_num(0), escaneo a reloj pleno
+    wire        dbg_mix_nz_w;       // _51dbg: ff_mix /= 0
 
     scc_wave2 SccCh (
         .clk21m (clk27),
@@ -174,7 +176,9 @@ module scc_tb_cen27;
         .dbo (cpu_dout),
         .wave (scc_wav),
         .sccplus (scc_mode_plus),
-        .dbg_ptr_lsb (dbg_ptr_lsb_w)
+        .dbg_ptr_lsb (dbg_ptr_lsb_w),
+        .dbg_scan_lsb (dbg_scan_lsb_w),
+        .dbg_mix_nz (dbg_mix_nz_w)
         // dbg_vol_nz / dbg_sel_nz / dbg_freq_nz sin conectar
     );
 
@@ -305,13 +309,21 @@ module scc_tb_cen27;
         end
     end
 
-    // toggles del _49dbg (dominio 27M del chip)
+    // sondas _49dbg/_51dbg (dominio 27M del chip): toggles del puntero,
+    // toggles del escaneo y duty del acumulador /= 0
     integer ptr_toggles;
     reg ptr_prev;
+    integer scan_toggles;
+    reg scan_prev;
+    integer mix_nz_cnt, mon_cycles27;
     always @(posedge clk27) begin
         if (mon_en) begin
+            mon_cycles27 = mon_cycles27 + 1;
             if (dbg_ptr_lsb_w !== ptr_prev) ptr_toggles = ptr_toggles + 1;
             ptr_prev = dbg_ptr_lsb_w;
+            if (dbg_scan_lsb_w !== scan_prev) scan_toggles = scan_toggles + 1;
+            scan_prev = dbg_scan_lsb_w;
+            if (dbg_mix_nz_w === 1'b1) mix_nz_cnt = mix_nz_cnt + 1;
         end
     end
 
@@ -320,6 +332,8 @@ module scc_tb_cen27;
         mon_trans = 0; mon_rises = 0; mon_state = 0;
         mon_changes = 0; wav_prev = wav_s;
         ptr_toggles = 0; ptr_prev = dbg_ptr_lsb_w;
+        scan_toggles = 0; scan_prev = dbg_scan_lsb_w;
+        mix_nz_cnt = 0; mon_cycles27 = 0;
         term_viol = 0;
         mon_en = 1;
     end endtask
@@ -432,6 +446,20 @@ module scc_tb_cen27;
                  mon_changes, mon_changes * 667, ptr_toggles);
         check("N1 puntero ch.A AVANZA (scc_wav cambia y dbg_ptr_lsb togglea)",
               (mon_changes >= 8) && (ptr_toggles >= 50));
+
+        // NUEVO (_51dbg): calibracion de las sondas de la cadena interna.
+        // dbg_scan_lsb debe togglear CADA ciclo de 27M (ff_ch_num avanza a
+        // reloj pleno; sin accesos CPU en esta ventana -> ~100%); dbg_mix_nz
+        // debe estar activo la mayor parte del tiempo con el tono sonando
+        // (teorico 5/6 ~ 83%: solo cae a 0 en el slot de reset del scan).
+        $display("  sondas _51dbg: scan_toggles=%0d de %0d ciclos27 (%0d%%), mix_nz activo %0d%% del tiempo",
+                 scan_toggles, mon_cycles27,
+                 (scan_toggles * 100) / mon_cycles27,
+                 (mix_nz_cnt * 100) / mon_cycles27);
+        check("N2 escaneo ff_ch_num VIVO (dbg_scan_lsb togglea cada ciclo)",
+              scan_toggles > (mon_cycles27 * 9) / 10);
+        check("N3 acumulador ff_mix ve senal (dbg_mix_nz activo con el tono)",
+              mix_nz_cnt > mon_cycles27 / 2);
 
         // volumen a 0 -> salida plana a 0 (camino reg_vol -> multiplicador)
         mem_write(16'h988A, 8'h00);

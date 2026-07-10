@@ -8,7 +8,7 @@
 // conversion.
 //
 // Fuentes:
-//   fpga/src/ocm/scc_wave2.vhd            (md5 c6a34f8b7927e63f0ad1269f4c54a3e3)
+//   fpga/src/ocm/scc_wave2.vhd            (md5 3a952ffdc27ea84e77f4d30c72fd7f95)
 //   fpga/tn_vdp_v3_v9958/src/ram.vhd      (md5 4b07b17365c24cdf624b4cafad86fbeb, solo entity 'ram')
 //
 // Herramienta:
@@ -21,11 +21,17 @@
 //        > scc_wave2_ghdl.v
 //
 // Modulos generados:
-//   scc_wave2   -- top, MISMO nombre y port map que la entity VHDL
-//                  (incl. los 3 puertos de debug _46dbg: dbg_vol_nz,
-//                   dbg_sel_nz, dbg_freq_nz; y el _49dbg dbg_ptr_lsb =
-//                   LSB de ff_ptr_ch_a, togglea en CADA avance del puntero
-//                   de onda del canal A -> LED duty ~50% si el tono corre)
+//   scc_wave2   -- top, MISMO nombre y port map que la entity VHDL, con los
+//                  puertos de debug:
+//                   _46dbg: dbg_vol_nz / dbg_sel_nz / dbg_freq_nz
+//                   _49dbg: dbg_ptr_lsb  = ff_ptr_ch_a(0), togglea en CADA
+//                           avance del puntero ch.A (440Hz -> cuadrada
+//                           ~7 kHz, duty 50%)
+//                   _51dbg: dbg_scan_lsb = ff_ch_num(0), escaneo de canales
+//                           a reloj pleno (vivo = cuadrada clk/2 = 13.5 MHz
+//                           a 27M, duty ~50%; congelado = nivel fijo)
+//                           dbg_mix_nz   = ff_mix /= 0 (con tono ~80% duty;
+//                           mixer muerto = 0%)
 //   ram_Brtl    -- la wave RAM 256x8 (entity 'ram', arquitectura RTL);
 //                  el sufijo _Brtl lo pone GHDL => NO colisiona con la
 //                  entity VHDL 'ram' de ram.vhd si esta sigue en el proyecto
@@ -38,8 +44,9 @@
 //   tools/scc_tb/run_ghdl.sh  -- mismos 21 checks que el TB de scc_wave2v
 //   tools/scc_tb/run_cen27.sh -- TB con el camino REAL de clk_enable_3m6_27
 //     (div30@108M -> PINFILTER@54M -> cadena 8FF@27M -> edge detect, replica
-//     verbatim de top.v:240-328) y chip a clk_27m: 21 checks + check de
-//     avance del puntero (cambios de valor de scc_wav + toggles dbg_ptr_lsb).
+//     verbatim de top.v:240-328) y chip a clk_27m: 21 checks + checks de
+//     avance del puntero (N1), escaneo vivo (N2) y acumulador activo (N3)
+//     con las sondas dbg_ptr_lsb / dbg_scan_lsb / dbg_mix_nz calibradas.
 //
 // Notas de estilo del netlist GHDL (revisadas):
 //   - FF: always @(posedge clk21m or posedge reset) con if/else -> DFF con
@@ -63,16 +70,16 @@ module ram_Brtl
    input  [7:0] dbo,
    output [7:0] dbi);
   wire [7:0] iadr;
-  reg [7:0] n588;
-  wire [7:0] n589; // mem_rd
-  assign dbi = n589; //(module output)
+  reg [7:0] n596;
+  wire [7:0] n597; // mem_rd
+  assign dbi = n597; //(module output)
   /*# ram.vhd:50:10 */
-  assign iadr = n588; // (signal)
+  assign iadr = n596; // (signal)
   /*# ram.vhd:56:5 */
   always @(posedge clk)
-    n588 <= adr;
+    n596 <= adr;
   reg [7:0] blkram[255:0] ; // memory
-  assign n589 = blkram[iadr];
+  assign n597 = blkram[iadr];
   always @(posedge clk)
     if (we)
       blkram[adr] <= dbo;
@@ -95,7 +102,9 @@ module scc_wave2
    output dbg_vol_nz,
    output dbg_sel_nz,
    output dbg_freq_nz,
-   output dbg_ptr_lsb);
+   output dbg_ptr_lsb,
+   output dbg_scan_lsb,
+   output dbg_mix_nz);
   wire w_wave_ce;
   wire w_wave_we;
   wire [7:0] w_wave_adr;
@@ -137,206 +146,201 @@ module scc_wave2
   wire ff_req_dl;
   wire [7:0] ff_wave_dat;
   wire [14:0] ff_wave;
-  wire n10;
-  wire n11;
   wire n12;
   wire n13;
-  wire [2:0] n14;
-  wire n16;
-  wire n17;
-  wire [2:0] n18;
-  wire n20;
-  wire n21;
+  wire n14;
+  wire n15;
+  wire [2:0] n16;
+  wire n18;
+  wire n19;
+  wire [2:0] n20;
   wire n22;
   wire n23;
-  wire [3:0] n24;
+  wire n24;
   wire n25;
+  wire [3:0] n26;
   wire n27;
-  wire [3:0] n28;
   wire n29;
+  wire [3:0] n30;
   wire n31;
-  wire n32;
+  wire n33;
   wire n34;
-  wire [3:0] n35;
   wire n36;
+  wire [3:0] n37;
   wire n38;
-  wire n39;
+  wire n40;
   wire n41;
-  wire [3:0] n42;
   wire n43;
+  wire [3:0] n44;
   wire n45;
-  wire n46;
+  wire n47;
   wire n48;
-  wire [3:0] n49;
   wire n50;
+  wire [3:0] n51;
   wire n52;
-  wire n53;
+  wire n54;
   wire n55;
-  wire [3:0] n56;
   wire n57;
+  wire [3:0] n58;
   wire n59;
-  wire [3:0] n60;
-  wire n62;
-  wire [3:0] n63;
-  wire n65;
-  wire [3:0] n66;
-  wire n68;
-  wire [3:0] n69;
-  wire n71;
-  wire [3:0] n72;
-  wire n74;
-  wire [4:0] n75;
-  wire [14:0] n76;
-  wire [7:0] n77;
-  reg [7:0] n78;
-  wire [3:0] n79;
-  reg [3:0] n80;
-  wire [7:0] n81;
-  reg [7:0] n82;
-  wire [3:0] n83;
-  reg [3:0] n84;
-  wire [7:0] n85;
-  reg [7:0] n86;
-  wire [3:0] n87;
-  reg [3:0] n88;
-  wire [7:0] n89;
-  reg [7:0] n90;
-  wire [3:0] n91;
-  reg [3:0] n92;
-  wire [7:0] n93;
-  reg [7:0] n94;
-  wire [3:0] n95;
-  reg [3:0] n96;
-  reg [3:0] n97;
+  wire n61;
+  wire [3:0] n62;
+  wire n64;
+  wire [3:0] n65;
+  wire n67;
+  wire [3:0] n68;
+  wire n70;
+  wire [3:0] n71;
+  wire n73;
+  wire [3:0] n74;
+  wire n76;
+  wire [4:0] n77;
+  wire [14:0] n78;
+  wire [7:0] n79;
+  reg [7:0] n80;
+  wire [3:0] n81;
+  reg [3:0] n82;
+  wire [7:0] n83;
+  reg [7:0] n84;
+  wire [3:0] n85;
+  reg [3:0] n86;
+  wire [7:0] n87;
+  reg [7:0] n88;
+  wire [3:0] n89;
+  reg [3:0] n90;
+  wire [7:0] n91;
+  reg [7:0] n92;
+  wire [3:0] n93;
+  reg [3:0] n94;
+  wire [7:0] n95;
+  reg [7:0] n96;
+  wire [3:0] n97;
   reg [3:0] n98;
   reg [3:0] n99;
   reg [3:0] n100;
   reg [3:0] n101;
-  reg [4:0] n102;
-  reg n103;
-  reg n104;
+  reg [3:0] n102;
+  reg [3:0] n103;
+  reg [4:0] n104;
   reg n105;
   reg n106;
   reg n107;
-  wire n109;
+  reg n108;
+  reg n109;
   wire n111;
   wire n113;
   wire n115;
   wire n117;
-  wire [11:0] n118;
+  wire n119;
   wire [11:0] n120;
   wire [11:0] n122;
   wire [11:0] n124;
   wire [11:0] n126;
-  wire n134;
-  wire n135;
+  wire [11:0] n128;
   wire n136;
   wire n137;
   wire n138;
   wire n139;
-  wire [2:0] n140;
-  wire n142;
-  wire n143;
-  wire n201;
-  wire n202;
+  wire n140;
+  wire n141;
+  wire [2:0] n142;
+  wire n144;
+  wire n145;
   wire n203;
+  wire n204;
   wire n205;
-  wire n206;
   wire n207;
-  wire n211;
-  wire n212;
-  wire n216;
-  wire n217;
-  wire n221;
-  wire n222;
+  wire n208;
+  wire n209;
+  wire n213;
+  wire n214;
+  wire n218;
+  wire n219;
+  wire n223;
   wire n224;
-  reg [11:0] n225_ff_cnt_ch_a;
-  reg [11:0] n225_ff_cnt_ch_b;
-  reg [11:0] n225_ff_cnt_ch_c;
-  reg [11:0] n225_ff_cnt_ch_d;
-  reg [11:0] n225_ff_cnt_ch_e;
-  wire [8:0] n233;
-  wire n235;
-  wire n236;
-  wire n238;
-  wire [4:0] n240;
-  wire [11:0] n242;
-  wire [4:0] n243;
-  wire [11:0] n244;
-  wire [4:0] n246;
-  wire [11:0] n247;
-  wire [8:0] n248;
-  wire n250;
-  wire n251;
-  wire n253;
-  wire [4:0] n255;
-  wire [11:0] n257;
-  wire [4:0] n258;
-  wire [11:0] n259;
-  wire [4:0] n261;
-  wire [11:0] n262;
-  wire [8:0] n263;
-  wire n265;
-  wire n266;
-  wire n268;
-  wire [4:0] n270;
-  wire [11:0] n272;
-  wire [4:0] n273;
-  wire [11:0] n274;
-  wire [4:0] n276;
-  wire [11:0] n277;
-  wire [8:0] n278;
-  wire n280;
-  wire n281;
-  wire n283;
-  wire [4:0] n285;
-  wire [11:0] n287;
-  wire [4:0] n288;
-  wire [11:0] n289;
-  wire [4:0] n291;
-  wire [11:0] n292;
-  wire [8:0] n293;
-  wire n295;
-  wire n296;
-  wire n298;
-  wire [4:0] n300;
-  wire [11:0] n302;
-  wire [4:0] n303;
-  wire [11:0] n304;
-  wire [4:0] n306;
-  wire [11:0] n307;
-  wire [7:0] n349;
-  wire [7:0] n351;
-  wire n353;
-  wire [7:0] n354;
-  wire [7:0] n356;
-  wire n358;
+  wire n226;
+  wire n227;
+  wire n230;
+  wire n231;
+  reg [11:0] n233_ff_cnt_ch_a;
+  reg [11:0] n233_ff_cnt_ch_b;
+  reg [11:0] n233_ff_cnt_ch_c;
+  reg [11:0] n233_ff_cnt_ch_d;
+  reg [11:0] n233_ff_cnt_ch_e;
+  wire [8:0] n241;
+  wire n243;
+  wire n244;
+  wire n246;
+  wire [4:0] n248;
+  wire [11:0] n250;
+  wire [4:0] n251;
+  wire [11:0] n252;
+  wire [4:0] n254;
+  wire [11:0] n255;
+  wire [8:0] n256;
+  wire n258;
+  wire n259;
+  wire n261;
+  wire [4:0] n263;
+  wire [11:0] n265;
+  wire [4:0] n266;
+  wire [11:0] n267;
+  wire [4:0] n269;
+  wire [11:0] n270;
+  wire [8:0] n271;
+  wire n273;
+  wire n274;
+  wire n276;
+  wire [4:0] n278;
+  wire [11:0] n280;
+  wire [4:0] n281;
+  wire [11:0] n282;
+  wire [4:0] n284;
+  wire [11:0] n285;
+  wire [8:0] n286;
+  wire n288;
+  wire n289;
+  wire n291;
+  wire [4:0] n293;
+  wire [11:0] n295;
+  wire [4:0] n296;
+  wire [11:0] n297;
+  wire [4:0] n299;
+  wire [11:0] n300;
+  wire [8:0] n301;
+  wire n303;
+  wire n304;
+  wire n306;
+  wire [4:0] n308;
+  wire [11:0] n310;
+  wire [4:0] n311;
+  wire [11:0] n312;
+  wire [4:0] n314;
+  wire [11:0] n315;
+  wire [7:0] n357;
   wire [7:0] n359;
-  wire [7:0] n361;
-  wire n363;
+  wire n361;
+  wire [7:0] n362;
   wire [7:0] n364;
-  wire [7:0] n366;
-  wire n368;
+  wire n366;
+  wire [7:0] n367;
   wire [7:0] n369;
-  wire [7:0] n371;
+  wire n371;
   wire [7:0] n372;
   wire [7:0] n374;
-  wire [7:0] wavemem_n375;
-  wire n404;
-  wire n407;
-  wire n410;
-  wire n413;
-  wire n416;
-  wire [4:0] n418;
-  reg [4:0] n419;
-  wire n420;
+  wire n376;
+  wire [7:0] n377;
+  wire [7:0] n379;
+  wire [7:0] n380;
+  wire [7:0] n382;
+  wire [7:0] wavemem_n383;
+  wire n412;
+  wire n415;
+  wire n418;
   wire n421;
-  wire n422;
-  wire n423;
   wire n424;
-  wire n425;
-  wire n426;
-  wire n427;
+  wire [4:0] n426;
+  reg [4:0] n427;
   wire n428;
   wire n429;
   wire n430;
@@ -348,315 +352,303 @@ module scc_wave2
   wire n436;
   wire n437;
   wire n438;
-  wire [7:0] n439;
+  wire n439;
+  wire n440;
   wire n441;
+  wire n442;
   wire n443;
+  wire n444;
   wire n445;
-  wire n447;
+  wire n446;
+  wire [7:0] n447;
   wire n449;
-  wire [4:0] n451;
-  reg [3:0] n452;
-  wire [7:0] n453;
-  wire [4:0] n455;
-  wire [12:0] n456;
-  wire [12:0] n457;
-  wire [12:0] n458;
-  wire [11:0] n459;
-  wire n463;
-  wire n465;
-  wire [2:0] n467;
-  wire [2:0] n469;
-  wire n478;
-  wire n480;
-  wire n481;
-  wire n482;
-  wire [1:0] n483;
-  wire n484;
-  wire [2:0] n485;
-  wire [14:0] n486;
-  wire [14:0] n487;
-  wire [14:0] n489;
-  wire n498;
-  wire n500;
-  wire n502;
-  wire [7:0] n510;
-  reg [7:0] n511;
-  wire [11:0] n512;
-  reg [11:0] n513;
-  wire [11:0] n514;
-  reg [11:0] n515;
-  wire [11:0] n516;
-  reg [11:0] n517;
-  wire [11:0] n518;
-  reg [11:0] n519;
+  wire n451;
+  wire n453;
+  wire n455;
+  wire n457;
+  wire [4:0] n459;
+  reg [3:0] n460;
+  wire [7:0] n461;
+  wire [4:0] n463;
+  wire [12:0] n464;
+  wire [12:0] n465;
+  wire [12:0] n466;
+  wire [11:0] n467;
+  wire n471;
+  wire n473;
+  wire [2:0] n475;
+  wire [2:0] n477;
+  wire n486;
+  wire n488;
+  wire n489;
+  wire n490;
+  wire [1:0] n491;
+  wire n492;
+  wire [2:0] n493;
+  wire [14:0] n494;
+  wire [14:0] n495;
+  wire [14:0] n497;
+  wire n506;
+  wire n508;
+  wire n510;
+  wire [7:0] n518;
+  reg [7:0] n519;
   wire [11:0] n520;
   reg [11:0] n521;
-  wire [3:0] n522;
-  reg [3:0] n523;
-  wire [3:0] n524;
-  reg [3:0] n525;
-  wire [3:0] n526;
-  reg [3:0] n527;
-  wire [3:0] n528;
-  reg [3:0] n529;
+  wire [11:0] n522;
+  reg [11:0] n523;
+  wire [11:0] n524;
+  reg [11:0] n525;
+  wire [11:0] n526;
+  reg [11:0] n527;
+  wire [11:0] n528;
+  reg [11:0] n529;
   wire [3:0] n530;
   reg [3:0] n531;
-  wire [4:0] n532;
-  reg [4:0] n533;
-  wire [7:0] n534;
-  reg [7:0] n535;
-  reg n536;
-  reg n537;
-  reg n538;
-  reg n539;
-  reg n540;
-  wire [4:0] n541;
-  reg [4:0] n542;
-  wire [4:0] n543;
-  reg [4:0] n544;
-  wire [4:0] n545;
-  reg [4:0] n546;
-  wire [4:0] n547;
-  reg [4:0] n548;
+  wire [3:0] n532;
+  reg [3:0] n533;
+  wire [3:0] n534;
+  reg [3:0] n535;
+  wire [3:0] n536;
+  reg [3:0] n537;
+  wire [3:0] n538;
+  reg [3:0] n539;
+  wire [4:0] n540;
+  reg [4:0] n541;
+  wire [7:0] n542;
+  reg [7:0] n543;
+  reg n544;
+  reg n545;
+  reg n546;
+  reg n547;
+  reg n548;
   wire [4:0] n549;
   reg [4:0] n550;
-  wire [2:0] n551;
-  reg [2:0] n552;
-  reg [2:0] n553;
-  wire [14:0] n554;
-  reg [14:0] n555;
-  reg n556;
-  reg n557;
-  reg n558;
-  reg [7:0] n559;
-  wire [14:0] n560;
-  reg [14:0] n561;
-  wire [11:0] n562;
-  reg [11:0] n563;
-  wire [11:0] n564;
-  reg [11:0] n565;
-  wire [11:0] n566;
-  reg [11:0] n567;
-  wire [11:0] n568;
-  reg [11:0] n569;
+  wire [4:0] n551;
+  reg [4:0] n552;
+  wire [4:0] n553;
+  reg [4:0] n554;
+  wire [4:0] n555;
+  reg [4:0] n556;
+  wire [4:0] n557;
+  reg [4:0] n558;
+  wire [2:0] n559;
+  reg [2:0] n560;
+  reg [2:0] n561;
+  wire [14:0] n562;
+  reg [14:0] n563;
+  reg n564;
+  reg n565;
+  reg n566;
+  reg [7:0] n567;
+  wire [14:0] n568;
+  reg [14:0] n569;
   wire [11:0] n570;
   reg [11:0] n571;
+  wire [11:0] n572;
+  reg [11:0] n573;
+  wire [11:0] n574;
+  reg [11:0] n575;
+  wire [11:0] n576;
+  reg [11:0] n577;
+  wire [11:0] n578;
+  reg [11:0] n579;
   assign ack = ff_req_dl; //(module output)
-  assign dbi = n511; //(module output)
+  assign dbi = n519; //(module output)
   assign wave = ff_wave; //(module output)
-  assign dbg_vol_nz = n212; //(module output)
-  assign dbg_sel_nz = n217; //(module output)
-  assign dbg_freq_nz = n222; //(module output)
-  assign dbg_ptr_lsb = n224; //(module output)
-  /*# scc_wave2.vhd:124:12 */
-  assign w_wave_ce = n203; // (signal)
-  /*# scc_wave2.vhd:125:12 */
-  assign w_wave_we = n207; // (signal)
-  /*# scc_wave2.vhd:126:12 */
-  assign w_wave_adr = n349; // (signal)
+  assign dbg_vol_nz = n214; //(module output)
+  assign dbg_sel_nz = n219; //(module output)
+  assign dbg_freq_nz = n224; //(module output)
+  assign dbg_ptr_lsb = n226; //(module output)
+  assign dbg_scan_lsb = n227; //(module output)
+  assign dbg_mix_nz = n231; //(module output)
   /*# scc_wave2.vhd:127:12 */
-  assign w_ch_dec = n419; // (signal)
+  assign w_wave_ce = n205; // (signal)
   /*# scc_wave2.vhd:128:12 */
-  assign w_ch_bit = n438; // (signal)
+  assign w_wave_we = n209; // (signal)
   /*# scc_wave2.vhd:129:12 */
-  assign w_ch_mask = n439; // (signal)
+  assign w_wave_adr = n357; // (signal)
   /*# scc_wave2.vhd:130:12 */
-  assign w_ch_vol = n452; // (signal)
+  assign w_ch_dec = n427; // (signal)
   /*# scc_wave2.vhd:131:12 */
-  assign w_wave = n453; // (signal)
+  assign w_ch_bit = n446; // (signal)
   /*# scc_wave2.vhd:132:12 */
-  assign w_mul = n459; // (signal)
+  assign w_ch_mask = n447; // (signal)
   /*# scc_wave2.vhd:133:12 */
-  assign w_mul_s = n458; // (signal)
+  assign w_ch_vol = n460; // (signal)
   /*# scc_wave2.vhd:134:12 */
-  assign ram_dbi = wavemem_n375; // (signal)
-  /*# scc_wave2.vhd:140:12 */
-  assign reg_freq_ch_a = n513; // (signal)
-  /*# scc_wave2.vhd:141:12 */
-  assign reg_freq_ch_b = n515; // (signal)
-  /*# scc_wave2.vhd:142:12 */
-  assign reg_freq_ch_c = n517; // (signal)
+  assign w_wave = n461; // (signal)
+  /*# scc_wave2.vhd:135:12 */
+  assign w_mul = n467; // (signal)
+  /*# scc_wave2.vhd:136:12 */
+  assign w_mul_s = n466; // (signal)
+  /*# scc_wave2.vhd:137:12 */
+  assign ram_dbi = wavemem_n383; // (signal)
   /*# scc_wave2.vhd:143:12 */
-  assign reg_freq_ch_d = n519; // (signal)
+  assign reg_freq_ch_a = n521; // (signal)
   /*# scc_wave2.vhd:144:12 */
-  assign reg_freq_ch_e = n521; // (signal)
+  assign reg_freq_ch_b = n523; // (signal)
   /*# scc_wave2.vhd:145:12 */
-  assign reg_vol_ch_a = n523; // (signal)
+  assign reg_freq_ch_c = n525; // (signal)
   /*# scc_wave2.vhd:146:12 */
-  assign reg_vol_ch_b = n525; // (signal)
+  assign reg_freq_ch_d = n527; // (signal)
   /*# scc_wave2.vhd:147:12 */
-  assign reg_vol_ch_c = n527; // (signal)
+  assign reg_freq_ch_e = n529; // (signal)
   /*# scc_wave2.vhd:148:12 */
-  assign reg_vol_ch_d = n529; // (signal)
+  assign reg_vol_ch_a = n531; // (signal)
   /*# scc_wave2.vhd:149:12 */
-  assign reg_vol_ch_e = n531; // (signal)
+  assign reg_vol_ch_b = n533; // (signal)
   /*# scc_wave2.vhd:150:12 */
-  assign reg_ch_sel = n533; // (signal)
+  assign reg_vol_ch_c = n535; // (signal)
   /*# scc_wave2.vhd:151:12 */
-  assign reg_mode_sel = n535; // (signal)
+  assign reg_vol_ch_d = n537; // (signal)
+  /*# scc_wave2.vhd:152:12 */
+  assign reg_vol_ch_e = n539; // (signal)
+  /*# scc_wave2.vhd:153:12 */
+  assign reg_ch_sel = n541; // (signal)
   /*# scc_wave2.vhd:154:12 */
-  assign ff_rst_ch_a = n536; // (signal)
-  /*# scc_wave2.vhd:155:12 */
-  assign ff_rst_ch_b = n537; // (signal)
-  /*# scc_wave2.vhd:156:12 */
-  assign ff_rst_ch_c = n538; // (signal)
+  assign reg_mode_sel = n543; // (signal)
   /*# scc_wave2.vhd:157:12 */
-  assign ff_rst_ch_d = n539; // (signal)
+  assign ff_rst_ch_a = n544; // (signal)
   /*# scc_wave2.vhd:158:12 */
-  assign ff_rst_ch_e = n540; // (signal)
+  assign ff_rst_ch_b = n545; // (signal)
   /*# scc_wave2.vhd:159:12 */
-  assign ff_ptr_ch_a = n542; // (signal)
+  assign ff_rst_ch_c = n546; // (signal)
   /*# scc_wave2.vhd:160:12 */
-  assign ff_ptr_ch_b = n544; // (signal)
+  assign ff_rst_ch_d = n547; // (signal)
   /*# scc_wave2.vhd:161:12 */
-  assign ff_ptr_ch_c = n546; // (signal)
+  assign ff_rst_ch_e = n548; // (signal)
   /*# scc_wave2.vhd:162:12 */
-  assign ff_ptr_ch_d = n548; // (signal)
+  assign ff_ptr_ch_a = n550; // (signal)
   /*# scc_wave2.vhd:163:12 */
-  assign ff_ptr_ch_e = n550; // (signal)
+  assign ff_ptr_ch_b = n552; // (signal)
   /*# scc_wave2.vhd:164:12 */
-  assign ff_ch_num = n552; // (signal)
+  assign ff_ptr_ch_c = n554; // (signal)
   /*# scc_wave2.vhd:165:12 */
-  assign ff_ch_num_dl = n553; // (signal)
+  assign ff_ptr_ch_d = n556; // (signal)
   /*# scc_wave2.vhd:166:12 */
-  assign ff_mix = n555; // (signal)
+  assign ff_ptr_ch_e = n558; // (signal)
   /*# scc_wave2.vhd:167:12 */
-  assign ff_wave_ce = n556; // (signal)
+  assign ff_ch_num = n560; // (signal)
   /*# scc_wave2.vhd:168:12 */
-  assign ff_wave_ce_dl = n557; // (signal)
+  assign ff_ch_num_dl = n561; // (signal)
   /*# scc_wave2.vhd:169:12 */
-  assign ff_req_dl = n558; // (signal)
+  assign ff_mix = n563; // (signal)
   /*# scc_wave2.vhd:170:12 */
-  assign ff_wave_dat = n559; // (signal)
+  assign ff_wave_ce = n564; // (signal)
   /*# scc_wave2.vhd:171:12 */
-  assign ff_wave = n561; // (signal)
-  /*# scc_wave2.vhd:205:41 */
-  assign n10 = ~ff_req_dl;
-  /*# scc_wave2.vhd:205:27 */
-  assign n11 = n10 & req;
-  /*# scc_wave2.vhd:205:47 */
-  assign n12 = wrt & n11;
-  /*# scc_wave2.vhd:206:27 */
-  assign n13 = ~sccplus;
-  /*# scc_wave2.vhd:206:40 */
-  assign n14 = adr[7:5]; // extract
-  /*# scc_wave2.vhd:206:53 */
-  assign n16 = n14 == 3'b100;
-  /*# scc_wave2.vhd:206:33 */
-  assign n17 = n16 & n13;
-  /*# scc_wave2.vhd:207:40 */
-  assign n18 = adr[7:5]; // extract
-  /*# scc_wave2.vhd:207:53 */
-  assign n20 = n18 == 3'b101;
-  /*# scc_wave2.vhd:207:33 */
-  assign n21 = n20 & sccplus;
-  /*# scc_wave2.vhd:206:62 */
-  assign n22 = n17 | n21;
-  /*# scc_wave2.vhd:205:61 */
-  assign n23 = n22 & n12;
-  /*# scc_wave2.vhd:208:25 */
-  assign n24 = adr[3:0]; // extract
-  /*# scc_wave2.vhd:209:114 */
-  assign n25 = reg_mode_sel[5]; // extract
-  /*# scc_wave2.vhd:209:21 */
-  assign n27 = n24 == 4'b0000;
-  /*# scc_wave2.vhd:210:71 */
-  assign n28 = dbo[3:0]; // extract
-  /*# scc_wave2.vhd:210:114 */
-  assign n29 = reg_mode_sel[5]; // extract
-  /*# scc_wave2.vhd:210:21 */
-  assign n31 = n24 == 4'b0001;
-  /*# scc_wave2.vhd:211:114 */
-  assign n32 = reg_mode_sel[5]; // extract
-  /*# scc_wave2.vhd:211:21 */
-  assign n34 = n24 == 4'b0010;
-  /*# scc_wave2.vhd:212:71 */
-  assign n35 = dbo[3:0]; // extract
+  assign ff_wave_ce_dl = n565; // (signal)
+  /*# scc_wave2.vhd:172:12 */
+  assign ff_req_dl = n566; // (signal)
+  /*# scc_wave2.vhd:173:12 */
+  assign ff_wave_dat = n567; // (signal)
+  /*# scc_wave2.vhd:174:12 */
+  assign ff_wave = n569; // (signal)
+  /*# scc_wave2.vhd:208:41 */
+  assign n12 = ~ff_req_dl;
+  /*# scc_wave2.vhd:208:27 */
+  assign n13 = n12 & req;
+  /*# scc_wave2.vhd:208:47 */
+  assign n14 = wrt & n13;
+  /*# scc_wave2.vhd:209:27 */
+  assign n15 = ~sccplus;
+  /*# scc_wave2.vhd:209:40 */
+  assign n16 = adr[7:5]; // extract
+  /*# scc_wave2.vhd:209:53 */
+  assign n18 = n16 == 3'b100;
+  /*# scc_wave2.vhd:209:33 */
+  assign n19 = n18 & n15;
+  /*# scc_wave2.vhd:210:40 */
+  assign n20 = adr[7:5]; // extract
+  /*# scc_wave2.vhd:210:53 */
+  assign n22 = n20 == 3'b101;
+  /*# scc_wave2.vhd:210:33 */
+  assign n23 = n22 & sccplus;
+  /*# scc_wave2.vhd:209:62 */
+  assign n24 = n19 | n23;
+  /*# scc_wave2.vhd:208:61 */
+  assign n25 = n24 & n14;
+  /*# scc_wave2.vhd:211:25 */
+  assign n26 = adr[3:0]; // extract
   /*# scc_wave2.vhd:212:114 */
-  assign n36 = reg_mode_sel[5]; // extract
+  assign n27 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:212:21 */
-  assign n38 = n24 == 4'b0011;
+  assign n29 = n26 == 4'b0000;
+  /*# scc_wave2.vhd:213:71 */
+  assign n30 = dbo[3:0]; // extract
   /*# scc_wave2.vhd:213:114 */
-  assign n39 = reg_mode_sel[5]; // extract
+  assign n31 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:213:21 */
-  assign n41 = n24 == 4'b0100;
-  /*# scc_wave2.vhd:214:71 */
-  assign n42 = dbo[3:0]; // extract
+  assign n33 = n26 == 4'b0001;
   /*# scc_wave2.vhd:214:114 */
-  assign n43 = reg_mode_sel[5]; // extract
+  assign n34 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:214:21 */
-  assign n45 = n24 == 4'b0101;
+  assign n36 = n26 == 4'b0010;
+  /*# scc_wave2.vhd:215:71 */
+  assign n37 = dbo[3:0]; // extract
   /*# scc_wave2.vhd:215:114 */
-  assign n46 = reg_mode_sel[5]; // extract
+  assign n38 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:215:21 */
-  assign n48 = n24 == 4'b0110;
-  /*# scc_wave2.vhd:216:71 */
-  assign n49 = dbo[3:0]; // extract
+  assign n40 = n26 == 4'b0011;
   /*# scc_wave2.vhd:216:114 */
-  assign n50 = reg_mode_sel[5]; // extract
+  assign n41 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:216:21 */
-  assign n52 = n24 == 4'b0111;
+  assign n43 = n26 == 4'b0100;
+  /*# scc_wave2.vhd:217:71 */
+  assign n44 = dbo[3:0]; // extract
   /*# scc_wave2.vhd:217:114 */
-  assign n53 = reg_mode_sel[5]; // extract
+  assign n45 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:217:21 */
-  assign n55 = n24 == 4'b1000;
-  /*# scc_wave2.vhd:218:71 */
-  assign n56 = dbo[3:0]; // extract
+  assign n47 = n26 == 4'b0101;
   /*# scc_wave2.vhd:218:114 */
-  assign n57 = reg_mode_sel[5]; // extract
+  assign n48 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:218:21 */
-  assign n59 = n24 == 4'b1001;
+  assign n50 = n26 == 4'b0110;
   /*# scc_wave2.vhd:219:71 */
-  assign n60 = dbo[3:0]; // extract
+  assign n51 = dbo[3:0]; // extract
+  /*# scc_wave2.vhd:219:114 */
+  assign n52 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:219:21 */
-  assign n62 = n24 == 4'b1010;
-  /*# scc_wave2.vhd:220:71 */
-  assign n63 = dbo[3:0]; // extract
+  assign n54 = n26 == 4'b0111;
+  /*# scc_wave2.vhd:220:114 */
+  assign n55 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:220:21 */
-  assign n65 = n24 == 4'b1011;
+  assign n57 = n26 == 4'b1000;
   /*# scc_wave2.vhd:221:71 */
-  assign n66 = dbo[3:0]; // extract
+  assign n58 = dbo[3:0]; // extract
+  /*# scc_wave2.vhd:221:114 */
+  assign n59 = reg_mode_sel[5]; // extract
   /*# scc_wave2.vhd:221:21 */
-  assign n68 = n24 == 4'b1100;
+  assign n61 = n26 == 4'b1001;
   /*# scc_wave2.vhd:222:71 */
-  assign n69 = dbo[3:0]; // extract
+  assign n62 = dbo[3:0]; // extract
   /*# scc_wave2.vhd:222:21 */
-  assign n71 = n24 == 4'b1101;
+  assign n64 = n26 == 4'b1010;
   /*# scc_wave2.vhd:223:71 */
-  assign n72 = dbo[3:0]; // extract
+  assign n65 = dbo[3:0]; // extract
   /*# scc_wave2.vhd:223:21 */
-  assign n74 = n24 == 4'b1110;
+  assign n67 = n26 == 4'b1011;
   /*# scc_wave2.vhd:224:71 */
-  assign n75 = dbo[4:0]; // extract
-  /*# scc_wave2.vhd:208:17 */
-  assign n76 = {n74, n71, n68, n65, n62, n59, n55, n52, n48, n45, n41, n38, n34, n31, n27};
-  /*# scc_wave2.vhd:140:12 */
-  assign n77 = reg_freq_ch_a[7:0]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  assign n68 = dbo[3:0]; // extract
+  /*# scc_wave2.vhd:224:21 */
+  assign n70 = n26 == 4'b1100;
+  /*# scc_wave2.vhd:225:71 */
+  assign n71 = dbo[3:0]; // extract
+  /*# scc_wave2.vhd:225:21 */
+  assign n73 = n26 == 4'b1101;
+  /*# scc_wave2.vhd:226:71 */
+  assign n74 = dbo[3:0]; // extract
+  /*# scc_wave2.vhd:226:21 */
+  assign n76 = n26 == 4'b1110;
+  /*# scc_wave2.vhd:227:71 */
+  assign n77 = dbo[4:0]; // extract
+  /*# scc_wave2.vhd:211:17 */
+  assign n78 = {n76, n73, n70, n67, n64, n61, n57, n54, n50, n47, n43, n40, n36, n33, n29};
+  /*# scc_wave2.vhd:143:12 */
+  assign n79 = reg_freq_ch_a[7:0]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n78 = n77;
-      15'b010000000000000: n78 = n77;
-      15'b001000000000000: n78 = n77;
-      15'b000100000000000: n78 = n77;
-      15'b000010000000000: n78 = n77;
-      15'b000001000000000: n78 = n77;
-      15'b000000100000000: n78 = n77;
-      15'b000000010000000: n78 = n77;
-      15'b000000001000000: n78 = n77;
-      15'b000000000100000: n78 = n77;
-      15'b000000000010000: n78 = n77;
-      15'b000000000001000: n78 = n77;
-      15'b000000000000100: n78 = n77;
-      15'b000000000000010: n78 = n77;
-      15'b000000000000001: n78 = dbo;
-      default: n78 = n77;
-    endcase
-  /*# scc_wave2.vhd:140:12 */
-  assign n79 = reg_freq_ch_a[11:8]; // extract
-  /*# scc_wave2.vhd:208:17 */
-  always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n80 = n79;
       15'b010000000000000: n80 = n79;
       15'b001000000000000: n80 = n79;
@@ -670,15 +662,15 @@ module scc_wave2
       15'b000000000010000: n80 = n79;
       15'b000000000001000: n80 = n79;
       15'b000000000000100: n80 = n79;
-      15'b000000000000010: n80 = n28;
-      15'b000000000000001: n80 = n79;
+      15'b000000000000010: n80 = n79;
+      15'b000000000000001: n80 = dbo;
       default: n80 = n79;
     endcase
-  /*# scc_wave2.vhd:141:12 */
-  assign n81 = reg_freq_ch_b[7:0]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:143:12 */
+  assign n81 = reg_freq_ch_a[11:8]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n82 = n81;
       15'b010000000000000: n82 = n81;
       15'b001000000000000: n82 = n81;
@@ -691,16 +683,16 @@ module scc_wave2
       15'b000000000100000: n82 = n81;
       15'b000000000010000: n82 = n81;
       15'b000000000001000: n82 = n81;
-      15'b000000000000100: n82 = dbo;
-      15'b000000000000010: n82 = n81;
+      15'b000000000000100: n82 = n81;
+      15'b000000000000010: n82 = n30;
       15'b000000000000001: n82 = n81;
       default: n82 = n81;
     endcase
-  /*# scc_wave2.vhd:141:12 */
-  assign n83 = reg_freq_ch_b[11:8]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:144:12 */
+  assign n83 = reg_freq_ch_b[7:0]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n84 = n83;
       15'b010000000000000: n84 = n83;
       15'b001000000000000: n84 = n83;
@@ -712,17 +704,17 @@ module scc_wave2
       15'b000000001000000: n84 = n83;
       15'b000000000100000: n84 = n83;
       15'b000000000010000: n84 = n83;
-      15'b000000000001000: n84 = n35;
-      15'b000000000000100: n84 = n83;
+      15'b000000000001000: n84 = n83;
+      15'b000000000000100: n84 = dbo;
       15'b000000000000010: n84 = n83;
       15'b000000000000001: n84 = n83;
       default: n84 = n83;
     endcase
-  /*# scc_wave2.vhd:142:12 */
-  assign n85 = reg_freq_ch_c[7:0]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:144:12 */
+  assign n85 = reg_freq_ch_b[11:8]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n86 = n85;
       15'b010000000000000: n86 = n85;
       15'b001000000000000: n86 = n85;
@@ -733,18 +725,18 @@ module scc_wave2
       15'b000000010000000: n86 = n85;
       15'b000000001000000: n86 = n85;
       15'b000000000100000: n86 = n85;
-      15'b000000000010000: n86 = dbo;
-      15'b000000000001000: n86 = n85;
+      15'b000000000010000: n86 = n85;
+      15'b000000000001000: n86 = n37;
       15'b000000000000100: n86 = n85;
       15'b000000000000010: n86 = n85;
       15'b000000000000001: n86 = n85;
       default: n86 = n85;
     endcase
-  /*# scc_wave2.vhd:142:12 */
-  assign n87 = reg_freq_ch_c[11:8]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:145:12 */
+  assign n87 = reg_freq_ch_c[7:0]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n88 = n87;
       15'b010000000000000: n88 = n87;
       15'b001000000000000: n88 = n87;
@@ -754,19 +746,19 @@ module scc_wave2
       15'b000000100000000: n88 = n87;
       15'b000000010000000: n88 = n87;
       15'b000000001000000: n88 = n87;
-      15'b000000000100000: n88 = n42;
-      15'b000000000010000: n88 = n87;
+      15'b000000000100000: n88 = n87;
+      15'b000000000010000: n88 = dbo;
       15'b000000000001000: n88 = n87;
       15'b000000000000100: n88 = n87;
       15'b000000000000010: n88 = n87;
       15'b000000000000001: n88 = n87;
       default: n88 = n87;
     endcase
-  /*# scc_wave2.vhd:143:12 */
-  assign n89 = reg_freq_ch_d[7:0]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:145:12 */
+  assign n89 = reg_freq_ch_c[11:8]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n90 = n89;
       15'b010000000000000: n90 = n89;
       15'b001000000000000: n90 = n89;
@@ -775,8 +767,8 @@ module scc_wave2
       15'b000001000000000: n90 = n89;
       15'b000000100000000: n90 = n89;
       15'b000000010000000: n90 = n89;
-      15'b000000001000000: n90 = dbo;
-      15'b000000000100000: n90 = n89;
+      15'b000000001000000: n90 = n89;
+      15'b000000000100000: n90 = n44;
       15'b000000000010000: n90 = n89;
       15'b000000000001000: n90 = n89;
       15'b000000000000100: n90 = n89;
@@ -784,11 +776,11 @@ module scc_wave2
       15'b000000000000001: n90 = n89;
       default: n90 = n89;
     endcase
-  /*# scc_wave2.vhd:143:12 */
-  assign n91 = reg_freq_ch_d[11:8]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:146:12 */
+  assign n91 = reg_freq_ch_d[7:0]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n92 = n91;
       15'b010000000000000: n92 = n91;
       15'b001000000000000: n92 = n91;
@@ -796,8 +788,8 @@ module scc_wave2
       15'b000010000000000: n92 = n91;
       15'b000001000000000: n92 = n91;
       15'b000000100000000: n92 = n91;
-      15'b000000010000000: n92 = n49;
-      15'b000000001000000: n92 = n91;
+      15'b000000010000000: n92 = n91;
+      15'b000000001000000: n92 = dbo;
       15'b000000000100000: n92 = n91;
       15'b000000000010000: n92 = n91;
       15'b000000000001000: n92 = n91;
@@ -806,19 +798,19 @@ module scc_wave2
       15'b000000000000001: n92 = n91;
       default: n92 = n91;
     endcase
-  /*# scc_wave2.vhd:144:12 */
-  assign n93 = reg_freq_ch_e[7:0]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:146:12 */
+  assign n93 = reg_freq_ch_d[11:8]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n94 = n93;
       15'b010000000000000: n94 = n93;
       15'b001000000000000: n94 = n93;
       15'b000100000000000: n94 = n93;
       15'b000010000000000: n94 = n93;
       15'b000001000000000: n94 = n93;
-      15'b000000100000000: n94 = dbo;
-      15'b000000010000000: n94 = n93;
+      15'b000000100000000: n94 = n93;
+      15'b000000010000000: n94 = n51;
       15'b000000001000000: n94 = n93;
       15'b000000000100000: n94 = n93;
       15'b000000000010000: n94 = n93;
@@ -828,18 +820,18 @@ module scc_wave2
       15'b000000000000001: n94 = n93;
       default: n94 = n93;
     endcase
-  /*# scc_wave2.vhd:144:12 */
-  assign n95 = reg_freq_ch_e[11:8]; // extract
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:147:12 */
+  assign n95 = reg_freq_ch_e[7:0]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
+    case (n78)
       15'b100000000000000: n96 = n95;
       15'b010000000000000: n96 = n95;
       15'b001000000000000: n96 = n95;
       15'b000100000000000: n96 = n95;
       15'b000010000000000: n96 = n95;
-      15'b000001000000000: n96 = n56;
-      15'b000000100000000: n96 = n95;
+      15'b000001000000000: n96 = n95;
+      15'b000000100000000: n96 = dbo;
       15'b000000010000000: n96 = n95;
       15'b000000001000000: n96 = n95;
       15'b000000000100000: n96 = n95;
@@ -850,851 +842,879 @@ module scc_wave2
       15'b000000000000001: n96 = n95;
       default: n96 = n95;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:147:12 */
+  assign n97 = reg_freq_ch_e[11:8]; // extract
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n97 = reg_vol_ch_a;
-      15'b010000000000000: n97 = reg_vol_ch_a;
-      15'b001000000000000: n97 = reg_vol_ch_a;
-      15'b000100000000000: n97 = reg_vol_ch_a;
-      15'b000010000000000: n97 = n60;
-      15'b000001000000000: n97 = reg_vol_ch_a;
-      15'b000000100000000: n97 = reg_vol_ch_a;
-      15'b000000010000000: n97 = reg_vol_ch_a;
-      15'b000000001000000: n97 = reg_vol_ch_a;
-      15'b000000000100000: n97 = reg_vol_ch_a;
-      15'b000000000010000: n97 = reg_vol_ch_a;
-      15'b000000000001000: n97 = reg_vol_ch_a;
-      15'b000000000000100: n97 = reg_vol_ch_a;
-      15'b000000000000010: n97 = reg_vol_ch_a;
-      15'b000000000000001: n97 = reg_vol_ch_a;
-      default: n97 = reg_vol_ch_a;
+    case (n78)
+      15'b100000000000000: n98 = n97;
+      15'b010000000000000: n98 = n97;
+      15'b001000000000000: n98 = n97;
+      15'b000100000000000: n98 = n97;
+      15'b000010000000000: n98 = n97;
+      15'b000001000000000: n98 = n58;
+      15'b000000100000000: n98 = n97;
+      15'b000000010000000: n98 = n97;
+      15'b000000001000000: n98 = n97;
+      15'b000000000100000: n98 = n97;
+      15'b000000000010000: n98 = n97;
+      15'b000000000001000: n98 = n97;
+      15'b000000000000100: n98 = n97;
+      15'b000000000000010: n98 = n97;
+      15'b000000000000001: n98 = n97;
+      default: n98 = n97;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n98 = reg_vol_ch_b;
-      15'b010000000000000: n98 = reg_vol_ch_b;
-      15'b001000000000000: n98 = reg_vol_ch_b;
-      15'b000100000000000: n98 = n63;
-      15'b000010000000000: n98 = reg_vol_ch_b;
-      15'b000001000000000: n98 = reg_vol_ch_b;
-      15'b000000100000000: n98 = reg_vol_ch_b;
-      15'b000000010000000: n98 = reg_vol_ch_b;
-      15'b000000001000000: n98 = reg_vol_ch_b;
-      15'b000000000100000: n98 = reg_vol_ch_b;
-      15'b000000000010000: n98 = reg_vol_ch_b;
-      15'b000000000001000: n98 = reg_vol_ch_b;
-      15'b000000000000100: n98 = reg_vol_ch_b;
-      15'b000000000000010: n98 = reg_vol_ch_b;
-      15'b000000000000001: n98 = reg_vol_ch_b;
-      default: n98 = reg_vol_ch_b;
+    case (n78)
+      15'b100000000000000: n99 = reg_vol_ch_a;
+      15'b010000000000000: n99 = reg_vol_ch_a;
+      15'b001000000000000: n99 = reg_vol_ch_a;
+      15'b000100000000000: n99 = reg_vol_ch_a;
+      15'b000010000000000: n99 = n62;
+      15'b000001000000000: n99 = reg_vol_ch_a;
+      15'b000000100000000: n99 = reg_vol_ch_a;
+      15'b000000010000000: n99 = reg_vol_ch_a;
+      15'b000000001000000: n99 = reg_vol_ch_a;
+      15'b000000000100000: n99 = reg_vol_ch_a;
+      15'b000000000010000: n99 = reg_vol_ch_a;
+      15'b000000000001000: n99 = reg_vol_ch_a;
+      15'b000000000000100: n99 = reg_vol_ch_a;
+      15'b000000000000010: n99 = reg_vol_ch_a;
+      15'b000000000000001: n99 = reg_vol_ch_a;
+      default: n99 = reg_vol_ch_a;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n99 = reg_vol_ch_c;
-      15'b010000000000000: n99 = reg_vol_ch_c;
-      15'b001000000000000: n99 = n66;
-      15'b000100000000000: n99 = reg_vol_ch_c;
-      15'b000010000000000: n99 = reg_vol_ch_c;
-      15'b000001000000000: n99 = reg_vol_ch_c;
-      15'b000000100000000: n99 = reg_vol_ch_c;
-      15'b000000010000000: n99 = reg_vol_ch_c;
-      15'b000000001000000: n99 = reg_vol_ch_c;
-      15'b000000000100000: n99 = reg_vol_ch_c;
-      15'b000000000010000: n99 = reg_vol_ch_c;
-      15'b000000000001000: n99 = reg_vol_ch_c;
-      15'b000000000000100: n99 = reg_vol_ch_c;
-      15'b000000000000010: n99 = reg_vol_ch_c;
-      15'b000000000000001: n99 = reg_vol_ch_c;
-      default: n99 = reg_vol_ch_c;
+    case (n78)
+      15'b100000000000000: n100 = reg_vol_ch_b;
+      15'b010000000000000: n100 = reg_vol_ch_b;
+      15'b001000000000000: n100 = reg_vol_ch_b;
+      15'b000100000000000: n100 = n65;
+      15'b000010000000000: n100 = reg_vol_ch_b;
+      15'b000001000000000: n100 = reg_vol_ch_b;
+      15'b000000100000000: n100 = reg_vol_ch_b;
+      15'b000000010000000: n100 = reg_vol_ch_b;
+      15'b000000001000000: n100 = reg_vol_ch_b;
+      15'b000000000100000: n100 = reg_vol_ch_b;
+      15'b000000000010000: n100 = reg_vol_ch_b;
+      15'b000000000001000: n100 = reg_vol_ch_b;
+      15'b000000000000100: n100 = reg_vol_ch_b;
+      15'b000000000000010: n100 = reg_vol_ch_b;
+      15'b000000000000001: n100 = reg_vol_ch_b;
+      default: n100 = reg_vol_ch_b;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n100 = reg_vol_ch_d;
-      15'b010000000000000: n100 = n69;
-      15'b001000000000000: n100 = reg_vol_ch_d;
-      15'b000100000000000: n100 = reg_vol_ch_d;
-      15'b000010000000000: n100 = reg_vol_ch_d;
-      15'b000001000000000: n100 = reg_vol_ch_d;
-      15'b000000100000000: n100 = reg_vol_ch_d;
-      15'b000000010000000: n100 = reg_vol_ch_d;
-      15'b000000001000000: n100 = reg_vol_ch_d;
-      15'b000000000100000: n100 = reg_vol_ch_d;
-      15'b000000000010000: n100 = reg_vol_ch_d;
-      15'b000000000001000: n100 = reg_vol_ch_d;
-      15'b000000000000100: n100 = reg_vol_ch_d;
-      15'b000000000000010: n100 = reg_vol_ch_d;
-      15'b000000000000001: n100 = reg_vol_ch_d;
-      default: n100 = reg_vol_ch_d;
+    case (n78)
+      15'b100000000000000: n101 = reg_vol_ch_c;
+      15'b010000000000000: n101 = reg_vol_ch_c;
+      15'b001000000000000: n101 = n68;
+      15'b000100000000000: n101 = reg_vol_ch_c;
+      15'b000010000000000: n101 = reg_vol_ch_c;
+      15'b000001000000000: n101 = reg_vol_ch_c;
+      15'b000000100000000: n101 = reg_vol_ch_c;
+      15'b000000010000000: n101 = reg_vol_ch_c;
+      15'b000000001000000: n101 = reg_vol_ch_c;
+      15'b000000000100000: n101 = reg_vol_ch_c;
+      15'b000000000010000: n101 = reg_vol_ch_c;
+      15'b000000000001000: n101 = reg_vol_ch_c;
+      15'b000000000000100: n101 = reg_vol_ch_c;
+      15'b000000000000010: n101 = reg_vol_ch_c;
+      15'b000000000000001: n101 = reg_vol_ch_c;
+      default: n101 = reg_vol_ch_c;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n101 = n72;
-      15'b010000000000000: n101 = reg_vol_ch_e;
-      15'b001000000000000: n101 = reg_vol_ch_e;
-      15'b000100000000000: n101 = reg_vol_ch_e;
-      15'b000010000000000: n101 = reg_vol_ch_e;
-      15'b000001000000000: n101 = reg_vol_ch_e;
-      15'b000000100000000: n101 = reg_vol_ch_e;
-      15'b000000010000000: n101 = reg_vol_ch_e;
-      15'b000000001000000: n101 = reg_vol_ch_e;
-      15'b000000000100000: n101 = reg_vol_ch_e;
-      15'b000000000010000: n101 = reg_vol_ch_e;
-      15'b000000000001000: n101 = reg_vol_ch_e;
-      15'b000000000000100: n101 = reg_vol_ch_e;
-      15'b000000000000010: n101 = reg_vol_ch_e;
-      15'b000000000000001: n101 = reg_vol_ch_e;
-      default: n101 = reg_vol_ch_e;
+    case (n78)
+      15'b100000000000000: n102 = reg_vol_ch_d;
+      15'b010000000000000: n102 = n71;
+      15'b001000000000000: n102 = reg_vol_ch_d;
+      15'b000100000000000: n102 = reg_vol_ch_d;
+      15'b000010000000000: n102 = reg_vol_ch_d;
+      15'b000001000000000: n102 = reg_vol_ch_d;
+      15'b000000100000000: n102 = reg_vol_ch_d;
+      15'b000000010000000: n102 = reg_vol_ch_d;
+      15'b000000001000000: n102 = reg_vol_ch_d;
+      15'b000000000100000: n102 = reg_vol_ch_d;
+      15'b000000000010000: n102 = reg_vol_ch_d;
+      15'b000000000001000: n102 = reg_vol_ch_d;
+      15'b000000000000100: n102 = reg_vol_ch_d;
+      15'b000000000000010: n102 = reg_vol_ch_d;
+      15'b000000000000001: n102 = reg_vol_ch_d;
+      default: n102 = reg_vol_ch_d;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n102 = reg_ch_sel;
-      15'b010000000000000: n102 = reg_ch_sel;
-      15'b001000000000000: n102 = reg_ch_sel;
-      15'b000100000000000: n102 = reg_ch_sel;
-      15'b000010000000000: n102 = reg_ch_sel;
-      15'b000001000000000: n102 = reg_ch_sel;
-      15'b000000100000000: n102 = reg_ch_sel;
-      15'b000000010000000: n102 = reg_ch_sel;
-      15'b000000001000000: n102 = reg_ch_sel;
-      15'b000000000100000: n102 = reg_ch_sel;
-      15'b000000000010000: n102 = reg_ch_sel;
-      15'b000000000001000: n102 = reg_ch_sel;
-      15'b000000000000100: n102 = reg_ch_sel;
-      15'b000000000000010: n102 = reg_ch_sel;
-      15'b000000000000001: n102 = reg_ch_sel;
-      default: n102 = n75;
+    case (n78)
+      15'b100000000000000: n103 = n74;
+      15'b010000000000000: n103 = reg_vol_ch_e;
+      15'b001000000000000: n103 = reg_vol_ch_e;
+      15'b000100000000000: n103 = reg_vol_ch_e;
+      15'b000010000000000: n103 = reg_vol_ch_e;
+      15'b000001000000000: n103 = reg_vol_ch_e;
+      15'b000000100000000: n103 = reg_vol_ch_e;
+      15'b000000010000000: n103 = reg_vol_ch_e;
+      15'b000000001000000: n103 = reg_vol_ch_e;
+      15'b000000000100000: n103 = reg_vol_ch_e;
+      15'b000000000010000: n103 = reg_vol_ch_e;
+      15'b000000000001000: n103 = reg_vol_ch_e;
+      15'b000000000000100: n103 = reg_vol_ch_e;
+      15'b000000000000010: n103 = reg_vol_ch_e;
+      15'b000000000000001: n103 = reg_vol_ch_e;
+      default: n103 = reg_vol_ch_e;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n103 = ff_rst_ch_a;
-      15'b010000000000000: n103 = ff_rst_ch_a;
-      15'b001000000000000: n103 = ff_rst_ch_a;
-      15'b000100000000000: n103 = ff_rst_ch_a;
-      15'b000010000000000: n103 = ff_rst_ch_a;
-      15'b000001000000000: n103 = ff_rst_ch_a;
-      15'b000000100000000: n103 = ff_rst_ch_a;
-      15'b000000010000000: n103 = ff_rst_ch_a;
-      15'b000000001000000: n103 = ff_rst_ch_a;
-      15'b000000000100000: n103 = ff_rst_ch_a;
-      15'b000000000010000: n103 = ff_rst_ch_a;
-      15'b000000000001000: n103 = ff_rst_ch_a;
-      15'b000000000000100: n103 = ff_rst_ch_a;
-      15'b000000000000010: n103 = n29;
-      15'b000000000000001: n103 = n25;
-      default: n103 = ff_rst_ch_a;
+    case (n78)
+      15'b100000000000000: n104 = reg_ch_sel;
+      15'b010000000000000: n104 = reg_ch_sel;
+      15'b001000000000000: n104 = reg_ch_sel;
+      15'b000100000000000: n104 = reg_ch_sel;
+      15'b000010000000000: n104 = reg_ch_sel;
+      15'b000001000000000: n104 = reg_ch_sel;
+      15'b000000100000000: n104 = reg_ch_sel;
+      15'b000000010000000: n104 = reg_ch_sel;
+      15'b000000001000000: n104 = reg_ch_sel;
+      15'b000000000100000: n104 = reg_ch_sel;
+      15'b000000000010000: n104 = reg_ch_sel;
+      15'b000000000001000: n104 = reg_ch_sel;
+      15'b000000000000100: n104 = reg_ch_sel;
+      15'b000000000000010: n104 = reg_ch_sel;
+      15'b000000000000001: n104 = reg_ch_sel;
+      default: n104 = n77;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n104 = ff_rst_ch_b;
-      15'b010000000000000: n104 = ff_rst_ch_b;
-      15'b001000000000000: n104 = ff_rst_ch_b;
-      15'b000100000000000: n104 = ff_rst_ch_b;
-      15'b000010000000000: n104 = ff_rst_ch_b;
-      15'b000001000000000: n104 = ff_rst_ch_b;
-      15'b000000100000000: n104 = ff_rst_ch_b;
-      15'b000000010000000: n104 = ff_rst_ch_b;
-      15'b000000001000000: n104 = ff_rst_ch_b;
-      15'b000000000100000: n104 = ff_rst_ch_b;
-      15'b000000000010000: n104 = ff_rst_ch_b;
-      15'b000000000001000: n104 = n36;
-      15'b000000000000100: n104 = n32;
-      15'b000000000000010: n104 = ff_rst_ch_b;
-      15'b000000000000001: n104 = ff_rst_ch_b;
-      default: n104 = ff_rst_ch_b;
+    case (n78)
+      15'b100000000000000: n105 = ff_rst_ch_a;
+      15'b010000000000000: n105 = ff_rst_ch_a;
+      15'b001000000000000: n105 = ff_rst_ch_a;
+      15'b000100000000000: n105 = ff_rst_ch_a;
+      15'b000010000000000: n105 = ff_rst_ch_a;
+      15'b000001000000000: n105 = ff_rst_ch_a;
+      15'b000000100000000: n105 = ff_rst_ch_a;
+      15'b000000010000000: n105 = ff_rst_ch_a;
+      15'b000000001000000: n105 = ff_rst_ch_a;
+      15'b000000000100000: n105 = ff_rst_ch_a;
+      15'b000000000010000: n105 = ff_rst_ch_a;
+      15'b000000000001000: n105 = ff_rst_ch_a;
+      15'b000000000000100: n105 = ff_rst_ch_a;
+      15'b000000000000010: n105 = n31;
+      15'b000000000000001: n105 = n27;
+      default: n105 = ff_rst_ch_a;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n105 = ff_rst_ch_c;
-      15'b010000000000000: n105 = ff_rst_ch_c;
-      15'b001000000000000: n105 = ff_rst_ch_c;
-      15'b000100000000000: n105 = ff_rst_ch_c;
-      15'b000010000000000: n105 = ff_rst_ch_c;
-      15'b000001000000000: n105 = ff_rst_ch_c;
-      15'b000000100000000: n105 = ff_rst_ch_c;
-      15'b000000010000000: n105 = ff_rst_ch_c;
-      15'b000000001000000: n105 = ff_rst_ch_c;
-      15'b000000000100000: n105 = n43;
-      15'b000000000010000: n105 = n39;
-      15'b000000000001000: n105 = ff_rst_ch_c;
-      15'b000000000000100: n105 = ff_rst_ch_c;
-      15'b000000000000010: n105 = ff_rst_ch_c;
-      15'b000000000000001: n105 = ff_rst_ch_c;
-      default: n105 = ff_rst_ch_c;
+    case (n78)
+      15'b100000000000000: n106 = ff_rst_ch_b;
+      15'b010000000000000: n106 = ff_rst_ch_b;
+      15'b001000000000000: n106 = ff_rst_ch_b;
+      15'b000100000000000: n106 = ff_rst_ch_b;
+      15'b000010000000000: n106 = ff_rst_ch_b;
+      15'b000001000000000: n106 = ff_rst_ch_b;
+      15'b000000100000000: n106 = ff_rst_ch_b;
+      15'b000000010000000: n106 = ff_rst_ch_b;
+      15'b000000001000000: n106 = ff_rst_ch_b;
+      15'b000000000100000: n106 = ff_rst_ch_b;
+      15'b000000000010000: n106 = ff_rst_ch_b;
+      15'b000000000001000: n106 = n38;
+      15'b000000000000100: n106 = n34;
+      15'b000000000000010: n106 = ff_rst_ch_b;
+      15'b000000000000001: n106 = ff_rst_ch_b;
+      default: n106 = ff_rst_ch_b;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n106 = ff_rst_ch_d;
-      15'b010000000000000: n106 = ff_rst_ch_d;
-      15'b001000000000000: n106 = ff_rst_ch_d;
-      15'b000100000000000: n106 = ff_rst_ch_d;
-      15'b000010000000000: n106 = ff_rst_ch_d;
-      15'b000001000000000: n106 = ff_rst_ch_d;
-      15'b000000100000000: n106 = ff_rst_ch_d;
-      15'b000000010000000: n106 = n50;
-      15'b000000001000000: n106 = n46;
-      15'b000000000100000: n106 = ff_rst_ch_d;
-      15'b000000000010000: n106 = ff_rst_ch_d;
-      15'b000000000001000: n106 = ff_rst_ch_d;
-      15'b000000000000100: n106 = ff_rst_ch_d;
-      15'b000000000000010: n106 = ff_rst_ch_d;
-      15'b000000000000001: n106 = ff_rst_ch_d;
-      default: n106 = ff_rst_ch_d;
+    case (n78)
+      15'b100000000000000: n107 = ff_rst_ch_c;
+      15'b010000000000000: n107 = ff_rst_ch_c;
+      15'b001000000000000: n107 = ff_rst_ch_c;
+      15'b000100000000000: n107 = ff_rst_ch_c;
+      15'b000010000000000: n107 = ff_rst_ch_c;
+      15'b000001000000000: n107 = ff_rst_ch_c;
+      15'b000000100000000: n107 = ff_rst_ch_c;
+      15'b000000010000000: n107 = ff_rst_ch_c;
+      15'b000000001000000: n107 = ff_rst_ch_c;
+      15'b000000000100000: n107 = n45;
+      15'b000000000010000: n107 = n41;
+      15'b000000000001000: n107 = ff_rst_ch_c;
+      15'b000000000000100: n107 = ff_rst_ch_c;
+      15'b000000000000010: n107 = ff_rst_ch_c;
+      15'b000000000000001: n107 = ff_rst_ch_c;
+      default: n107 = ff_rst_ch_c;
     endcase
-  /*# scc_wave2.vhd:208:17 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    case (n76)
-      15'b100000000000000: n107 = ff_rst_ch_e;
-      15'b010000000000000: n107 = ff_rst_ch_e;
-      15'b001000000000000: n107 = ff_rst_ch_e;
-      15'b000100000000000: n107 = ff_rst_ch_e;
-      15'b000010000000000: n107 = ff_rst_ch_e;
-      15'b000001000000000: n107 = n57;
-      15'b000000100000000: n107 = n53;
-      15'b000000010000000: n107 = ff_rst_ch_e;
-      15'b000000001000000: n107 = ff_rst_ch_e;
-      15'b000000000100000: n107 = ff_rst_ch_e;
-      15'b000000000010000: n107 = ff_rst_ch_e;
-      15'b000000000001000: n107 = ff_rst_ch_e;
-      15'b000000000000100: n107 = ff_rst_ch_e;
-      15'b000000000000010: n107 = ff_rst_ch_e;
-      15'b000000000000001: n107 = ff_rst_ch_e;
-      default: n107 = ff_rst_ch_e;
+    case (n78)
+      15'b100000000000000: n108 = ff_rst_ch_d;
+      15'b010000000000000: n108 = ff_rst_ch_d;
+      15'b001000000000000: n108 = ff_rst_ch_d;
+      15'b000100000000000: n108 = ff_rst_ch_d;
+      15'b000010000000000: n108 = ff_rst_ch_d;
+      15'b000001000000000: n108 = ff_rst_ch_d;
+      15'b000000100000000: n108 = ff_rst_ch_d;
+      15'b000000010000000: n108 = n52;
+      15'b000000001000000: n108 = n48;
+      15'b000000000100000: n108 = ff_rst_ch_d;
+      15'b000000000010000: n108 = ff_rst_ch_d;
+      15'b000000000001000: n108 = ff_rst_ch_d;
+      15'b000000000000100: n108 = ff_rst_ch_d;
+      15'b000000000000010: n108 = ff_rst_ch_d;
+      15'b000000000000001: n108 = ff_rst_ch_d;
+      default: n108 = ff_rst_ch_d;
     endcase
-  /*# scc_wave2.vhd:226:13 */
-  assign n109 = clkena ? 1'b0 : ff_rst_ch_a;
-  /*# scc_wave2.vhd:226:13 */
-  assign n111 = clkena ? 1'b0 : ff_rst_ch_b;
-  /*# scc_wave2.vhd:226:13 */
-  assign n113 = clkena ? 1'b0 : ff_rst_ch_c;
-  /*# scc_wave2.vhd:226:13 */
-  assign n115 = clkena ? 1'b0 : ff_rst_ch_d;
-  /*# scc_wave2.vhd:226:13 */
-  assign n117 = clkena ? 1'b0 : ff_rst_ch_e;
-  /*# scc_wave2.vhd:205:13 */
-  assign n118 = {n80, n78};
-  /*# scc_wave2.vhd:205:13 */
-  assign n120 = {n84, n82};
-  /*# scc_wave2.vhd:205:13 */
-  assign n122 = {n88, n86};
-  /*# scc_wave2.vhd:205:13 */
-  assign n124 = {n92, n90};
-  /*# scc_wave2.vhd:205:13 */
-  assign n126 = {n96, n94};
-  /*# scc_wave2.vhd:205:13 */
-  assign n134 = n23 ? n103 : n109;
-  /*# scc_wave2.vhd:205:13 */
-  assign n135 = n23 ? n104 : n111;
-  /*# scc_wave2.vhd:205:13 */
-  assign n136 = n23 ? n105 : n113;
-  /*# scc_wave2.vhd:205:13 */
-  assign n137 = n23 ? n106 : n115;
-  /*# scc_wave2.vhd:205:13 */
-  assign n138 = n23 ? n107 : n117;
-  /*# scc_wave2.vhd:235:27 */
-  assign n139 = wrt & req;
-  /*# scc_wave2.vhd:235:48 */
-  assign n140 = adr[7:5]; // extract
-  /*# scc_wave2.vhd:235:61 */
-  assign n142 = n140 == 3'b110;
-  /*# scc_wave2.vhd:235:41 */
-  assign n143 = n142 & n139;
-  /*# scc_wave2.vhd:244:55 */
-  assign n201 = ~ff_req_dl;
-  /*# scc_wave2.vhd:244:41 */
-  assign n202 = n201 & req;
-  /*# scc_wave2.vhd:244:25 */
-  assign n203 = n202 ? 1'b1 : 1'b0;
-  /*# scc_wave2.vhd:245:55 */
-  assign n205 = ~ff_req_dl;
-  /*# scc_wave2.vhd:245:41 */
-  assign n206 = n205 & req;
-  /*# scc_wave2.vhd:245:25 */
-  assign n207 = n206 ? wrt : 1'b0;
-  /*# scc_wave2.vhd:249:44 */
-  assign n211 = reg_vol_ch_a != 4'b0000;
-  /*# scc_wave2.vhd:249:24 */
-  assign n212 = n211 ? 1'b1 : 1'b0;
-  /*# scc_wave2.vhd:250:42 */
-  assign n216 = reg_ch_sel != 5'b00000;
-  /*# scc_wave2.vhd:250:24 */
-  assign n217 = n216 ? 1'b1 : 1'b0;
-  /*# scc_wave2.vhd:251:45 */
-  assign n221 = reg_freq_ch_a != 12'b000000000000;
-  /*# scc_wave2.vhd:251:24 */
-  assign n222 = n221 ? 1'b1 : 1'b0;
-  /*# scc_wave2.vhd:257:31 */
-  assign n224 = ff_ptr_ch_a[0]; // extract
-  /*# scc_wave2.vhd:263:18 */
+  /*# scc_wave2.vhd:211:17 */
   always @*
-    n225_ff_cnt_ch_a = n563; // (isignal)
+    case (n78)
+      15'b100000000000000: n109 = ff_rst_ch_e;
+      15'b010000000000000: n109 = ff_rst_ch_e;
+      15'b001000000000000: n109 = ff_rst_ch_e;
+      15'b000100000000000: n109 = ff_rst_ch_e;
+      15'b000010000000000: n109 = ff_rst_ch_e;
+      15'b000001000000000: n109 = n59;
+      15'b000000100000000: n109 = n55;
+      15'b000000010000000: n109 = ff_rst_ch_e;
+      15'b000000001000000: n109 = ff_rst_ch_e;
+      15'b000000000100000: n109 = ff_rst_ch_e;
+      15'b000000000010000: n109 = ff_rst_ch_e;
+      15'b000000000001000: n109 = ff_rst_ch_e;
+      15'b000000000000100: n109 = ff_rst_ch_e;
+      15'b000000000000010: n109 = ff_rst_ch_e;
+      15'b000000000000001: n109 = ff_rst_ch_e;
+      default: n109 = ff_rst_ch_e;
+    endcase
+  /*# scc_wave2.vhd:229:13 */
+  assign n111 = clkena ? 1'b0 : ff_rst_ch_a;
+  /*# scc_wave2.vhd:229:13 */
+  assign n113 = clkena ? 1'b0 : ff_rst_ch_b;
+  /*# scc_wave2.vhd:229:13 */
+  assign n115 = clkena ? 1'b0 : ff_rst_ch_c;
+  /*# scc_wave2.vhd:229:13 */
+  assign n117 = clkena ? 1'b0 : ff_rst_ch_d;
+  /*# scc_wave2.vhd:229:13 */
+  assign n119 = clkena ? 1'b0 : ff_rst_ch_e;
+  /*# scc_wave2.vhd:208:13 */
+  assign n120 = {n82, n80};
+  /*# scc_wave2.vhd:208:13 */
+  assign n122 = {n86, n84};
+  /*# scc_wave2.vhd:208:13 */
+  assign n124 = {n90, n88};
+  /*# scc_wave2.vhd:208:13 */
+  assign n126 = {n94, n92};
+  /*# scc_wave2.vhd:208:13 */
+  assign n128 = {n98, n96};
+  /*# scc_wave2.vhd:208:13 */
+  assign n136 = n25 ? n105 : n111;
+  /*# scc_wave2.vhd:208:13 */
+  assign n137 = n25 ? n106 : n113;
+  /*# scc_wave2.vhd:208:13 */
+  assign n138 = n25 ? n107 : n115;
+  /*# scc_wave2.vhd:208:13 */
+  assign n139 = n25 ? n108 : n117;
+  /*# scc_wave2.vhd:208:13 */
+  assign n140 = n25 ? n109 : n119;
+  /*# scc_wave2.vhd:238:27 */
+  assign n141 = wrt & req;
+  /*# scc_wave2.vhd:238:48 */
+  assign n142 = adr[7:5]; // extract
+  /*# scc_wave2.vhd:238:61 */
+  assign n144 = n142 == 3'b110;
+  /*# scc_wave2.vhd:238:41 */
+  assign n145 = n144 & n141;
+  /*# scc_wave2.vhd:247:55 */
+  assign n203 = ~ff_req_dl;
+  /*# scc_wave2.vhd:247:41 */
+  assign n204 = n203 & req;
+  /*# scc_wave2.vhd:247:25 */
+  assign n205 = n204 ? 1'b1 : 1'b0;
+  /*# scc_wave2.vhd:248:55 */
+  assign n207 = ~ff_req_dl;
+  /*# scc_wave2.vhd:248:41 */
+  assign n208 = n207 & req;
+  /*# scc_wave2.vhd:248:25 */
+  assign n209 = n208 ? wrt : 1'b0;
+  /*# scc_wave2.vhd:252:44 */
+  assign n213 = reg_vol_ch_a != 4'b0000;
+  /*# scc_wave2.vhd:252:24 */
+  assign n214 = n213 ? 1'b1 : 1'b0;
+  /*# scc_wave2.vhd:253:42 */
+  assign n218 = reg_ch_sel != 5'b00000;
+  /*# scc_wave2.vhd:253:24 */
+  assign n219 = n218 ? 1'b1 : 1'b0;
+  /*# scc_wave2.vhd:254:45 */
+  assign n223 = reg_freq_ch_a != 12'b000000000000;
+  /*# scc_wave2.vhd:254:24 */
+  assign n224 = n223 ? 1'b1 : 1'b0;
+  /*# scc_wave2.vhd:260:31 */
+  assign n226 = ff_ptr_ch_a[0]; // extract
+  /*# scc_wave2.vhd:272:30 */
+  assign n227 = ff_ch_num[0]; // extract
+  /*# scc_wave2.vhd:273:39 */
+  assign n230 = ff_mix != 15'b000000000000000;
+  /*# scc_wave2.vhd:273:25 */
+  assign n231 = n230 ? 1'b1 : 1'b0;
+  /*# scc_wave2.vhd:279:18 */
+  always @*
+    n233_ff_cnt_ch_a = n571; // (isignal)
   initial
-    n225_ff_cnt_ch_a = 12'bX;
-  /*# scc_wave2.vhd:264:18 */
+    n233_ff_cnt_ch_a = 12'bX;
+  /*# scc_wave2.vhd:280:18 */
   always @*
-    n225_ff_cnt_ch_b = n565; // (isignal)
+    n233_ff_cnt_ch_b = n573; // (isignal)
   initial
-    n225_ff_cnt_ch_b = 12'bX;
-  /*# scc_wave2.vhd:265:18 */
+    n233_ff_cnt_ch_b = 12'bX;
+  /*# scc_wave2.vhd:281:18 */
   always @*
-    n225_ff_cnt_ch_c = n567; // (isignal)
+    n233_ff_cnt_ch_c = n575; // (isignal)
   initial
-    n225_ff_cnt_ch_c = 12'bX;
-  /*# scc_wave2.vhd:266:18 */
+    n233_ff_cnt_ch_c = 12'bX;
+  /*# scc_wave2.vhd:282:18 */
   always @*
-    n225_ff_cnt_ch_d = n569; // (isignal)
+    n233_ff_cnt_ch_d = n577; // (isignal)
   initial
-    n225_ff_cnt_ch_d = 12'bX;
-  /*# scc_wave2.vhd:267:18 */
+    n233_ff_cnt_ch_d = 12'bX;
+  /*# scc_wave2.vhd:283:18 */
   always @*
-    n225_ff_cnt_ch_e = n571; // (isignal)
+    n233_ff_cnt_ch_e = n579; // (isignal)
   initial
-    n225_ff_cnt_ch_e = 12'bX;
-  /*# scc_wave2.vhd:284:34 */
-  assign n233 = reg_freq_ch_a[11:3]; // extract
-  /*# scc_wave2.vhd:284:48 */
-  assign n235 = n233 == 9'b000000000;
-  /*# scc_wave2.vhd:284:62 */
-  assign n236 = n235 | ff_rst_ch_a;
-  /*# scc_wave2.vhd:287:36 */
-  assign n238 = n225_ff_cnt_ch_a == 12'b000000000000;
-  /*# scc_wave2.vhd:288:48 */
-  assign n240 = ff_ptr_ch_a + 5'b00001;
-  /*# scc_wave2.vhd:291:48 */
-  assign n242 = n225_ff_cnt_ch_a - 12'b000000000001;
-  /*# scc_wave2.vhd:287:17 */
-  assign n243 = n238 ? n240 : ff_ptr_ch_a;
-  /*# scc_wave2.vhd:287:17 */
-  assign n244 = n238 ? reg_freq_ch_a : n242;
-  /*# scc_wave2.vhd:284:17 */
-  assign n246 = n236 ? 5'b00000 : n243;
-  /*# scc_wave2.vhd:284:17 */
-  assign n247 = n236 ? reg_freq_ch_a : n244;
-  /*# scc_wave2.vhd:294:34 */
-  assign n248 = reg_freq_ch_b[11:3]; // extract
-  /*# scc_wave2.vhd:294:48 */
-  assign n250 = n248 == 9'b000000000;
-  /*# scc_wave2.vhd:294:62 */
-  assign n251 = n250 | ff_rst_ch_b;
-  /*# scc_wave2.vhd:297:36 */
-  assign n253 = n225_ff_cnt_ch_b == 12'b000000000000;
-  /*# scc_wave2.vhd:298:48 */
-  assign n255 = ff_ptr_ch_b + 5'b00001;
-  /*# scc_wave2.vhd:301:48 */
-  assign n257 = n225_ff_cnt_ch_b - 12'b000000000001;
-  /*# scc_wave2.vhd:297:17 */
-  assign n258 = n253 ? n255 : ff_ptr_ch_b;
-  /*# scc_wave2.vhd:297:17 */
-  assign n259 = n253 ? reg_freq_ch_b : n257;
-  /*# scc_wave2.vhd:294:17 */
-  assign n261 = n251 ? 5'b00000 : n258;
-  /*# scc_wave2.vhd:294:17 */
-  assign n262 = n251 ? reg_freq_ch_b : n259;
-  /*# scc_wave2.vhd:304:34 */
-  assign n263 = reg_freq_ch_c[11:3]; // extract
+    n233_ff_cnt_ch_e = 12'bX;
+  /*# scc_wave2.vhd:300:34 */
+  assign n241 = reg_freq_ch_a[11:3]; // extract
+  /*# scc_wave2.vhd:300:48 */
+  assign n243 = n241 == 9'b000000000;
+  /*# scc_wave2.vhd:300:62 */
+  assign n244 = n243 | ff_rst_ch_a;
+  /*# scc_wave2.vhd:303:36 */
+  assign n246 = n233_ff_cnt_ch_a == 12'b000000000000;
   /*# scc_wave2.vhd:304:48 */
-  assign n265 = n263 == 9'b000000000;
-  /*# scc_wave2.vhd:304:62 */
-  assign n266 = n265 | ff_rst_ch_c;
-  /*# scc_wave2.vhd:307:36 */
-  assign n268 = n225_ff_cnt_ch_c == 12'b000000000000;
-  /*# scc_wave2.vhd:308:48 */
-  assign n270 = ff_ptr_ch_c + 5'b00001;
-  /*# scc_wave2.vhd:311:48 */
-  assign n272 = n225_ff_cnt_ch_c - 12'b000000000001;
-  /*# scc_wave2.vhd:307:17 */
-  assign n273 = n268 ? n270 : ff_ptr_ch_c;
-  /*# scc_wave2.vhd:307:17 */
-  assign n274 = n268 ? reg_freq_ch_c : n272;
-  /*# scc_wave2.vhd:304:17 */
-  assign n276 = n266 ? 5'b00000 : n273;
-  /*# scc_wave2.vhd:304:17 */
-  assign n277 = n266 ? reg_freq_ch_c : n274;
-  /*# scc_wave2.vhd:314:34 */
-  assign n278 = reg_freq_ch_d[11:3]; // extract
+  assign n248 = ff_ptr_ch_a + 5'b00001;
+  /*# scc_wave2.vhd:307:48 */
+  assign n250 = n233_ff_cnt_ch_a - 12'b000000000001;
+  /*# scc_wave2.vhd:303:17 */
+  assign n251 = n246 ? n248 : ff_ptr_ch_a;
+  /*# scc_wave2.vhd:303:17 */
+  assign n252 = n246 ? reg_freq_ch_a : n250;
+  /*# scc_wave2.vhd:300:17 */
+  assign n254 = n244 ? 5'b00000 : n251;
+  /*# scc_wave2.vhd:300:17 */
+  assign n255 = n244 ? reg_freq_ch_a : n252;
+  /*# scc_wave2.vhd:310:34 */
+  assign n256 = reg_freq_ch_b[11:3]; // extract
+  /*# scc_wave2.vhd:310:48 */
+  assign n258 = n256 == 9'b000000000;
+  /*# scc_wave2.vhd:310:62 */
+  assign n259 = n258 | ff_rst_ch_b;
+  /*# scc_wave2.vhd:313:36 */
+  assign n261 = n233_ff_cnt_ch_b == 12'b000000000000;
   /*# scc_wave2.vhd:314:48 */
-  assign n280 = n278 == 9'b000000000;
-  /*# scc_wave2.vhd:314:62 */
-  assign n281 = n280 | ff_rst_ch_d;
-  /*# scc_wave2.vhd:317:36 */
-  assign n283 = n225_ff_cnt_ch_d == 12'b000000000000;
-  /*# scc_wave2.vhd:318:48 */
-  assign n285 = ff_ptr_ch_d + 5'b00001;
-  /*# scc_wave2.vhd:321:48 */
-  assign n287 = n225_ff_cnt_ch_d - 12'b000000000001;
-  /*# scc_wave2.vhd:317:17 */
-  assign n288 = n283 ? n285 : ff_ptr_ch_d;
-  /*# scc_wave2.vhd:317:17 */
-  assign n289 = n283 ? reg_freq_ch_d : n287;
-  /*# scc_wave2.vhd:314:17 */
-  assign n291 = n281 ? 5'b00000 : n288;
-  /*# scc_wave2.vhd:314:17 */
-  assign n292 = n281 ? reg_freq_ch_d : n289;
-  /*# scc_wave2.vhd:324:34 */
-  assign n293 = reg_freq_ch_e[11:3]; // extract
+  assign n263 = ff_ptr_ch_b + 5'b00001;
+  /*# scc_wave2.vhd:317:48 */
+  assign n265 = n233_ff_cnt_ch_b - 12'b000000000001;
+  /*# scc_wave2.vhd:313:17 */
+  assign n266 = n261 ? n263 : ff_ptr_ch_b;
+  /*# scc_wave2.vhd:313:17 */
+  assign n267 = n261 ? reg_freq_ch_b : n265;
+  /*# scc_wave2.vhd:310:17 */
+  assign n269 = n259 ? 5'b00000 : n266;
+  /*# scc_wave2.vhd:310:17 */
+  assign n270 = n259 ? reg_freq_ch_b : n267;
+  /*# scc_wave2.vhd:320:34 */
+  assign n271 = reg_freq_ch_c[11:3]; // extract
+  /*# scc_wave2.vhd:320:48 */
+  assign n273 = n271 == 9'b000000000;
+  /*# scc_wave2.vhd:320:62 */
+  assign n274 = n273 | ff_rst_ch_c;
+  /*# scc_wave2.vhd:323:36 */
+  assign n276 = n233_ff_cnt_ch_c == 12'b000000000000;
   /*# scc_wave2.vhd:324:48 */
-  assign n295 = n293 == 9'b000000000;
-  /*# scc_wave2.vhd:324:62 */
-  assign n296 = n295 | ff_rst_ch_e;
-  /*# scc_wave2.vhd:327:36 */
-  assign n298 = n225_ff_cnt_ch_e == 12'b000000000000;
-  /*# scc_wave2.vhd:328:48 */
-  assign n300 = ff_ptr_ch_e + 5'b00001;
-  /*# scc_wave2.vhd:331:48 */
-  assign n302 = n225_ff_cnt_ch_e - 12'b000000000001;
-  /*# scc_wave2.vhd:327:17 */
-  assign n303 = n298 ? n300 : ff_ptr_ch_e;
-  /*# scc_wave2.vhd:327:17 */
-  assign n304 = n298 ? reg_freq_ch_e : n302;
-  /*# scc_wave2.vhd:324:17 */
-  assign n306 = n296 ? 5'b00000 : n303;
-  /*# scc_wave2.vhd:324:17 */
-  assign n307 = n296 ? reg_freq_ch_e : n304;
-  /*# scc_wave2.vhd:341:41 */
-  assign n349 = w_wave_ce ? adr : n354;
-  /*# scc_wave2.vhd:342:24 */
-  assign n351 = {3'b000, ff_ptr_ch_a};
-  /*# scc_wave2.vhd:342:57 */
-  assign n353 = ff_ch_num == 3'b000;
-  /*# scc_wave2.vhd:341:66 */
-  assign n354 = n353 ? n351 : n359;
-  /*# scc_wave2.vhd:343:24 */
-  assign n356 = {3'b001, ff_ptr_ch_b};
-  /*# scc_wave2.vhd:343:57 */
-  assign n358 = ff_ch_num == 3'b001;
-  /*# scc_wave2.vhd:342:66 */
-  assign n359 = n358 ? n356 : n364;
-  /*# scc_wave2.vhd:344:24 */
-  assign n361 = {3'b010, ff_ptr_ch_c};
-  /*# scc_wave2.vhd:344:57 */
-  assign n363 = ff_ch_num == 3'b010;
-  /*# scc_wave2.vhd:343:66 */
-  assign n364 = n363 ? n361 : n369;
-  /*# scc_wave2.vhd:345:24 */
-  assign n366 = {3'b011, ff_ptr_ch_d};
-  /*# scc_wave2.vhd:345:57 */
-  assign n368 = ff_ch_num == 3'b011;
-  /*# scc_wave2.vhd:344:66 */
-  assign n369 = n368 ? n366 : n372;
-  /*# scc_wave2.vhd:346:24 */
-  assign n371 = {3'b100, ff_ptr_ch_e};
-  /*# scc_wave2.vhd:345:66 */
-  assign n372 = sccplus ? n371 : n374;
-  /*# scc_wave2.vhd:347:24 */
-  assign n374 = {3'b011, ff_ptr_ch_e};
-  /*# scc_wave2.vhd:349:5 */
+  assign n278 = ff_ptr_ch_c + 5'b00001;
+  /*# scc_wave2.vhd:327:48 */
+  assign n280 = n233_ff_cnt_ch_c - 12'b000000000001;
+  /*# scc_wave2.vhd:323:17 */
+  assign n281 = n276 ? n278 : ff_ptr_ch_c;
+  /*# scc_wave2.vhd:323:17 */
+  assign n282 = n276 ? reg_freq_ch_c : n280;
+  /*# scc_wave2.vhd:320:17 */
+  assign n284 = n274 ? 5'b00000 : n281;
+  /*# scc_wave2.vhd:320:17 */
+  assign n285 = n274 ? reg_freq_ch_c : n282;
+  /*# scc_wave2.vhd:330:34 */
+  assign n286 = reg_freq_ch_d[11:3]; // extract
+  /*# scc_wave2.vhd:330:48 */
+  assign n288 = n286 == 9'b000000000;
+  /*# scc_wave2.vhd:330:62 */
+  assign n289 = n288 | ff_rst_ch_d;
+  /*# scc_wave2.vhd:333:36 */
+  assign n291 = n233_ff_cnt_ch_d == 12'b000000000000;
+  /*# scc_wave2.vhd:334:48 */
+  assign n293 = ff_ptr_ch_d + 5'b00001;
+  /*# scc_wave2.vhd:337:48 */
+  assign n295 = n233_ff_cnt_ch_d - 12'b000000000001;
+  /*# scc_wave2.vhd:333:17 */
+  assign n296 = n291 ? n293 : ff_ptr_ch_d;
+  /*# scc_wave2.vhd:333:17 */
+  assign n297 = n291 ? reg_freq_ch_d : n295;
+  /*# scc_wave2.vhd:330:17 */
+  assign n299 = n289 ? 5'b00000 : n296;
+  /*# scc_wave2.vhd:330:17 */
+  assign n300 = n289 ? reg_freq_ch_d : n297;
+  /*# scc_wave2.vhd:340:34 */
+  assign n301 = reg_freq_ch_e[11:3]; // extract
+  /*# scc_wave2.vhd:340:48 */
+  assign n303 = n301 == 9'b000000000;
+  /*# scc_wave2.vhd:340:62 */
+  assign n304 = n303 | ff_rst_ch_e;
+  /*# scc_wave2.vhd:343:36 */
+  assign n306 = n233_ff_cnt_ch_e == 12'b000000000000;
+  /*# scc_wave2.vhd:344:48 */
+  assign n308 = ff_ptr_ch_e + 5'b00001;
+  /*# scc_wave2.vhd:347:48 */
+  assign n310 = n233_ff_cnt_ch_e - 12'b000000000001;
+  /*# scc_wave2.vhd:343:17 */
+  assign n311 = n306 ? n308 : ff_ptr_ch_e;
+  /*# scc_wave2.vhd:343:17 */
+  assign n312 = n306 ? reg_freq_ch_e : n310;
+  /*# scc_wave2.vhd:340:17 */
+  assign n314 = n304 ? 5'b00000 : n311;
+  /*# scc_wave2.vhd:340:17 */
+  assign n315 = n304 ? reg_freq_ch_e : n312;
+  /*# scc_wave2.vhd:357:41 */
+  assign n357 = w_wave_ce ? adr : n362;
+  /*# scc_wave2.vhd:358:24 */
+  assign n359 = {3'b000, ff_ptr_ch_a};
+  /*# scc_wave2.vhd:358:57 */
+  assign n361 = ff_ch_num == 3'b000;
+  /*# scc_wave2.vhd:357:66 */
+  assign n362 = n361 ? n359 : n367;
+  /*# scc_wave2.vhd:359:24 */
+  assign n364 = {3'b001, ff_ptr_ch_b};
+  /*# scc_wave2.vhd:359:57 */
+  assign n366 = ff_ch_num == 3'b001;
+  /*# scc_wave2.vhd:358:66 */
+  assign n367 = n366 ? n364 : n372;
+  /*# scc_wave2.vhd:360:24 */
+  assign n369 = {3'b010, ff_ptr_ch_c};
+  /*# scc_wave2.vhd:360:57 */
+  assign n371 = ff_ch_num == 3'b010;
+  /*# scc_wave2.vhd:359:66 */
+  assign n372 = n371 ? n369 : n377;
+  /*# scc_wave2.vhd:361:24 */
+  assign n374 = {3'b011, ff_ptr_ch_d};
+  /*# scc_wave2.vhd:361:57 */
+  assign n376 = ff_ch_num == 3'b011;
+  /*# scc_wave2.vhd:360:66 */
+  assign n377 = n376 ? n374 : n380;
+  /*# scc_wave2.vhd:362:24 */
+  assign n379 = {3'b100, ff_ptr_ch_e};
+  /*# scc_wave2.vhd:361:66 */
+  assign n380 = sccplus ? n379 : n382;
+  /*# scc_wave2.vhd:363:24 */
+  assign n382 = {3'b011, ff_ptr_ch_e};
+  /*# scc_wave2.vhd:365:5 */
   ram_Brtl wavemem (
     .adr(w_wave_adr),
     .clk(clk21m),
     .we(w_wave_we),
     .dbo(dbo),
-    .dbi(wavemem_n375));
-  /*# scc_wave2.vhd:393:17 */
-  assign n404 = ff_ch_num_dl == 3'b001;
-  /*# scc_wave2.vhd:394:17 */
-  assign n407 = ff_ch_num_dl == 3'b010;
-  /*# scc_wave2.vhd:395:17 */
-  assign n410 = ff_ch_num_dl == 3'b011;
-  /*# scc_wave2.vhd:396:17 */
-  assign n413 = ff_ch_num_dl == 3'b100;
-  /*# scc_wave2.vhd:397:17 */
-  assign n416 = ff_ch_num_dl == 3'b101;
-  /*# scc_wave2.vhd:392:5 */
-  assign n418 = {n416, n413, n410, n407, n404};
-  /*# scc_wave2.vhd:392:5 */
+    .dbi(wavemem_n383));
+  /*# scc_wave2.vhd:409:17 */
+  assign n412 = ff_ch_num_dl == 3'b001;
+  /*# scc_wave2.vhd:410:17 */
+  assign n415 = ff_ch_num_dl == 3'b010;
+  /*# scc_wave2.vhd:411:17 */
+  assign n418 = ff_ch_num_dl == 3'b011;
+  /*# scc_wave2.vhd:412:17 */
+  assign n421 = ff_ch_num_dl == 3'b100;
+  /*# scc_wave2.vhd:413:17 */
+  assign n424 = ff_ch_num_dl == 3'b101;
+  /*# scc_wave2.vhd:408:5 */
+  assign n426 = {n424, n421, n418, n415, n412};
+  /*# scc_wave2.vhd:408:5 */
   always @*
-    case (n418)
-      5'b10000: n419 = 5'b10000;
-      5'b01000: n419 = 5'b01000;
-      5'b00100: n419 = 5'b00100;
-      5'b00010: n419 = 5'b00010;
-      5'b00001: n419 = 5'b00001;
-      default: n419 = 5'b00000;
+    case (n426)
+      5'b10000: n427 = 5'b10000;
+      5'b01000: n427 = 5'b01000;
+      5'b00100: n427 = 5'b00100;
+      5'b00010: n427 = 5'b00010;
+      5'b00001: n427 = 5'b00001;
+      default: n427 = 5'b00000;
     endcase
-  /*# scc_wave2.vhd:400:30 */
-  assign n420 = w_ch_dec[0]; // extract
-  /*# scc_wave2.vhd:400:48 */
-  assign n421 = reg_ch_sel[0]; // extract
-  /*# scc_wave2.vhd:400:34 */
-  assign n422 = n420 & n421;
-  /*# scc_wave2.vhd:401:30 */
-  assign n423 = w_ch_dec[1]; // extract
-  /*# scc_wave2.vhd:401:48 */
-  assign n424 = reg_ch_sel[1]; // extract
-  /*# scc_wave2.vhd:401:34 */
-  assign n425 = n423 & n424;
-  /*# scc_wave2.vhd:400:53 */
-  assign n426 = n422 | n425;
-  /*# scc_wave2.vhd:402:30 */
-  assign n427 = w_ch_dec[2]; // extract
-  /*# scc_wave2.vhd:402:48 */
-  assign n428 = reg_ch_sel[2]; // extract
-  /*# scc_wave2.vhd:402:34 */
-  assign n429 = n427 & n428;
-  /*# scc_wave2.vhd:401:53 */
-  assign n430 = n426 | n429;
-  /*# scc_wave2.vhd:403:30 */
-  assign n431 = w_ch_dec[3]; // extract
-  /*# scc_wave2.vhd:403:48 */
-  assign n432 = reg_ch_sel[3]; // extract
-  /*# scc_wave2.vhd:403:34 */
+  /*# scc_wave2.vhd:416:30 */
+  assign n428 = w_ch_dec[0]; // extract
+  /*# scc_wave2.vhd:416:48 */
+  assign n429 = reg_ch_sel[0]; // extract
+  /*# scc_wave2.vhd:416:34 */
+  assign n430 = n428 & n429;
+  /*# scc_wave2.vhd:417:30 */
+  assign n431 = w_ch_dec[1]; // extract
+  /*# scc_wave2.vhd:417:48 */
+  assign n432 = reg_ch_sel[1]; // extract
+  /*# scc_wave2.vhd:417:34 */
   assign n433 = n431 & n432;
-  /*# scc_wave2.vhd:402:53 */
+  /*# scc_wave2.vhd:416:53 */
   assign n434 = n430 | n433;
-  /*# scc_wave2.vhd:404:30 */
-  assign n435 = w_ch_dec[4]; // extract
-  /*# scc_wave2.vhd:404:48 */
-  assign n436 = reg_ch_sel[4]; // extract
-  /*# scc_wave2.vhd:404:34 */
+  /*# scc_wave2.vhd:418:30 */
+  assign n435 = w_ch_dec[2]; // extract
+  /*# scc_wave2.vhd:418:48 */
+  assign n436 = reg_ch_sel[2]; // extract
+  /*# scc_wave2.vhd:418:34 */
   assign n437 = n435 & n436;
-  /*# scc_wave2.vhd:403:53 */
+  /*# scc_wave2.vhd:417:53 */
   assign n438 = n434 | n437;
-  /*# scc_wave2.vhd:406:21 */
-  assign n439 = {w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit};
-  /*# scc_wave2.vhd:409:29 */
-  assign n441 = ff_ch_num_dl == 3'b001;
-  /*# scc_wave2.vhd:410:29 */
-  assign n443 = ff_ch_num_dl == 3'b010;
-  /*# scc_wave2.vhd:411:29 */
-  assign n445 = ff_ch_num_dl == 3'b011;
-  /*# scc_wave2.vhd:412:29 */
-  assign n447 = ff_ch_num_dl == 3'b100;
-  /*# scc_wave2.vhd:413:29 */
-  assign n449 = ff_ch_num_dl == 3'b101;
-  /*# scc_wave2.vhd:408:5 */
-  assign n451 = {n449, n447, n445, n443, n441};
-  /*# scc_wave2.vhd:408:5 */
+  /*# scc_wave2.vhd:419:30 */
+  assign n439 = w_ch_dec[3]; // extract
+  /*# scc_wave2.vhd:419:48 */
+  assign n440 = reg_ch_sel[3]; // extract
+  /*# scc_wave2.vhd:419:34 */
+  assign n441 = n439 & n440;
+  /*# scc_wave2.vhd:418:53 */
+  assign n442 = n438 | n441;
+  /*# scc_wave2.vhd:420:30 */
+  assign n443 = w_ch_dec[4]; // extract
+  /*# scc_wave2.vhd:420:48 */
+  assign n444 = reg_ch_sel[4]; // extract
+  /*# scc_wave2.vhd:420:34 */
+  assign n445 = n443 & n444;
+  /*# scc_wave2.vhd:419:53 */
+  assign n446 = n442 | n445;
+  /*# scc_wave2.vhd:422:21 */
+  assign n447 = {w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit, w_ch_bit};
+  /*# scc_wave2.vhd:425:29 */
+  assign n449 = ff_ch_num_dl == 3'b001;
+  /*# scc_wave2.vhd:426:29 */
+  assign n451 = ff_ch_num_dl == 3'b010;
+  /*# scc_wave2.vhd:427:29 */
+  assign n453 = ff_ch_num_dl == 3'b011;
+  /*# scc_wave2.vhd:428:29 */
+  assign n455 = ff_ch_num_dl == 3'b100;
+  /*# scc_wave2.vhd:429:29 */
+  assign n457 = ff_ch_num_dl == 3'b101;
+  /*# scc_wave2.vhd:424:5 */
+  assign n459 = {n457, n455, n453, n451, n449};
+  /*# scc_wave2.vhd:424:5 */
   always @*
-    case (n451)
-      5'b10000: n452 = reg_vol_ch_e;
-      5'b01000: n452 = reg_vol_ch_d;
-      5'b00100: n452 = reg_vol_ch_c;
-      5'b00010: n452 = reg_vol_ch_b;
-      5'b00001: n452 = reg_vol_ch_a;
-      default: n452 = 4'b0000;
+    case (n459)
+      5'b10000: n460 = reg_vol_ch_e;
+      5'b01000: n460 = reg_vol_ch_d;
+      5'b00100: n460 = reg_vol_ch_c;
+      5'b00010: n460 = reg_vol_ch_b;
+      5'b00001: n460 = reg_vol_ch_a;
+      default: n460 = 4'b0000;
     endcase
-  /*# scc_wave2.vhd:416:28 */
-  assign n453 = w_ch_mask & ff_wave_dat;
-  /*# scc_wave2.vhd:426:48 */
-  assign n455 = {1'b0, w_ch_vol};
-  /*# scc_wave2.vhd:426:35 */
-  assign n456 = {{5{w_wave[7]}}, w_wave}; // sext
-  /*# scc_wave2.vhd:426:35 */
-  assign n457 = {{8{n455[4]}}, n455}; // sext
-  /*# scc_wave2.vhd:426:35 */
-  assign n458 = $signed(n456) * $signed(n457); // smul
-  /*# scc_wave2.vhd:427:44 */
-  assign n459 = w_mul_s[11:0]; // extract
-  /*# scc_wave2.vhd:470:28 */
-  assign n463 = ~ff_wave_ce;
-  /*# scc_wave2.vhd:471:31 */
-  assign n465 = ff_ch_num == 3'b101;
-  /*# scc_wave2.vhd:474:44 */
-  assign n467 = ff_ch_num + 3'b001;
-  /*# scc_wave2.vhd:471:17 */
-  assign n469 = n465 ? 3'b000 : n467;
-  /*# scc_wave2.vhd:486:31 */
-  assign n478 = ~ff_wave_ce_dl;
-  /*# scc_wave2.vhd:487:34 */
-  assign n480 = ff_ch_num_dl == 3'b000;
-  /*# scc_wave2.vhd:490:39 */
-  assign n481 = w_mul[11]; // extract
-  /*# scc_wave2.vhd:490:51 */
-  assign n482 = w_mul[11]; // extract
+  /*# scc_wave2.vhd:432:28 */
+  assign n461 = w_ch_mask & ff_wave_dat;
+  /*# scc_wave2.vhd:442:48 */
+  assign n463 = {1'b0, w_ch_vol};
+  /*# scc_wave2.vhd:442:35 */
+  assign n464 = {{5{w_wave[7]}}, w_wave}; // sext
+  /*# scc_wave2.vhd:442:35 */
+  assign n465 = {{8{n463[4]}}, n463}; // sext
+  /*# scc_wave2.vhd:442:35 */
+  assign n466 = $signed(n464) * $signed(n465); // smul
+  /*# scc_wave2.vhd:443:44 */
+  assign n467 = w_mul_s[11:0]; // extract
+  /*# scc_wave2.vhd:486:28 */
+  assign n471 = ~ff_wave_ce;
+  /*# scc_wave2.vhd:487:31 */
+  assign n473 = ff_ch_num == 3'b101;
   /*# scc_wave2.vhd:490:44 */
-  assign n483 = {n481, n482};
-  /*# scc_wave2.vhd:490:63 */
-  assign n484 = w_mul[11]; // extract
-  /*# scc_wave2.vhd:490:56 */
-  assign n485 = {n483, n484};
-  /*# scc_wave2.vhd:490:68 */
-  assign n486 = {n485, w_mul};
-  /*# scc_wave2.vhd:490:77 */
-  assign n487 = n486 + ff_mix;
+  assign n475 = ff_ch_num + 3'b001;
   /*# scc_wave2.vhd:487:17 */
-  assign n489 = n480 ? 15'b000000000000000 : n487;
+  assign n477 = n473 ? 3'b000 : n475;
   /*# scc_wave2.vhd:502:31 */
-  assign n498 = ~ff_wave_ce_dl;
+  assign n486 = ~ff_wave_ce_dl;
   /*# scc_wave2.vhd:503:34 */
-  assign n500 = ff_ch_num_dl == 3'b000;
-  /*# scc_wave2.vhd:502:13 */
-  assign n502 = n500 & n498;
-  /*# scc_wave2.vhd:363:9 */
-  assign n510 = ff_wave_ce ? ram_dbi : n511;
-  /*# scc_wave2.vhd:363:9 */
+  assign n488 = ff_ch_num_dl == 3'b000;
+  /*# scc_wave2.vhd:506:39 */
+  assign n489 = w_mul[11]; // extract
+  /*# scc_wave2.vhd:506:51 */
+  assign n490 = w_mul[11]; // extract
+  /*# scc_wave2.vhd:506:44 */
+  assign n491 = {n489, n490};
+  /*# scc_wave2.vhd:506:63 */
+  assign n492 = w_mul[11]; // extract
+  /*# scc_wave2.vhd:506:56 */
+  assign n493 = {n491, n492};
+  /*# scc_wave2.vhd:506:68 */
+  assign n494 = {n493, w_mul};
+  /*# scc_wave2.vhd:506:77 */
+  assign n495 = n494 + ff_mix;
+  /*# scc_wave2.vhd:503:17 */
+  assign n497 = n488 ? 15'b000000000000000 : n495;
+  /*# scc_wave2.vhd:518:31 */
+  assign n506 = ~ff_wave_ce_dl;
+  /*# scc_wave2.vhd:519:34 */
+  assign n508 = ff_ch_num_dl == 3'b000;
+  /*# scc_wave2.vhd:518:13 */
+  assign n510 = n508 & n506;
+  /*# scc_wave2.vhd:379:9 */
+  assign n518 = ff_wave_ce ? ram_dbi : n519;
+  /*# scc_wave2.vhd:379:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n511 <= 8'b11111111;
-    else
-      n511 <= n510;
-  /*# scc_wave2.vhd:203:9 */
-  assign n512 = n23 ? n118 : reg_freq_ch_a;
-  /*# scc_wave2.vhd:203:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n513 <= 12'b000000000000;
-    else
-      n513 <= n512;
-  /*# scc_wave2.vhd:203:9 */
-  assign n514 = n23 ? n120 : reg_freq_ch_b;
-  /*# scc_wave2.vhd:203:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n515 <= 12'b000000000000;
-    else
-      n515 <= n514;
-  /*# scc_wave2.vhd:203:9 */
-  assign n516 = n23 ? n122 : reg_freq_ch_c;
-  /*# scc_wave2.vhd:203:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n517 <= 12'b000000000000;
-    else
-      n517 <= n516;
-  /*# scc_wave2.vhd:203:9 */
-  assign n518 = n23 ? n124 : reg_freq_ch_d;
-  /*# scc_wave2.vhd:203:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n519 <= 12'b000000000000;
+      n519 <= 8'b11111111;
     else
       n519 <= n518;
-  /*# scc_wave2.vhd:203:9 */
-  assign n520 = n23 ? n126 : reg_freq_ch_e;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n520 = n25 ? n120 : reg_freq_ch_a;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
       n521 <= 12'b000000000000;
     else
       n521 <= n520;
-  /*# scc_wave2.vhd:203:9 */
-  assign n522 = n23 ? n97 : reg_vol_ch_a;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n522 = n25 ? n122 : reg_freq_ch_b;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n523 <= 4'b0000;
+      n523 <= 12'b000000000000;
     else
       n523 <= n522;
-  /*# scc_wave2.vhd:203:9 */
-  assign n524 = n23 ? n98 : reg_vol_ch_b;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n524 = n25 ? n124 : reg_freq_ch_c;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n525 <= 4'b0000;
+      n525 <= 12'b000000000000;
     else
       n525 <= n524;
-  /*# scc_wave2.vhd:203:9 */
-  assign n526 = n23 ? n99 : reg_vol_ch_c;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n526 = n25 ? n126 : reg_freq_ch_d;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n527 <= 4'b0000;
+      n527 <= 12'b000000000000;
     else
       n527 <= n526;
-  /*# scc_wave2.vhd:203:9 */
-  assign n528 = n23 ? n100 : reg_vol_ch_d;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n528 = n25 ? n128 : reg_freq_ch_e;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n529 <= 4'b0000;
+      n529 <= 12'b000000000000;
     else
       n529 <= n528;
-  /*# scc_wave2.vhd:203:9 */
-  assign n530 = n23 ? n101 : reg_vol_ch_e;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n530 = n25 ? n99 : reg_vol_ch_a;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
       n531 <= 4'b0000;
     else
       n531 <= n530;
-  /*# scc_wave2.vhd:203:9 */
-  assign n532 = n23 ? n102 : reg_ch_sel;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n532 = n25 ? n100 : reg_vol_ch_b;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n533 <= 5'b00000;
+      n533 <= 4'b0000;
     else
       n533 <= n532;
-  /*# scc_wave2.vhd:203:9 */
-  assign n534 = n143 ? dbo : reg_mode_sel;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n534 = n25 ? n101 : reg_vol_ch_c;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n535 <= 8'b00000000;
+      n535 <= 4'b0000;
     else
       n535 <= n534;
-  /*# scc_wave2.vhd:203:9 */
+  /*# scc_wave2.vhd:206:9 */
+  assign n536 = n25 ? n102 : reg_vol_ch_d;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n536 <= 1'b0;
+      n537 <= 4'b0000;
     else
-      n536 <= n134;
-  /*# scc_wave2.vhd:203:9 */
+      n537 <= n536;
+  /*# scc_wave2.vhd:206:9 */
+  assign n538 = n25 ? n103 : reg_vol_ch_e;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n537 <= 1'b0;
+      n539 <= 4'b0000;
     else
-      n537 <= n135;
-  /*# scc_wave2.vhd:203:9 */
+      n539 <= n538;
+  /*# scc_wave2.vhd:206:9 */
+  assign n540 = n25 ? n104 : reg_ch_sel;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n538 <= 1'b0;
+      n541 <= 5'b00000;
     else
-      n538 <= n136;
-  /*# scc_wave2.vhd:203:9 */
+      n541 <= n540;
+  /*# scc_wave2.vhd:206:9 */
+  assign n542 = n145 ? dbo : reg_mode_sel;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n539 <= 1'b0;
+      n543 <= 8'b00000000;
     else
-      n539 <= n137;
-  /*# scc_wave2.vhd:203:9 */
+      n543 <= n542;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n540 <= 1'b0;
+      n544 <= 1'b0;
     else
-      n540 <= n138;
-  /*# scc_wave2.vhd:281:9 */
-  assign n541 = clkena ? n246 : ff_ptr_ch_a;
-  /*# scc_wave2.vhd:281:9 */
+      n544 <= n136;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n542 <= 5'b00000;
+      n545 <= 1'b0;
     else
-      n542 <= n541;
-  /*# scc_wave2.vhd:281:9 */
-  assign n543 = clkena ? n261 : ff_ptr_ch_b;
-  /*# scc_wave2.vhd:281:9 */
+      n545 <= n137;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n544 <= 5'b00000;
+      n546 <= 1'b0;
     else
-      n544 <= n543;
-  /*# scc_wave2.vhd:281:9 */
-  assign n545 = clkena ? n276 : ff_ptr_ch_c;
-  /*# scc_wave2.vhd:281:9 */
+      n546 <= n138;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n546 <= 5'b00000;
+      n547 <= 1'b0;
     else
-      n546 <= n545;
-  /*# scc_wave2.vhd:281:9 */
-  assign n547 = clkena ? n291 : ff_ptr_ch_d;
-  /*# scc_wave2.vhd:281:9 */
+      n547 <= n139;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n548 <= 5'b00000;
+      n548 <= 1'b0;
     else
-      n548 <= n547;
-  /*# scc_wave2.vhd:281:9 */
-  assign n549 = clkena ? n306 : ff_ptr_ch_e;
-  /*# scc_wave2.vhd:281:9 */
+      n548 <= n140;
+  /*# scc_wave2.vhd:297:9 */
+  assign n549 = clkena ? n254 : ff_ptr_ch_a;
+  /*# scc_wave2.vhd:297:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
       n550 <= 5'b00000;
     else
       n550 <= n549;
-  /*# scc_wave2.vhd:469:9 */
-  assign n551 = n463 ? n469 : ff_ch_num;
-  /*# scc_wave2.vhd:469:9 */
+  /*# scc_wave2.vhd:297:9 */
+  assign n551 = clkena ? n269 : ff_ptr_ch_b;
+  /*# scc_wave2.vhd:297:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n552 <= 3'b000;
+      n552 <= 5'b00000;
     else
       n552 <= n551;
-  /*# scc_wave2.vhd:381:9 */
+  /*# scc_wave2.vhd:297:9 */
+  assign n553 = clkena ? n284 : ff_ptr_ch_c;
+  /*# scc_wave2.vhd:297:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n553 <= 3'b000;
+      n554 <= 5'b00000;
     else
-      n553 <= ff_ch_num;
+      n554 <= n553;
+  /*# scc_wave2.vhd:297:9 */
+  assign n555 = clkena ? n299 : ff_ptr_ch_d;
+  /*# scc_wave2.vhd:297:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n556 <= 5'b00000;
+    else
+      n556 <= n555;
+  /*# scc_wave2.vhd:297:9 */
+  assign n557 = clkena ? n314 : ff_ptr_ch_e;
+  /*# scc_wave2.vhd:297:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n558 <= 5'b00000;
+    else
+      n558 <= n557;
   /*# scc_wave2.vhd:485:9 */
-  assign n554 = n478 ? n489 : ff_mix;
+  assign n559 = n471 ? n477 : ff_ch_num;
   /*# scc_wave2.vhd:485:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n555 <= 15'b000000000000000;
+      n560 <= 3'b000;
     else
-      n555 <= n554;
-  /*# scc_wave2.vhd:381:9 */
+      n560 <= n559;
+  /*# scc_wave2.vhd:397:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n556 <= 1'b0;
+      n561 <= 3'b000;
     else
-      n556 <= w_wave_ce;
-  /*# scc_wave2.vhd:381:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n557 <= 1'b0;
-    else
-      n557 <= ff_wave_ce;
-  /*# scc_wave2.vhd:203:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n558 <= 1'b0;
-    else
-      n558 <= req;
-  /*# scc_wave2.vhd:381:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n559 <= 8'b00000000;
-    else
-      n559 <= ram_dbi;
+      n561 <= ff_ch_num;
   /*# scc_wave2.vhd:501:9 */
-  assign n560 = n502 ? ff_mix : ff_wave;
+  assign n562 = n486 ? n497 : ff_mix;
   /*# scc_wave2.vhd:501:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n561 <= 15'b000000000000000;
-    else
-      n561 <= n560;
-  /*# scc_wave2.vhd:281:9 */
-  assign n562 = clkena ? n247 : n225_ff_cnt_ch_a;
-  /*# scc_wave2.vhd:281:9 */
-  always @(posedge clk21m or posedge reset)
-    if (reset)
-      n563 <= 12'b000000000000;
+      n563 <= 15'b000000000000000;
     else
       n563 <= n562;
-  /*# scc_wave2.vhd:281:9 */
-  assign n564 = clkena ? n262 : n225_ff_cnt_ch_b;
-  /*# scc_wave2.vhd:281:9 */
+  /*# scc_wave2.vhd:397:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n565 <= 12'b000000000000;
+      n564 <= 1'b0;
     else
-      n565 <= n564;
-  /*# scc_wave2.vhd:281:9 */
-  assign n566 = clkena ? n277 : n225_ff_cnt_ch_c;
-  /*# scc_wave2.vhd:281:9 */
+      n564 <= w_wave_ce;
+  /*# scc_wave2.vhd:397:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n567 <= 12'b000000000000;
+      n565 <= 1'b0;
     else
-      n567 <= n566;
-  /*# scc_wave2.vhd:281:9 */
-  assign n568 = clkena ? n292 : n225_ff_cnt_ch_d;
-  /*# scc_wave2.vhd:281:9 */
+      n565 <= ff_wave_ce;
+  /*# scc_wave2.vhd:206:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
-      n569 <= 12'b000000000000;
+      n566 <= 1'b0;
+    else
+      n566 <= req;
+  /*# scc_wave2.vhd:397:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n567 <= 8'b00000000;
+    else
+      n567 <= ram_dbi;
+  /*# scc_wave2.vhd:517:9 */
+  assign n568 = n510 ? ff_mix : ff_wave;
+  /*# scc_wave2.vhd:517:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n569 <= 15'b000000000000000;
     else
       n569 <= n568;
-  /*# scc_wave2.vhd:281:9 */
-  assign n570 = clkena ? n307 : n225_ff_cnt_ch_e;
-  /*# scc_wave2.vhd:281:9 */
+  /*# scc_wave2.vhd:297:9 */
+  assign n570 = clkena ? n255 : n233_ff_cnt_ch_a;
+  /*# scc_wave2.vhd:297:9 */
   always @(posedge clk21m or posedge reset)
     if (reset)
       n571 <= 12'b000000000000;
     else
       n571 <= n570;
+  /*# scc_wave2.vhd:297:9 */
+  assign n572 = clkena ? n270 : n233_ff_cnt_ch_b;
+  /*# scc_wave2.vhd:297:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n573 <= 12'b000000000000;
+    else
+      n573 <= n572;
+  /*# scc_wave2.vhd:297:9 */
+  assign n574 = clkena ? n285 : n233_ff_cnt_ch_c;
+  /*# scc_wave2.vhd:297:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n575 <= 12'b000000000000;
+    else
+      n575 <= n574;
+  /*# scc_wave2.vhd:297:9 */
+  assign n576 = clkena ? n300 : n233_ff_cnt_ch_d;
+  /*# scc_wave2.vhd:297:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n577 <= 12'b000000000000;
+    else
+      n577 <= n576;
+  /*# scc_wave2.vhd:297:9 */
+  assign n578 = clkena ? n315 : n233_ff_cnt_ch_e;
+  /*# scc_wave2.vhd:297:9 */
+  always @(posedge clk21m or posedge reset)
+    if (reset)
+      n579 <= 12'b000000000000;
+    else
+      n579 <= n578;
 endmodule
 

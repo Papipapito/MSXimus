@@ -1869,6 +1869,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_snd_dis_w;
     wire dbg_scc_enable_w;   // panel _42dbg (declarado ANTES del uso — leccion EX3638)
     wire scc_dbg_vol_nz, scc_dbg_sel_nz, scc_dbg_freq_nz;   // _46dbg (idem)
+    wire scc_dbg_ptr_lsb, scc_dbg_scan_lsb, scc_dbg_mix_nz;  // _51dbg (idem)
     scc_glue sccglue1 (
         .clk (clk_54m),             // v2.6: glue SCC a 54M (bus mismo dominio)
         .reset_n (bus_reset_n),
@@ -1981,7 +1982,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .sccplus (scc_mode_plus),
         .dbg_vol_nz (scc_dbg_vol_nz),
         .dbg_sel_nz (scc_dbg_sel_nz),
-        .dbg_freq_nz (scc_dbg_freq_nz)
+        .dbg_freq_nz (scc_dbg_freq_nz),
+        .dbg_ptr_lsb (scc_dbg_ptr_lsb),
+        .dbg_scan_lsb (scc_dbg_scan_lsb),
+        .dbg_mix_nz (scc_dbg_mix_nz)
     );
 `else
     assign scc_wav  = 15'd0;        // BASE MINIMA v3.0: SCC fuera (aparcado)
@@ -2105,7 +2109,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .sccplus (scc2x_modeb[5]),
         .dbg_vol_nz (),
         .dbg_sel_nz (),
-        .dbg_freq_nz ()
+        .dbg_freq_nz (),
+        .dbg_ptr_lsb (),
+        .dbg_scan_lsb (),
+        .dbg_mix_nz ()
     );
 `else
     assign scc2x_wav  = 15'd0;      // BASE MINIMA v3.0: SCC-I fuera
@@ -3244,9 +3251,30 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             if (scc_cen_local     && cenloc_pulses != 22'h3FFFFF) cenloc_pulses <= cenloc_pulses + 22'd1;
         end
     end
-    assign dbg_pmod1[0] = ~cen27_alive;           // LED1 ON = la cadena VIEJA de cen_27 pulsa
-    assign dbg_pmod1[1] = ~cenloc_alive;          // LED2 ON = el cen LOCAL pulsa (control)
-    assign dbg_pmod1[2] = ~scc_dbg_vol_nz;        // LED3 ON = volumen aterrizo (registros ok)
+    // _51dbg: rayos X INTERNOS de la cadena de sintesis (detectores de toggle)
+    reg ptr_prev = 1'b0, scan_prev = 1'b0;
+    reg [24:0] xtr_win = 25'd0;
+    reg [15:0] ptr_tr = 16'd0, scan_tr = 16'd0;
+    reg ptr_alive = 1'b0, scan_alive = 1'b0;
+    always @(posedge clk_27m) begin
+        ptr_prev  <= scc_dbg_ptr_lsb;
+        scan_prev <= scc_dbg_scan_lsb;
+        if (xtr_win == 25'd13500000) begin
+            ptr_alive  <= (ptr_tr  > 16'd1000);   // vivo: ~7000 toggles/0.5s @440Hz
+            scan_alive <= (scan_tr > 16'd1000);   // vivo: satura (13.5MHz)
+            xtr_win <= 25'd0; ptr_tr <= 16'd0; scan_tr <= 16'd0;
+        end else begin
+            xtr_win <= xtr_win + 25'd1;
+            if (scc_dbg_ptr_lsb  != ptr_prev  && ptr_tr  != 16'hFFFF) ptr_tr  <= ptr_tr  + 16'd1;
+            if (scc_dbg_scan_lsb != scan_prev && scan_tr != 16'hFFFF) scan_tr <= scan_tr + 16'd1;
+        end
+    end
+    wire scc_dbg_mix_act;
+    led_stretch #(.HOLD(27000000)) st_mixnz (.clk(clk_27m), .rst_n(bus_reset_n),
+        .trig(scc_dbg_mix_nz), .active(scc_dbg_mix_act));
+    assign dbg_pmod1[0] = ~ptr_alive;             // LED1 ON = el PUNTERO avanza (freq counters vivos)
+    assign dbg_pmod1[1] = ~scan_alive;            // LED2 ON = el ESCANEO de canales vivo (13.5MHz)
+    assign dbg_pmod1[2] = ~scc_dbg_mix_act;       // LED3 ON = el ACUMULADOR de mezcla ve datos
     assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = duty scc_wav (nivel != 0 sostenido)
 `else
     assign dbg_pmod1[0] = ~dbg_psgwr_led;     // LED ON = la CPU esta ESCRIBIENDO al PSG

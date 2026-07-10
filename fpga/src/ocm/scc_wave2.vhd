@@ -96,7 +96,10 @@ entity scc_wave2 is
         dbg_sel_nz  : out   std_logic;  -- reg_ch_sel != 0
         dbg_freq_nz : out   std_logic;  -- reg_freq_ch_a != 0
         -- _49dbg: prueba de AVANCE del puntero de onda del canal A
-        dbg_ptr_lsb : out   std_logic   -- LSB de ff_ptr_ch_a (togglea en cada avance)
+        dbg_ptr_lsb : out   std_logic;  -- LSB de ff_ptr_ch_a (togglea en cada avance)
+        -- _51dbg: cadena INTERNA del mezclador (escaneo de canales + acumulador)
+        dbg_scan_lsb: out   std_logic;  -- ff_ch_num(0): escaneo a reloj pleno
+        dbg_mix_nz  : out   std_logic   -- '1' = ff_mix /= 0 (el acumulador ve senal)
     );
 end scc_wave2;
 
@@ -255,6 +258,19 @@ begin
     -- tono de ~440Hz el puntero avanza a ~14 kHz -> un detector de duty en LED
     -- lo ve al ~50%. Congelado (sintoma de placa) = nivel fijo (duty 0/100%).
     dbg_ptr_lsb <= ff_ptr_ch_a(0);
+
+    -- _51dbg: cadena interna del mezclador.
+    -- dbg_scan_lsb = ff_ch_num(0): el escaneo de canales avanza CADA ciclo de
+    --   reloj pleno (solo se congela 1 tick por acceso de CPU, ff_wave_ce).
+    --   La secuencia 0,1,2,3,4,5 alterna paridad en cada paso (tambien 5->0)
+    --   => el LSB togglea CADA ciclo: cuadrada a clk/2 (13.5 MHz con clk=27M),
+    --   duty ~50%. Congelado = nivel fijo => si esto esta parado, el mux de
+    --   volumen se queda en "000" y w_mul=0 eternamente (sintoma de placa).
+    -- dbg_mix_nz = ff_mix /= 0: el acumulador ve senal en algun momento.
+    --   Con un tono sonando ~80% duty (0 solo en el slot de reset del scan y
+    --   cuando la muestra actual vale 0x00); mixer muerto = 0% fijo.
+    dbg_scan_lsb <= ff_ch_num(0);
+    dbg_mix_nz   <= '1' when ( ff_mix /= "000000000000000" ) else '0';
 
     ----------------------------------------------------------------
     -- tone generator
