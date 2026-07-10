@@ -9,7 +9,6 @@ module megaram_scc(
     input wire scc_wrt,
     input wire [1:0] map_sel,
     input wire map_linear,
-    input wire [1:0] console_mode,  // puerto #44: 00=MSX, 01=SG-1000, 10=ColecoVision
     input wire [7:0] sram_cfg,      // puerto #43: ASCII8 = bit de habilitacion SRAM
                                     // (pow2 >= bancos 8K); ASCII16 = no-cero activa el
                                     // modo "valor==0x10"; 0 = SRAM apagada (defecto)
@@ -47,13 +46,12 @@ module megaram_scc(
         ff_scc_mode <= ( map_sel == 2'b10 ) ? 1'b1 : 1'b0;
     end
     wire megaram_scc_a;
-    //combina dev (ff_scc_mode registrado: fix timing regresion MG2 v1.7) con el
-    //guard de consola (la ventana SCC solo existe en modo MSX, console_mode==0)
-    assign megaram_scc_a = ( console_mode == 2'b00 && ff_scc_mode == 1 && bus_addr[15:11] == 5'b10011 && megaram_mode_b[5] == 0 && megaram_reg2[5:0] == 6'b111111  ) ? 1 : 0;
+    //ff_scc_mode registrado: fix timing regresion MG2 v1.7
+    assign megaram_scc_a = ( ff_scc_mode == 1 && bus_addr[15:11] == 5'b10011 && megaram_mode_b[5] == 0 && megaram_reg2[5:0] == 6'b111111  ) ? 1 : 0;
 
     //Mapped I/O port access on B800-BFFFh ... Wave memory
     wire megaram_scc_b;
-    assign megaram_scc_b = ( console_mode == 2'b00 && ff_scc_mode == 1 && bus_addr[15:11] == 5'b10111 && megaram_mode_b[5] == 1 && megaram_reg3[7] == 1  ) ? 1 : 0;
+    assign megaram_scc_b = ( ff_scc_mode == 1 && bus_addr[15:11] == 5'b10111 && megaram_mode_b[5] == 1 && megaram_reg3[7] == 1  ) ? 1 : 0;
 
     //SCC address decoder
     wire megaram_sel_wave;
@@ -66,9 +64,7 @@ module megaram_scc(
                           (map_sel[1] == 1) ? (bus_addr[15:14] == 2'b10)
                                             : (bus_addr[14:13] != 2'b11) ) ) ? 1 : 0;
 
-    assign megaram_sel_memory = ( console_mode != 2'b00 ) ?
-                                  ( (bus_rd_n == 0) || (bus_wr_n == 0 && console_ram_wr == 1) ) :
-                                ( megaram_sel_wave == 1 ) ? 0 :
+    assign megaram_sel_memory = ( megaram_sel_wave == 1 ) ? 0 :
                                 ( bus_rd_n == 0 ) ? 1 :
                                 ( bus_wr_n == 0 && sram_wr_ok == 1 ) ? 1 :
                                 ( bus_wr_n == 0 && bus_addr[15:13] == 3'b010 && megaram_mode_a[4] == 1 ) ? 1 : 
@@ -108,26 +104,7 @@ module megaram_scc(
     assign sram_addr = (map_sel[1] == 1) ? { 10'b1111110000, bus_addr[10:0] }
                                          : { 6'b111111, sram_pg, bus_addr[12:0] };
 
-    //modo consola (SG-1000 / ColecoVision): el mapa completo del Z80 vive en la
-    //megaram, sin slots MSX. SG: 0000-BFFF = ROM lineal (segs 0-5), C000-FFFF =
-    //RAM de 8KB (seg 249, espejada). Coleco: 0000-1FFF = BIOS (seg 250),
-    //6000-7FFF = RAM de 1KB espejada (seg 249), 8000-FFFF = cartucho (segs 0-3).
-    wire [20:0] console_addr;
-    wire console_ram_wr;
-    assign console_addr =
-        (console_mode == 2'b01) ?
-            ( (bus_addr[15:14] == 2'b11) ? { 8'd249, bus_addr[12:0] }
-                                         : { 5'b00000, bus_addr } ) :
-        ( (bus_addr[15:13] == 3'b000) ? { 8'd250, bus_addr[12:0] } :
-          (bus_addr[15:13] == 3'b011) ? { 8'd249, 3'b000, bus_addr[9:0] } :
-          (bus_addr[15] == 1'b1)      ? { 6'b000000, bus_addr[14:13], bus_addr[12:0] }
-                                      : { 8'd251, bus_addr[12:0] } );
-    assign console_ram_wr =
-        (console_mode == 2'b01) ? (bus_addr[15:14] == 2'b11) :
-        (console_mode == 2'b10) ? (bus_addr[15:13] == 3'b011) : 1'b0;
-
-    assign megaram_addr =  (console_mode != 2'b00) ? console_addr :
-                          (map_linear == 1) ? { 5'b00000, bus_addr} :
+    assign megaram_addr =  (map_linear == 1) ? { 5'b00000, bus_addr} :
                           (sram_hit == 1) ? sram_addr :
                           (bus_addr [14:13] == 2'b10 ) ? { megaram_reg0, bus_addr[12:0] } :
                           (bus_addr [14:13] == 2'b11 ) ? { megaram_reg1, bus_addr[12:0] } :
@@ -162,7 +139,7 @@ module megaram_scc(
             sram_page2      <= 2'b00;
             sram_page3      <= 2'b00;
         end
-        else if (scc_wrt == 1 && console_mode == 2'b00) begin
+        else if (scc_wrt == 1) begin
             if (map_sel == 2'b00) begin
                 //Konami4 (sin SCC): regs de banco 6000/8000/A000, banco 0 FIJO
                 //en 4000-5FFF. Sin regs de modo (7FFE/BFFE ignorados = ROM pura,

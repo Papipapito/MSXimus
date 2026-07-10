@@ -50,7 +50,6 @@ add_file src/megaram.v
 add_file src/scc_wave2_ghdl.v
 add_file src/scc_glue.v
 add_file src/scc_wave2v.v
-add_file src/sn76489.v
 add_file src/memory.v
 add_file src/ocm/kanji.v
 add_file src/ocm/rtc.v
