@@ -13,7 +13,7 @@ Base v3.0 estable + **Fase 3 completa**, todo validado en hardware:
 - **Vídeo 720p** desacoplado por puente BRAM propio (HDMI arranca siempre, 4:3/16:9 por menú, scanlines).
 - **Audio**: PSG, **doble SCC + estéreo**, OPLL (jt2413).
 - **Teclado USB directo** (soft-host en el fabric, sin hub) por los USB-A onboard.
-- **Modos consola** SG-1000 / ColecoVision (SN76489).
+- **Logo de arranque** propio (pantalla MSXimus antes del menú).
 - Nextor + microSD, megaram (Konami4/Konami-SCC/ASCII8/16), menú de arranque propio.
 
 En cocina (F4+): turbo Panasonic 5.37 MHz, gamepads USB→joystick MSX, MSX-Audio Y8950, y la pista **V9968**/V9990. Ruta del proyecto en [docs/ROADMAP.md](docs/ROADMAP.md).
