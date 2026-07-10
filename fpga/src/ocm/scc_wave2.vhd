@@ -99,7 +99,9 @@ entity scc_wave2 is
         dbg_ptr_lsb : out   std_logic;  -- LSB de ff_ptr_ch_a (togglea en cada avance)
         -- _51dbg: cadena INTERNA del mezclador (escaneo de canales + acumulador)
         dbg_scan_lsb: out   std_logic;  -- ff_ch_num(0): escaneo a reloj pleno
-        dbg_mix_nz  : out   std_logic   -- '1' = ff_mix /= 0 (el acumulador ve senal)
+        dbg_mix_nz  : out   std_logic;  -- '1' = ff_mix /= 0 (el acumulador ve senal)
+        -- _52dbg: tasa de CAPTURA real del latch final de salida
+        dbg_wavlatch: out   std_logic   -- togglea cada vez que ff_wave captura ff_mix
     );
 end scc_wave2;
 
@@ -172,6 +174,7 @@ architecture rtl of scc_wave2 is
     signal ff_req_dl        : std_logic;
     signal ff_wave_dat      : std_logic_vector(  7 downto 0 );
     signal ff_wave          : std_logic_vector( 14 downto 0 );
+    signal ff_wavlatch_tgl  : std_logic;    -- _52dbg: togglea en cada captura de ff_wave
 begin
 
     ----------------------------------------------------------------
@@ -510,20 +513,31 @@ begin
     end process;
 
     --  wave out
+    --  _52 EXPERIMENTO (¿miscompilacion GW5A del latch final?): el guard
+    --  ff_wave_ce_dl = '0' esta ELIMINADO — ff_wave captura SIEMPRE que el
+    --  escaneo pasa por ff_ch_num_dl = "000" (una vez por vuelta del scan).
+    --  El guard original solo evitaba capturar en el ciclo adyacente a un
+    --  acceso de CPU (pipeline congelado); sin el, el peor caso es capturar
+    --  una muestra duplicada/a medias durante martilleo de accesos, artefacto
+    --  menor e inaudible. El proceso ff_mix CONSERVA su guard (la acumulacion
+    --  no cambia). El toggle _52dbg mide la tasa de captura REAL en silicio:
+    --  vivo = togglea a ~4.5 MHz con clk=27M (27M/6, una captura por vuelta,
+    --  CON o SIN tono) => cuadrada ~2.25 MHz, duty 50%; latch muerto = nivel
+    --  fijo; capturas ligadas-a-accesos (hipotesis del bug) = kHz esporadicos
+    --  solo mientras la CPU martillea.
     process( reset, clk21m )
     begin
         if( reset = '1' )then
-            ff_wave <= (others => '0');
+            ff_wave         <= (others => '0');
+            ff_wavlatch_tgl <= '0';
         elsif( clk21m'event and clk21m = '1' )then
-            if( ff_wave_ce_dl = '0' )then
-                if( ff_ch_num_dl = "000" )then
-                    ff_wave <= ff_mix;  -- 15bit 二の補数
-                else
-                    --  hold
-                end if;
+            if( ff_ch_num_dl = "000" )then
+                ff_wave         <= ff_mix;  -- 15bit 二の補数
+                ff_wavlatch_tgl <= not ff_wavlatch_tgl;
             end if;
         end if;
     end process;
 
     wave <= ff_wave;
+    dbg_wavlatch <= ff_wavlatch_tgl;    -- _52dbg
 end rtl;

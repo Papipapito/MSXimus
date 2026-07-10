@@ -2094,30 +2094,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0] scc2x_dout;
     wire [14:0] scc2x_wav;
 
-`ifdef ENABLE_SCC
-    scc_wave2 SccCh2 (   // v3.4: idem SccCh — config TN20K (27M en fase)
-        .clk21m (clk_27m),
-        .reset (~bus_reset_n),
-        .clkena (clk_enable_3m6_27),// _50dbg: cen original (pinfilter fixed)
-        .req ( scc2x_req),
-        .ack (),
-        .wrt (scc2x_wrt),
-        .adr (bus_addr[7:0]),
-        .dbi (scc2x_dout),
-        .dbo (cpu_dout),
-        .wave (scc2x_wav),
-        .sccplus (scc2x_modeb[5]),
-        .dbg_vol_nz (),
-        .dbg_sel_nz (),
-        .dbg_freq_nz (),
-        .dbg_ptr_lsb (),
-        .dbg_scan_lsb (),
-        .dbg_mix_nz ()
-    );
-`else
-    assign scc2x_wav  = 15'd0;      // BASE MINIMA v3.0: SCC-I fuera
+    // v3.8 (_52): DUAL SCC ELIMINADO a peticion del usuario — UN solo chip.
+    // SccCh ya cubre SCC compat Y SCC+ via su entrada sccplus (scc_mode_plus
+    // de la megaram); el segundo chip fisico (SccCh2, el "ghost"/SCC-I dual)
+    // sale del diseño para limpiar el tablero. Su ventana sigue devolviendo
+    // FF (sin memoria detras) y su termino de mezcla desaparece.
+    assign scc2x_wav  = 15'd0;
     assign scc2x_dout = 8'hFF;
-`endif
 
     //mixer (L = PSG1+SCC1+OPLL, R = PSG2+SCC2+OPLL; mono = everything on both sides)
 	reg [15:0] audio_sample;
