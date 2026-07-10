@@ -141,7 +141,6 @@ module scc_tb;   // variante GHDL: instancia scc_wave2 (scc_wave2_ghdl.v) en vez
         .map_sel (map_sel),
         .map_linear (1'b0),
         .sram_cfg (8'h00),
-        .console_mode (2'b00),
         .megaram_req (),
         .megaram_wrt (),
         .megaram_addr (),

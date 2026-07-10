@@ -213,7 +213,6 @@ module scc_tb_cen27;
         .map_sel (map_sel),
         .map_linear (1'b0),
         .sram_cfg (8'h00),
-        .console_mode (2'b00),
         .megaram_req (),
         .megaram_wrt (),
         .megaram_addr (),
