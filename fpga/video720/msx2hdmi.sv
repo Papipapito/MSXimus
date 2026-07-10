@@ -69,6 +69,10 @@ module msx2hdmi (
     input  wire        vs_n,         // VideoVS_n del VDP
     input  wire        blank,        // blank_o del VDP (1 = blanking)
     input  wire        pal_mode,     // cuasi-estático
+    input  wire        aspect_wide,  // _56: 0 = 4:3 (960 centrado), 1 = 16:9
+                                     // (720→1280 estirado). Cuasi-estático
+                                     // desde la config del menú; el cambio en
+                                     // caliente puede dar 1 frame feo.
     input  wire [15:0] audio_l,      // muestras del core (cruce 2FF)
     input  wire [15:0] audio_r,
     input  wire        clk_pixel,    // 74.25 MHz
@@ -93,8 +97,11 @@ module msx2hdmi (
     localparam AUDIO_RATE      = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
     localparam NUM_CHANNELS    = 3;
-    localparam XSTART          = (1280-960)/2;  // 160
-    localparam XSTOP           = (1280+960)/2;  // 1120
+    localparam XSTART          = (1280-960)/2;  // 160   (4:3)
+    localparam XSTOP           = (1280+960)/2;  // 1120  (4:3)
+    // _56 (16:9 estirado): ventana a pantalla completa, 720→1280
+    localparam XSTART_W        = 0;
+    localparam XSTOP_W         = 1280;
 
     // ========================================================================
     // Dominio clk (27 MHz): captura auto-cronometrada al ring buffer
@@ -223,6 +230,12 @@ module msx2hdmi (
         pal_sync <= {pal_sync[0], pal_mode};
     wire pal_x = pal_sync[1];
 
+    // _56: aspecto cuasi-estático desde la config del menú (2FF por higiene)
+    reg [1:0] aspect_sync = 2'b00;
+    always @(posedge clk_pixel)
+        aspect_sync <= {aspect_sync[0], aspect_wide};
+    wire wide_x = aspect_sync[1];
+
     // ========================================================================
     // Contadores HDMI (reales o conductuales) y mux NTSC/PAL
     // ========================================================================
@@ -236,11 +249,20 @@ module msx2hdmi (
     wire [9:0]  cy = pal_x ? cy_pal : cy_ntsc;
 
     // ========================================================================
-    // Escalado a ventana activa 960×720 centrada (X ∈ [160,1120))
+    // Escalado a la ventana activa — conmutable por aspecto (_56):
+    //   wide_x=0 (4:3, SIN CAMBIOS): 960×720 centrada (X ∈ [160,1120)),
+    //     acumulador xcnt+=720 con umbral 960 (720→960), reset en cx==0.
+    //   wide_x=1 (16:9 estirado): 1280×720 completa (X ∈ [0,1280)),
+    //     xcnt+=720 con umbral 1280 (720→1280). Como la ventana empieza en
+    //     x=0 y xx corre 2 ciclos POR DELANTE (pipeline BRAM+RGB), el
+    //     acumulador arranca al FINAL de la línea ANTERIOR: acumula en
+    //     cx ∈ {W-2,W-1} ∪ [0,1277) y resetea en cx==W-3, con W = ancho de
+    //     línea del frame HDMI activo (1650 NTSC / 1980 PAL).
     //
     // xx/yy se generan 2 ciclos POR DELANTE del cx del hdmi para absorber el
     // pipeline BRAM(1)+RGB(1): así rgb en el ciclo (cx,cy) es EXACTAMENTE el
-    // píxel nativo (floor(3·(cx-160)/4), floor(cy·N/720)), sin desfase.
+    // píxel nativo (floor(720·(cx-XSTART)/ANCHO), floor(cy·N/720)) del modo.
+    // El escalado VERTICAL no cambia con el aspecto.
     // ========================================================================
 
     reg [9:0]  xx   = 10'd0;    // 0..719 (píxel nativo)
@@ -249,23 +271,32 @@ module msx2hdmi (
     reg [10:0] ycnt = 11'd0;
     reg [9:0]  cy_r = 10'd0;
 
+    // _56: geometría del escalador horizontal muxeada por aspecto
+    wire [11:0] wlast    = pal_x ? 12'd1979 : 12'd1649;             // W-1
+    wire        xacc_en  = wide_x ? ((cx >= wlast - 12'd1) || (cx < XSTOP_W-3))
+                                  : ((cx >= XSTART-2) && (cx < XSTOP-3));
+    wire [10:0] xthresh  = wide_x ? 11'd1280 : 11'd960;
+    wire        xrst_now = wide_x ? (cx == wlast - 12'd2) : (cx == 12'd0);
+
     always @(posedge clk_pixel) begin : scaler
         reg [10:0] xcnt_next;
         reg [10:0] ycnt_next;
         xcnt_next = xcnt + 11'd720;
         ycnt_next = ycnt + (pal_x ? 11'd288 : 11'd240);
 
-        // Horizontal: acumula en cx ∈ [XSTART-2, XSTOP-3) → 959 flancos;
-        // xx acaba en 719 y se queda ahí (nunca desborda la línea del ring).
-        if (cx >= XSTART-2 && cx < XSTOP-3) begin
-            if (xcnt_next >= 11'd960) begin
-                xcnt <= xcnt_next - 11'd960;
+        // Horizontal: acumula en la ventana adelantada 2 ciclos del modo
+        // (4:3: cx ∈ [158,1117) → 959 flancos; 16:9: {W-2,W-1} ∪ [0,1277) →
+        // 1279 flancos); xx acaba en 719 y se queda ahí (nunca desborda la
+        // línea del ring).
+        if (xacc_en) begin
+            if (xcnt_next >= xthresh) begin
+                xcnt <= xcnt_next - xthresh;
                 xx   <= xx + 1'b1;
             end else
                 xcnt <= xcnt_next;
         end
 
-        // Vertical: acumula al cambiar de línea (como sms2hdmi).
+        // Vertical: acumula al cambiar de línea (como sms2hdmi). SIN CAMBIOS.
         cy_r <= cy;
         if (cy[0] != cy_r[0]) begin
             if (ycnt_next >= 11'd720) begin
@@ -276,7 +307,7 @@ module msx2hdmi (
         end
 
         // Resets por posición (prioridad: van los últimos).
-        if (cx == 12'd0) begin
+        if (xrst_now) begin
             xx   <= 10'd0;
             xcnt <= 11'd0;
         end
@@ -286,13 +317,59 @@ module msx2hdmi (
         end
     end
 
-    // Lectura del ring: dato registrado + registro rgb (2 etapas).
-    wire [14:0] rd_addr = yy[4:0] * 15'd720 + {5'd0, xx};
+    // _56b FIX TIMING (clk_hdmi Setup TNS -341ns, 467 endpoints, TODOS
+    // cx → ventana/lookahead → yy*720+xx → ADB de la BRAM en un ciclo de
+    // 13.468ns): el producto yy*720 es CONSTANTE durante toda la línea →
+    // se precalcula REGISTRADO (yy720_r / yy720_inc_r: camino corto
+    // reg→mult-por-constante→reg, sin cx) y la dirección por píxel queda
+    // base + xx (sumador de 15 bits). Los flags del lookahead 16:9 también
+    // van REGISTRADOS un ciclo antes: los comparadores de cx salen por
+    // completo del cono del ADB.
+    //
+    // Lookahead vertical 16:9 (con la base registrada, un ciclo MÁS que en
+    // la _56 original): los fetches cuya línea destino aún no está en
+    // yy720_r son los de cx ∈ {W-2, W-1, 0, 1}. En ESOS 4 ciclos la base
+    // correcta es EXACTAMENTE yy720_inc_r (el producto de yy_inc registrado
+    // el ciclo ANTERIOR): en cx∈{W-2,W-1} yy_inc se calculó con los regs de
+    // la línea actual (→ línea siguiente), y en cx∈{0,1} con los de la línea
+    // previa (→ línea actual) porque el acumulador vertical actualiza en el
+    // flanco 0→1 — en los 4 casos da la línea DESTINO del fetch (verificado
+    // caso a caso; el TB lo cubre con la geometría estricta de x=0..3 de
+    // cada línea). Si el destino es la línea 0 del frame, base = 0.
+    // En 4:3 los flags no aplican: base = yy720_r = yy*720 con 1 ciclo de
+    // retardo — idéntico dentro de su ventana (yy estable desde cx=1, sus
+    // fetches empiezan en cx=158). Geometría de AMBOS modos sin cambios.
+    wire [10:0] ycnt_nx = ycnt + (pal_x ? 11'd288 : 11'd240);
+    wire [8:0]  yy_inc  = (ycnt_nx >= 11'd720) ? yy + 9'd1 : yy;
+
+    reg [14:0] yy720_r     = 15'd0;   // yy[4:0]     * 720, registrado
+    reg [14:0] yy720_inc_r = 15'd0;   // yy_inc[4:0] * 720, registrado
+    reg        use_tgt_r   = 1'b0;    // ciclo ACTUAL de prefetch 16:9 (cx ∈ {W-2,W-1,0,1})
+    reg        tgt_is0_r   = 1'b0;    // ...y la línea destino es la 0 del frame
+
+    always @(posedge clk_pixel) begin
+        yy720_r     <= yy[4:0]     * 15'd720;
+        yy720_inc_r <= yy_inc[4:0] * 15'd720;
+        // flags para el ciclo SIGUIENTE: cx+1 ∈ {W-2,W-1,0,1} ⟺ cx ∈ {W-3,W-2,W-1,0}
+        use_tgt_r   <= (cx >= wlast - 12'd2) || (cx == 12'd0);
+        tgt_is0_r   <= ((cx >= wlast - 12'd2) && (cy == 10'd749)) ||
+                       ((cx == 12'd0) && (cy == 10'd0));
+    end
+
+    // Lectura del ring: base registrada + xx; dato registrado + registro rgb.
+    wire [14:0] rd_base = (wide_x && use_tgt_r) ? (tgt_is0_r ? 15'd0 : yy720_inc_r)
+                                                : yy720_r;
+    wire [14:0] rd_addr = rd_base + {5'd0, xx};
     reg  [17:0] rd_data = 18'd0;
     reg  [23:0] rgb     = 24'd0;
 
-    // "El PRÓXIMO ciclo está dentro de la ventana activa" (cx+1 ∈ [160,1120)).
-    wire win_next = (cx >= XSTART-1) && (cx < XSTOP-1) && (cy < 10'd720);
+    // "El PRÓXIMO ciclo está dentro de la ventana activa" del modo:
+    //  4:3:  cx+1 ∈ [160,1120) en línea activa.
+    //  16:9: cx+1 ∈ [0,1280) — en cx==W-1 el próximo píxel es el x=0 de la
+    //        LÍNEA SIGUIENTE (activa si cy<719, o cy==749 → línea 0).
+    wire win_next = wide_x ? ( ((cx < XSTOP_W-1) && (cy < 10'd720)) ||
+                               ((cx == wlast) && ((cy < 10'd719) || (cy == 10'd749))) )
+                           : ((cx >= XSTART-1) && (cx < XSTOP-1) && (cy < 10'd720));
 
     always @(posedge clk_pixel) begin
         rd_data <= mem[rd_addr];

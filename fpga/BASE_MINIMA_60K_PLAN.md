@@ -120,26 +120,32 @@ de la sesión (`n2m/`).
   actual. Objetivo: build pequeño, timing holgado, cero lotería; validar
   estabilidad larga (menú+BASIC+juego PSG horas).
 
-**F3 — re-añadir/curar de uno en uno (un build = una variable):**
-  1. **Teclado USB-A directo** (usb_hid_host versión 2025 de
-     snestang/tangcore — con retry 200ms —, pll_12 estática, pines
-     H13/G13 + M15/M16, OR con el companion como gbatang; cruce del pulso
-     `report` a 54M por toggle+2FF). Adiós hub.
-  2. **Fuera el CLKDIV** (re-_28 con la disciplina _34): clk_27m del ODIV2
-     de la PLLA; SDC re-declara 27 como reloj emparentado de 54 (generated +
-     multicycle). Si va: muere la clase de fase entera.
-  3. **SCC de vuelta** con la receta VM2413/jt89 (checklist de C).
-  4. OPLL → megaram → sn76489/consola.
-  5. **Turbo** con latch-al-expirar + FSM de waits consciente del modo (o
-     sin waits si 2 ya lo permitió).
+**F3 — re-priorizada por el usuario (2026-07-10, tras la victoria del SCC):**
+  1. ~~Teclado USB-A directo~~ ✅ (_39)
+  2. ~~Fuera el CLKDIV~~ ✅ (absorbido en la 1-REDUX)
+  3. ~~SCC~~ ✅ (_55: saga de 15 builds, 3 bugs de toolchain GW5A — crónica
+     en los commits 442a257..c4d73ea y en la memoria)
+  4. **Opción 4:3/16:9 del menú** (_56): el conmutador config_enable_16_9
+     ya llega a v9958_top; el escalador de msx2hdmi lo obedece (960
+     centrado vs 1280 estirado).
+  5. **Segundo SCC + estéreo** (_57): restaurar SccCh2 con el chip CURADO
+     (mismo scc_wave2 vía GHDL) + verificar el modo estéreo del menú
+     (mixer ya lo trae: L=PSG1+SCC1+OPLL / R=PSG2+SCC2+OPLL; el segundo
+     PSG YA existe en el core — dual PSG estilo OCM).
+  6. **Scanlines** (_58): reimplementar en msx2hdmi (el efecto legacy vivía
+     en el hdmi de 480p): oscurecer 1 de cada 3 líneas de salida (720p =
+     3 líneas por línea nativa), gated por config_enable_scanlines.
+  7. **Modos consola** (_59): Coleco/SG-1000 + SN76489 — ANTES de
+     reactivar, auditar sn76489.v contra la lección GW5A del SCC
+     (patrón captura+reset mismo ciclo).
 
-**F4 — endurecimiento estructural (según necesidad tras F3):**
-  - VRAM 128KB → BRAM dual-port (mata SCREEN 3 de raíz; BSRAM al 13% hoy).
-  - memory.v estilo sdram_nes: peticiones por flanco + slots re-sincronizados
-    a clkref + refresh estructural (jubila `rfsh_skip_cnt`) + fase del reloj
-    de pad por PE de PLLA (jubila `SDCLK_INVERT`).
-  - Reset fan-out replicado a mano; multicycle global del T80 (si se migran
-    los strobes negedge a estilo T80s posedge).
+**F4 — turbo + mandos + endurecimiento (tras F3):**
+  - **Turbo WSX** con la receta mdtang/pctang (latch del divisor al expirar
+    + FSM de waits consciente del modo).
+  - **Mandos USB-A → joystick MSX** (el usb_hid_host ya los lee; falta el
+    mapeo a los puertos DB9 virtuales).
+  - VRAM 128KB → BRAM dual-port (candidato firme para SCREEN 3).
+  - memory.v estilo sdram_nes; reset fan-out replicado; multicycle T80.
 
 **F5 — roadmap largo (validado por el barrido):**
   - Frontend gráfico fase B: `ddr3_framebuffer.v` de gbatang tal cual

@@ -22,11 +22,17 @@
 //      cabe: 858-720 = 138 máx → se usa 130.)
 //   2. PAL  HOFF=100 (todas las 288 nativas caben: 46+576 = 622 ≤ 625,
 //      sin alias)
+//   3. NTSC 16:9 (_56, aspect_wide=1): ventana [0,1280), 720→1280. Las fases
+//      0-2 corren con aspect_wide=0 y checks IDÉNTICOS (no-regresión 4:3).
+//   4. PAL  16:9 (_56)
 //
 // Checks (contadores de error, $fatal al final si >0):
 //  a. GEOMETRÍA estricta contra el patrón r=x[5:0], g=y_nativa[5:0], b=0x2A,
-//     con referencia independiente por división real:
-//        xx = ((cx-160)*720)/960,  yy = (cy*N)/720   (N = 240/288)
+//     con referencia independiente por división real (XW/AW según aspecto:
+//     4:3 → 160/960, 16:9 → 0/1280):
+//        xx = ((cx-XW)*720)/AW,  yy = (cy*N)/720   (N = 240/288)
+//     En 16:9 se muestrean ADEMÁS x=0..3 de cada línea (estresan el arranque
+//     adelantado del acumulador y el lookahead vertical de yy).
 //  b. CARRERA DEL RING: slot_last por slot + writer-in-progress + cota
 //     lag = líneas_completadas - línea_esperada ∈ [1,31]; lag mín/máx por
 //     fase, y rampa (escritor aún en frame) con margen ≥2 → [3,29].
@@ -50,6 +56,7 @@ module msx2hdmi_tb;
     // ------------------------------------------------------------------
     reg        resetn   = 1'b0;
     reg        pal_mode = 1'b0;
+    reg        aspect   = 1'b0;    // _56: 0 = 4:3, 1 = 16:9
     wire       hs_n, vs_n, blank;
     reg  [5:0] r, g, b;
 
@@ -63,6 +70,7 @@ module msx2hdmi_tb;
         .vs_n         (vs_n),
         .blank        (blank),
         .pal_mode     (pal_mode),
+        .aspect_wide  (aspect),
         .audio_l      (16'h1234),
         .audio_r      (16'h5678),
         .clk_pixel    (clk_pixel),
@@ -83,9 +91,12 @@ module msx2hdmi_tb;
     // Modelo del VDP: solo hs_n / vs_n / blank / rgb
     // ------------------------------------------------------------------
     integer LINE_CLKS, LINES, HOFF, VOFF, NAT;
-    integer phase;                       // 0/1 = NTSC, 2 = PAL
+    integer XW, AW;                      // ventana del lector según aspecto
+    integer phase;                       // 0/1 = NTSC 4:3, 2 = PAL 4:3,
+                                         // 3 = NTSC 16:9, 4 = PAL 16:9
     initial begin
         LINE_CLKS = 858; LINES = 525; HOFF = 100; VOFF = 40; NAT = 240;
+        XW = 160; AW = 960;
         phase = 0;
     end
 
@@ -198,11 +209,11 @@ module msx2hdmi_tb;
     integer border_err = 0;
     integer border_checks = 0;
 
-    integer lagmin  [0:2], lagmax  [0:2];     // absoluto por fase
-    integer rlagmin [0:2], rlagmax [0:2];     // rampa (escritor en frame)
-    integer nchecks [0:2], ntail   [0:2], lagmin_yy [0:2];
+    integer lagmin  [0:4], lagmax  [0:4];     // absoluto por fase
+    integer rlagmin [0:4], rlagmax [0:4];     // rampa (escritor en frame)
+    integer nchecks [0:4], ntail   [0:4], lagmin_yy [0:4];
     initial begin
-        for (k = 0; k < 3; k = k + 1) begin
+        for (k = 0; k < 5; k = k + 1) begin
             lagmin[k]  = 1000; lagmax[k]  = -1000;
             rlagmin[k] = 1000; rlagmax[k] = -1000;
             nchecks[k] = 0;    ntail[k]   = 0;    lagmin_yy[k] = -1;
@@ -217,11 +228,13 @@ module msx2hdmi_tb;
         if (checking && locks_mode >= 2 && rbase >= 0) begin
             cxv = dut.cx;
             cyv = dut.cy;
-            if (cyv < 720 && cxv >= 160 && cxv < 1120) begin
-                if (((cxv - 160) % 7) == 0) begin
+            if (cyv < 720 && cxv >= XW && cxv < XW + AW) begin
+                // muestreo %7 (como siempre) + en 16:9 los x=0..3 de cada
+                // línea (estresan arranque adelantado + lookahead de yy)
+                if ((((cxv - XW) % 7) == 0) || (aspect && (cxv - XW) < 4)) begin
                     // referencia independiente con división real
-                    ip     = cxv - 160;
-                    xx_ref = (ip * 720) / 960;
+                    ip     = cxv - XW;
+                    xx_ref = (ip * 720) / AW;
                     yy_ref = (cyv * NAT) / 720;
 
                     // -------- a) geometría / patrón --------
@@ -332,10 +345,49 @@ module msx2hdmi_tb;
                  nchecks[2], lagmin[2], lagmax[2], lagmin_yy[2],
                  rlagmin[2], rlagmax[2], ntail[2], geo_err, race_err, border_err);
 
+        // ============ fase 3: NTSC 16:9 (_56, aspect_wide=1) ============
+        @(negedge clk);
+        vdp_restart  = 1'b1;
+        phase        = 3;
+        pal_mode     = 1'b0;
+        aspect       = 1'b1;
+        XW           = 0;   AW = 1280;
+        LINE_CLKS    = 858; LINES = 525; HOFF = 100; VOFF = 40; NAT = 240;
+        toggles_mode = 0; locks_mode = 0; rbase = -1; base_pending = -1000000;
+        @(negedge clk); @(negedge clk);
+        vdp_restart = 1'b0;
+
+        checking = 1'b1;
+        wait (toggles_mode == 4);
+        checking = 1'b0;
+        $display("NTSC 16:9 (HOFF=100): checks=%0d lag=[%0d..%0d] (min yy=%0d) rampa=[%0d..%0d] tail=%0d  geo=%0d race=%0d bord=%0d",
+                 nchecks[3], lagmin[3], lagmax[3], lagmin_yy[3],
+                 rlagmin[3], rlagmax[3], ntail[3], geo_err, race_err, border_err);
+
+        // ============ fase 4: PAL 16:9 (_56) ============
+        @(negedge clk);
+        vdp_restart  = 1'b1;
+        phase        = 4;
+        pal_mode     = 1'b1;
+        aspect       = 1'b1;
+        XW           = 0;   AW = 1280;
+        LINE_CLKS    = 864; LINES = 625; HOFF = 100; VOFF = 46; NAT = 288;
+        toggles_mode = 0; locks_mode = 0; rbase = -1; base_pending = -1000000;
+        @(negedge clk); @(negedge clk);
+        vdp_restart = 1'b0;
+
+        checking = 1'b1;
+        wait (toggles_mode == 4);
+        checking = 1'b0;
+        $display("PAL  16:9 (HOFF=100): checks=%0d lag=[%0d..%0d] (min yy=%0d) rampa=[%0d..%0d] tail=%0d  geo=%0d race=%0d bord=%0d",
+                 nchecks[4], lagmin[4], lagmax[4], lagmin_yy[4],
+                 rlagmin[4], rlagmax[4], ntail[4], geo_err, race_err, border_err);
+
         // ============ veredicto ============
-        if (nchecks[0] < 100000 || nchecks[1] < 100000 || nchecks[2] < 100000) begin
-            $display("FAIL: muy pocos checks (%0d/%0d/%0d) - gating roto",
-                     nchecks[0], nchecks[1], nchecks[2]);
+        if (nchecks[0] < 100000 || nchecks[1] < 100000 || nchecks[2] < 100000 ||
+            nchecks[3] < 100000 || nchecks[4] < 100000) begin
+            $display("FAIL: muy pocos checks (%0d/%0d/%0d/%0d/%0d) - gating roto",
+                     nchecks[0], nchecks[1], nchecks[2], nchecks[3], nchecks[4]);
             $fatal(1, "TB FAILED");
         end
         if (geo_err + race_err + border_err > 0) begin
@@ -346,7 +398,7 @@ module msx2hdmi_tb;
         // margen >=2 por ambos lados de [1,31] sobre el lag de rampa (lo que
         // controla LOCK_LINES; el minimo absoluto satura a fin de frame con
         // el escritor ya parado = caso seguro, verificado por el check de slot)
-        for (ph = 0; ph < 3; ph = ph + 1) begin
+        for (ph = 0; ph < 5; ph = ph + 1) begin
             if (rlagmin[ph] < 3 || rlagmax[ph] > 29) begin
                 $display("FAIL: rampa fase %0d = [%0d..%0d] sin margen >=2 - ajustar LOCK_LINES",
                          ph, rlagmin[ph], rlagmax[ph]);
@@ -359,12 +411,15 @@ module msx2hdmi_tb;
         $display("  PAL  lag rampa=[%0d..%0d]; abs=[%0d..%0d] (min en yy=%0d)",
                  rlagmin[2], rlagmax[2], lagmin[2], lagmax[2], lagmin_yy[2]);
         $display("  Inmunidad al offset horizontal verificada: fases A (HOFF=100) y B (HOFF=130) pasan los mismos checks estrictos.");
+        $display("  _56 16:9 verificado: NTSC rampa=[%0d..%0d], PAL rampa=[%0d..%0d]; geometria estricta 720->1280 con XW=0 (incl. x=0..3 de cada linea).",
+                 rlagmin[3], rlagmax[3], rlagmin[4], rlagmax[4]);
+        $display("  No-regresion 4:3: las fases 0-2 corren con aspect_wide=0 y los checks originales intactos.");
         $finish;
     end
 
-    // Watchdog
+    // Watchdog (5 fases: ~83+67+100+67+80 ms de tiempo simulado + margen)
     initial begin
-        #450_000_000;
+        #800_000_000;
         $fatal(1, "TIMEOUT: la simulacion no termino");
     end
 
