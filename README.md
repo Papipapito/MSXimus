@@ -1,36 +1,37 @@
-# MSX_up — Port del core MSXnano a la Tang Console 60K
+<p align="center"><img src="docs/logo/msximus.svg" alt="MSXimus" width="480"/></p>
 
-Repo de **staging** para migrar el core **MSXnano** del **Tang Nano 20K** (Gowin **GW2AR-18C**, SDRAM integrada) a la **Tang Console 60K** (SOM Tang Mega 60K = Gowin **GW5AT-60**, GW5AT-LV60PG484, DDR3 512 MB, BL616 onboard, 2× USB-A host, HDMI, microSD).
+# MSXimus — MSX2+ standalone en la Tang Console 60K
 
-> Aquí va cayendo, de forma incremental y validada, el código que se va migrando. **No** es un fork con historia completa: es una base nueva donde cada pieza entra ya adaptada (o marcada como pendiente). El core original de producción sigue viviendo en [`Papipapito/MSXnano`](https://github.com/Papipapito/MSXnano).
+**MSXimus** es el hermano mayor del [**MSXnano**](https://github.com/Papipapito/MSXnano): el mismo linaje de core MSX2+ (goauld → MSXnano), portado y ampliado sobre la **Tang Console 60K** (SOM Tang Mega 60K = Gowin **GW5AT-60**, GW5AT-LV60PG484, DDR3 512 MB, BL616 onboard, 2× USB-A host, HDMI, microSD). *Nano* era el pequeño; *Maximus* es el grande.
+
+> El nombre del repo hasta 2026-07-10 era `MSX_up` (staging del port); las URLs antiguas redirigen aquí.
 
 ## Estado
 
-Fase **F4 (port)** arrancando con enfoque **híbrido**: primero lo específico del 60K que no depende de fixes pre-port (árbol de relojes GW5A, CST/SDC nuevos, wrapper DDR3, IP que porta tal cual); `flash_rw`/SD/`YM2149` entran después ya con sus fixes.
+Base v3.0 estable + **Fase 3 completa**, todo validado en hardware:
 
-Ver **[docs/PORT_PLAN.md](docs/PORT_PLAN.md)** para el plan completo.
+- **Vídeo 720p** desacoplado por puente BRAM propio (HDMI arranca siempre, 4:3/16:9 por menú, scanlines).
+- **Audio**: PSG, **doble SCC + estéreo**, OPLL (jt2413).
+- **Teclado USB directo** (soft-host en el fabric, sin hub) por los USB-A onboard.
+- **Modos consola** SG-1000 / ColecoVision (SN76489).
+- Nextor + microSD, megaram (Konami4/Konami-SCC/ASCII8/16), menú de arranque propio.
+
+En cocina (F4+): turbo Panasonic 5.37 MHz, gamepads USB→joystick MSX, MSX-Audio Y8950, y la pista **V9968**/V9990. Plan vivo en [fpga/BASE_MINIMA_60K_PLAN.md](fpga/BASE_MINIMA_60K_PLAN.md).
 
 ## Base de partida
 
-- Upstream: `Papipapito/MSXnano`, rama **`dev`**, commit **`390132d`** (incluye F0+F1 de limpieza pre-port ya aplicadas).
-- Guía del port: **[docs/AUDIT_PRE_PORT_60K.md](docs/AUDIT_PRE_PORT_60K.md)** (auditoría de ~45 findings, 6 bugs confirmados, 4 frentes del port).
-
-## Los 4 frentes del port
-
-1. **Memoria** — SDRAM (GW2AR) → **DDR3** (GW5AT). El bloque más caro. Preservar la interfaz `ram_*`/`vram_*` como frontera estable + requisito "toda escritura VDP se completa" + waits adaptativos.
-2. **Árbol de relojes** — `rPLL`→`PLLA`, CLKDIV regenerados para GW5A, constantes absolutas recalculadas para la base nueva (turbo WSX 5.369318 MHz, 859372 bps del ESP, LFSR del RTC…).
-3. **Constraints** — `.sdc` y `.cst` **nuevos desde cero** (fallan en silencio si se copian; verificar que cada constraint matchea >0 objetos tras el primer PnR).
-4. **Companion BL616** — topología TangCore del 60K; decidir si sigue el dock M0S externo.
+- Upstream: `Papipapito/MSXnano`, rama `dev`, commit `390132d`.
+- Auditoría del port: [docs/AUDIT_PRE_PORT_60K.md](docs/AUDIT_PRE_PORT_60K.md).
+- Los bitstreams se entregan como `msximus_60k_YYYYMMDD_NN.fs` (hasta la _59 el prefijo fue `msxup_60k_`).
 
 ## Estructura
 
 ```
-docs/            Plan del port + auditoría + tablas code-grounded (constantes, memoria, manifiesto, placa)
-fpga/src/        RTL portado (se rellena incrementalmente)
-fpga/constraints/  msx_console60k.cst / .sdc (skeletons nuevos GW5AT-60)
-fpga/ip/         IP GW5A regenerada (PLLA, CLKDIV, controlador DDR3)
+docs/            Planes, auditoría, logo, tablas code-grounded
+fpga/            top.v, build.tcl, video720/ (puente HDMI), src/ (RTL), constraints/
+tools/           Testbenches (SCC, vídeo, megaram) y utilidades
 ```
 
 ## Licencia
 
-**GPLv3** — derivado de `Papipapito/MSXnano` (GPLv3). Ver [LICENSE](LICENSE) y **[UPSTREAM.md](UPSTREAM.md)** (atribución + IP de terceros).
+**GPLv3** — derivado de `Papipapito/MSXnano` (GPLv3). Ver [LICENSE](LICENSE) y [UPSTREAM.md](UPSTREAM.md) (atribución + IP de terceros). El logo (docs/logo/) es del proyecto.
