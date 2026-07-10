@@ -95,8 +95,8 @@ set_false_path -from [get_clocks {clk_54m}] -to [get_pins {psg2/?*?/?*}]
 # v3.4 (_44): chips SCC de vuelta a 27M (config TN20K, fase alineada v3.0) —
 # misma clase cuasi-estatica por protocolo de bus que rtc/kanji/psg
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {SccCh/?*?/?*}]
-# v3.8 (_52): SccCh2 ELIMINADO (dual-SCC fuera a peticion del usuario) -> retirada
-# set_false_path -from [get_clocks {clk_54m}] -to [get_pins {SccCh2/?*?/?*}]
+# v4.2 (_57): SccCh2 RESTAURADO (F3.5) -> excepcion de vuelta (misma clase que SccCh)
+set_false_path -from [get_clocks {clk_54m}] -to [get_pins {SccCh2/?*?/?*}]
 # v3.0 BASE MINIMA: sn1 fuera del netlist -> excepcion retirada
 # set_false_path -from [get_clocks {clk_54m}] -to [get_pins {sn1/?*?/?*}]
 # F3 (_38): OPLL de vuelta A 54M+cen (mismo dominio que el bus) -> la
