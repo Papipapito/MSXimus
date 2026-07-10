@@ -18,7 +18,7 @@
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
-//`define ENABLE_TURBO      // BASE MINIMA: turbo F11/WSX fuera (turbo=0 fijo)
+`define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
 
 module top
 #(
@@ -955,7 +955,12 @@ assign keyboard_addr = ppi_port_c[3:0];
     // NOTE: F12 is captured by the BL616 FPGA-Companion firmware (its OSD) and never
     // reaches the FPGA, so F11 (which does reach it, verified on HW) is used instead.
     // (reg turbo declarado arriba, v2.1)
-    reg turbo_req = 1'b0;   // deseo de turbo; se COMMITEA solo en ventana segura
+    // P1 (receta MSXnano v1.9 ce46ef9): los eventos escriben `turbo` DIRECTO y el
+    // conmutado seguro lo hace turbo_eff (mas abajo): limite de T-estado limpio
+    // (fix de cadencia del nano, validado en su HW) COMBINADO con el guard de
+    // bus/memoria en reposo propio del 60K (SDRAM externa: no conmutar con un
+    // acceso en vuelo). El esquema turbo_req anterior queda sustituido.
+    reg boot_done = 1'b0;   // 1 tras la PRIMERA (fria) salida de reset; sobrevive warm resets
     reg f11_s0  = 1'b0;
     reg f11_s1  = 1'b0;
     reg f11_prev= 1'b0;
@@ -963,22 +968,9 @@ assign keyboard_addr = ppi_port_c[3:0];
         f11_s0   <= keyboard[68];   // sync HID F11 state into clk_54m domain
         f11_s1   <= f11_s0;
         f11_prev <= f11_s1;
-        // FIX 60K (cuelgue F11): el mux de cadencia NO puede conmutar con un
-        // acceso en vuelo — con la SDRAM externa el dato llega mas tarde que
-        // en la interna del TN20K y el mis-latch pilla basura (menu sobrevivia
-        // por probabilidad; BASIC moria). Los eventos escriben turbo_req y el
-        // cambio se aplica SOLO con el bus Z80 y la memoria en reposo.
-        if (turbo != turbo_req
-            && bus_rd_n && bus_wr_n && bus_mreq_n && ex_bus_iorq_n
-            && ram_busy == 0
-`ifdef ENABLE_WAIT
-            && state_wait == WAIT_IDLE
-`endif
-            )
-            turbo <= turbo_req;
 `ifdef ENABLE_TURBO
         if (f11_s1 & ~f11_prev)     // rising edge = F11 pressed
-            turbo_req <= ~turbo_req; // toggle real-MSX <-> turbo
+            turbo <= ~turbo;        // toggle real-MSX <-> turbo
 `endif
         // v1.9: control software Panasonic — OUT &H41,n con el dispositivo 8
         // seleccionado (decode pana41_wr junto al bloque config). bit0 activo-bajo:
@@ -986,19 +978,28 @@ assign keyboard_addr = ppi_port_c[3:0];
         // mismo ciclo gana el software (en el T9769 real el puerto es el unico control).
 `ifdef ENABLE_TURBO
         if (pana41_wr)
-            turbo_req <= ~cpu_dout[0];
+            turbo <= ~cpu_dout[0];
 `endif
         // v1.9: "Boot Turbo" persistido (ajuste del menu, puerto #45). Siembra el
-        // turbo durante la ventana config_init del stream de flash: config_init y
-        // config_sig son dominio clk_54m (sin CDC) y config_sig[4] ya esta cargado
-        // cuando la ventana abre (se carga con last_bytes_cnt==2). Va el ULTIMO del
-        // bloque: domina sobre F11/puerto durante el boot (no disparan ahi de todos
-        // modos). Con S2 (rescate) arranca SIEMPRE a 3.58.
+        // turbo durante la ventana config_init del stream de flash. Va el ULTIMO
+        // del bloque de eventos: domina sobre F11/puerto durante el boot.
+        // v1.9b FIX pantalla-negra Save&Reset-con-turbo: el boot-turbo (5.37) SOLO
+        // se aplica en arranque en FRIO (boot_done=0). En warm reset -> 3.58 (= un
+        // Save&Reset normal); el boot-turbo entra al PROXIMO encendido.
 `ifdef ENABLE_TURBO
         if (config_init)
-            turbo_req <= (!s2_press && config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
+            turbo <= (~boot_done && !s2_press && config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
+        // estado conocido de `turbo` en cualquier reset (mirror del cold boot). Ultimo = prioridad.
+        if (~bus_reset_n)
+            turbo <= 1'b0;
 `endif
     end
+    // boot_done: se pone a 1 la primera vez que el CPU sale de reset (arranque en
+    // frio) y NO se borra nunca (sin clausula de reset -> sobrevive warm resets;
+    // GSR lo inicia a 0 al encender). Discriminador frio/warm del boot-turbo.
+    always @ (posedge clk_54m)
+        if (bus_reset_n & reset3_n & flash_idle & esp_boot_ok & ~config_init)
+            boot_done <= 1'b1;   // ~config_init: no marcar boot_done durante la siembra
 
     // ===== v1.9 Panasonic-WSX turbo: 5.37 MHz CPU cadence =====
     // /20 divider on 108 MHz -> 5.40 MHz base cadence + "period swallow" trim ->
@@ -1055,10 +1056,31 @@ assign keyboard_addr = ppi_port_c[3:0];
     end
     wire clk_enable_5m4_54  = clk_enable_5m4_raw  & ~pana_skip_now;
     wire clk_falling_5m4_54 = clk_falling_5m4_raw & ~pana_skip_pend;
-    // CPU cadence mux: turbo picks 5.37 MHz, else the untouched 3.6 MHz path.
-    // (wires forward-declared above the M1-wait FSM)
-    assign clk_enable_cpu_54  = turbo ? clk_enable_5m4_54  : clk_enable_3m6_54;
-    assign clk_falling_cpu_54 = turbo ? clk_falling_5m4_54 : clk_falling_3m6_54;
+    // ===== v1.9: conmutado de cadencia SIN glitch =====
+    // El mux elige entre dos cadencias de FASE INDEPENDIENTE (3.6 del /30, 5.37
+    // del /20). Conmutar sobre `turbo` crudo a mitad de T-estado puede entregar
+    // al Z80 dos ENABLE (o dos FALLING) seguidos sin pareja -> opcode mal
+    // latcheado -> cuelgue (el F11 en el menu del nano). turbo_eff (el select
+    // REAL) solo adopta `turbo` cuando AMBAS cadencias estan bajas Y el CPU no
+    // esta en ningun wait (receta v1.9, validada en el TN20K) Y ADEMAS el bus
+    // Z80 y la SDRAM estan en reposo (guard 60K: memoria externa, no conmutar
+    // con un acceso en vuelo). En reset adopta directo (semilla del boot-turbo).
+    wire cadence_safe = (bus_clk_3m6 == 1'b0 && bus_clk_3m6_54 == 1'b0) &&
+                        (s5m4_a == 1'b0 && s5m4_b == 1'b0);
+    // v1.9b: un warm reset EN CURSO debe CRUZAR la entrada del reset a 3.58
+    // (la grabacion en flash tarda decenas de ms con bus_reset_n aun alto).
+    wire warm_reset_pending = flash_write_busy | config_reset_req;
+    reg  turbo_eff = 1'b0;
+    always @ (posedge clk_54m) begin
+        if (!(bus_reset_n & reset3_n & flash_idle & esp_boot_ok))
+            turbo_eff <= turbo;                                 // en reset: sigue a turbo (semilla / 0)
+        else if (cadence_safe & wait_io & wait_m1
+                 & bus_rd_n & bus_wr_n & bus_mreq_n & ex_bus_iorq_n & (ram_busy == 0))
+            turbo_eff <= warm_reset_pending ? 1'b0 : turbo;     // corriendo: 3.58 si hay warm-reset pendiente
+    end
+    // CPU cadence mux: turbo_eff (conmutado sin glitch) elige 5.37; si no, la 3.6 intacta.
+    assign clk_enable_cpu_54  = turbo_eff ? clk_enable_5m4_54  : clk_enable_3m6_54;
+    assign clk_falling_cpu_54 = turbo_eff ? clk_falling_5m4_54 : clk_falling_3m6_54;
 
     // ----- M1-wait fallback (divisor) -----
     // If on real HW the benchmark still does not land near 100% with the WAIT_n

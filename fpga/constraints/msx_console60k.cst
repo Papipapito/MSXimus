@@ -185,3 +185,14 @@ IO_LOC "usb2_dn" M16; IO_PORT "usb2_dn" IO_TYPE=LVCMOS33;
 // reasignacion aleatoria con la red llena mato el bitstream _45: build con
 // timing limpio y logs identicos pero muerto en placa).
 CLOCK_LOC "vdp4/u_msx2hdmi/clk_audio" LOCAL_CLOCK;
+
+// ============ P1: endurecimiento anti-loteria de strobes (2026-07-11) ============
+// Los samplers negedge de RD/WR del T80 y su primer LUT se FIJAN en el centroide
+// del cluster mem1/wait (R45-59, C91-98 en el placement de referencia): el camino
+// critico half-period (9.26ns, F11 golden rule: NUNCA relajarlo) es sampler ->
+// decode -> mux ram_addr -> sdram_seq/ram_busy/state_wait, y el salto CPU->mem
+// (~1.9ns de net) era lo que la loteria de placement a veces no absorbia. El lado
+// T80 -> sampler tiene margen de sobra y tolera el viaje largo.
+INS_LOC "cpu1/RD_s0" R52C95;
+INS_LOC "cpu1/RD_n_i_s0" R52C96;
+INS_LOC "cpu1/WR_n_i_s0" R53C95;
