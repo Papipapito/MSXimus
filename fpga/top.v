@@ -796,7 +796,7 @@ assign keyboard_addr = ppi_port_c[3:0];
                     // la CPU leia basura ("se vuelve loco y se cuelga"; la nota
                     // iter.2 del port lo predijo). A 3.58 el termino es INERTE:
                     // camino validado byte-identico.
-                    if ( ram_write == 1 || (turbo_eff == 1 && bus_mreq_n == 0 && bus_rd_n == 0 && ram_busy == 1) || (ex_bus_iorq_n == 0 || ( config_enable_wait == 1 && ex_bus_mreq_n == 0 ) )&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin
+                    if ( ram_write == 1 || (turbo_eff == 1 && bus_mreq_n == 0 && bus_rd_n == 0 && ram_busy == 1) || (ex_bus_iorq_n == 0)&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin  // P2: fuera el 'Compatible Mode' vestigial (= v1.9 nano)
                         wait_io_ff <= 0;
                         state_wait <= WAIT_STATE1;
                     end
@@ -2189,7 +2189,6 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire config_enable_megaram12;
     wire config_enable_ghost_scc;
     reg config_enable_sdcard;
-    wire config_enable_wait;
     wire config_enable_stereo;
     wire config_enable_16_9;
     reg config_reset_ff;
@@ -2300,7 +2299,6 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign config5_req = (config_ok == 1 && bus_addr[7:0] == 8'h45 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 1:0;
     assign config_enable_scanlines = config1_ff[3];
     //assign config_keyboard = config2_ff[4:3];
-    assign config_enable_wait = config2_ff[3];
     assign config_enable_stereo = config2_ff[5];
     assign config_enable_16_9 = config2_ff[4];
     // ===== v1.9 Panasonic switched-I/O device 8 (T9769 turbo, estilo WSX) =====
@@ -2359,7 +2357,6 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [1:0] config_megaram_slot;
     wire [1:0] config_sdcard_slot;
     wire config_reset;
-    wire config_enable_wait;
     assign config_enable_mapper3 = 1;
     assign config_enable_mapper12 = 0;
     assign config_enable_megaram = 1;
@@ -2372,7 +2369,6 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign config_megaram_slot = 2'b11;
     assign config_sdcard_slot= 2'b11;
     assign config_reset = 0;
-    assign config_enable_wait = 0;
     wire config_enable_stereo;
     assign config_enable_stereo = 0;
     wire config_enable_16_9;
