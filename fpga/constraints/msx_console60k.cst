@@ -193,6 +193,10 @@ CLOCK_LOC "vdp4/u_msx2hdmi/clk_audio" LOCAL_CLOCK;
 // decode -> mux ram_addr -> sdram_seq/ram_busy/state_wait, y el salto CPU->mem
 // (~1.9ns de net) era lo que la loteria de placement a veces no absorbia. El lado
 // T80 -> sampler tiene margen de sobra y tolera el viaje largo.
-INS_LOC "cpu1/RD_s0" R52C95;
-INS_LOC "cpu1/RD_n_i_s0" R52C96;
-INS_LOC "cpu1/WR_n_i_s0" R53C95;
+// _63diag: pins DESACTIVADOS para bisecar la regresion de ESC de la _62
+// (con turbo=0 el injerto es funcionalmente identico a la _61; el otro cambio
+// eran estos pins -> sospecha: alargar T80->sampler rompe coherencia de
+// muestreo aunque el STA pase por la excepcion multicycle)
+//INS_LOC "cpu1/RD_s0" R52C95;
+//INS_LOC "cpu1/RD_n_i_s0" R52C96;
+//INS_LOC "cpu1/WR_n_i_s0" R53C95;

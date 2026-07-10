@@ -763,6 +763,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // liberar con uno y consumir con el otro = carrera dependiente de fase
     // (en el TN20K ambos dominios salian ALINEADOS del mismo rPLL).
     reg  turbo = 1'b0;
+    reg  turbo_eff = 1'b0;   // P1-iter.2: adelantado (el FSM de waits lo consume)
     wire clk_enable_cpu_54;
     wire clk_falling_cpu_54;
 
@@ -789,7 +790,13 @@ assign keyboard_addr = ppi_port_c[3:0];
         else begin
             case (state_wait)
                 WAIT_IDLE: begin
-                    if ( ram_write == 1 || (ex_bus_iorq_n == 0 || ( config_enable_wait == 1 && ex_bus_mreq_n == 0 ) )&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin
+                    // P1-iter.2 (_64): handshake de LECTURA con la SDRAM, SOLO en
+                    // turbo (turbo_eff) — a 5.37 los T-states (186ns) ya no tapan
+                    // la latencia/contencion de la SDRAM externa (VDP+refresh) y
+                    // la CPU leia basura ("se vuelve loco y se cuelga"; la nota
+                    // iter.2 del port lo predijo). A 3.58 el termino es INERTE:
+                    // camino validado byte-identico.
+                    if ( ram_write == 1 || (turbo_eff == 1 && bus_mreq_n == 0 && bus_rd_n == 0 && ram_busy == 1) || (ex_bus_iorq_n == 0 || ( config_enable_wait == 1 && ex_bus_mreq_n == 0 ) )&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin
                         wait_io_ff <= 0;
                         state_wait <= WAIT_STATE1;
                     end
@@ -802,8 +809,9 @@ assign keyboard_addr = ppi_port_c[3:0];
                 // NOTA v1.9: el wait sigue midiendo y liberando con los pulsos 3m6
                 // fijos TAMBIEN en turbo (release 3m6-alineado con el CPU en tren
                 // 5m4 swallowed). Validado en HW: juegos/DOS en turbo sin fallos.
+                // P1-iter.2: en turbo, ademas, NO liberar con la SDRAM ocupada.
                 WAIT_STATE2: begin
-                    if ( clk_falling_3m6_54 == 1 ) begin
+                    if ( clk_falling_3m6_54 == 1 && (turbo_eff == 0 || ram_busy == 0) ) begin
                         wait_io_ff <= 1;
                         state_wait <= WAIT_STATE3;
                     end
@@ -1070,7 +1078,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // v1.9b: un warm reset EN CURSO debe CRUZAR la entrada del reset a 3.58
     // (la grabacion en flash tarda decenas de ms con bus_reset_n aun alto).
     wire warm_reset_pending = flash_write_busy | config_reset_req;
-    reg  turbo_eff = 1'b0;
+    // (reg turbo_eff adelantado junto al FSM de waits, P1-iter.2)
     always @ (posedge clk_54m) begin
         if (!(bus_reset_n & reset3_n & flash_idle & esp_boot_ok))
             turbo_eff <= turbo;                                 // en reset: sigue a turbo (semilla / 0)
@@ -1571,46 +1579,47 @@ assign keyboard_addr = ppi_port_c[3:0];
                         (logo_req == 1 ) ? { 9'b111011111, bus_addr[13:0] } : //bank D (pack 0x7C000)
                         23'h7fffff; 
     
-    assign ram_read = (~flash_idle) ? 0 : 
+    // P1-fix (_64): muxes de habilitacion APLANADOS. Las cascadas ternarias
+    // (~10 niveles) devolvian LO MISMO en todas las ramas -> OR plano
+    // booleanamente identico (y los reqs son mutuamente exclusivos por decode).
+    // Era el grueso del cono strobe->CE (7 niveles de LUT + 1.9ns de net) que
+    // la loteria de placement no siempre absorbia; el OR de 2 niveles lo mata
+    // de raiz sin pins INS_LOC (leccion del ESC de la _62: los samplers no se
+    // mueven).
+    wire any_ram_rd_req =
                 `ifdef ENABLE_MAPPER
-                      (mapper_read == 1) ? ~bus_rd_n :
+                      mapper_read |
                 `endif
-                      (bios_req == 1) ? ~bus_rd_n :
-                      (subrom_logo_req == 1) ? ~bus_rd_n :
+                      bios_req | subrom_logo_req |
                 `ifdef ENABLE_SDCARD
-                      (megarom_req == 1) ? ~bus_rd_n :
+                      megarom_req |
                 `endif
-                      (megaram_req == 1) ? ~bus_rd_n :
-                      (kanji_driver_req == 1) ? ~bus_rd_n :
-                      (kanji_data_ram_req == 1) ? ~bus_rd_n :
+                      megaram_req | kanji_driver_req | kanji_data_ram_req |
                 `ifdef ENABLE_WIFI
-                      (wifi_req == 1) ? ~bus_rd_n :
+                      wifi_req |
                 `endif
-                      (logo_req == 1) ? ~bus_rd_n :
-                      0;
-    
-    assign ram_write = (~flash_idle) ? rom_write : 
+                      logo_req;
+    wire any_ram_req =
+                      mapper_req | bios_req | subrom_logo_req |
+                `ifdef ENABLE_SDCARD
+                      megarom_req |
+                `endif
+                      megaram_req | kanji_driver_req | kanji_data_ram_req |
+                `ifdef ENABLE_WIFI
+                      wifi_req |
+                `endif
+                      logo_req;
+    wire any_ram_wr =
                 `ifdef ENABLE_MAPPER
-                      (mapper_write == 1 ) ? ~bus_wr_n :
+                      mapper_write |
                 `endif
-                      (megaram_wrt == 1) ? ~bus_wr_n :
-                      0; 
+                      megaram_wrt;
 
-    assign ram_req = (~flash_idle) ? rom_write : 
-                     (mapper_req == 1) ? mapper_req:
-                     (bios_req == 1) ? bios_req:
-                     (subrom_logo_req == 1) ? subrom_logo_req:
-                `ifdef ENABLE_SDCARD
-                     (megarom_req == 1) ? megarom_req:
-                `endif
-                     (megaram_req == 1) ? megaram_req:
-                     (kanji_driver_req == 1) ? kanji_driver_req:
-                     (kanji_data_ram_req == 1) ? kanji_data_ram_req:
-                `ifdef ENABLE_WIFI
-                     (wifi_req == 1) ? wifi_req:
-                `endif
-                     (logo_req == 1) ? logo_req:
-                      0;
+    assign ram_read  = (~flash_idle) ? 1'b0      : (any_ram_rd_req & ~bus_rd_n);
+
+    assign ram_write = (~flash_idle) ? rom_write : (any_ram_wr & ~bus_wr_n);
+
+    assign ram_req   = (~flash_idle) ? rom_write : any_ram_req;
 
     assign ram_din = (~flash_idle) ? { rom_dout, rom_dout }  : { cpu_dout, cpu_dout };
 
