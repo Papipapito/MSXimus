@@ -18,7 +18,7 @@
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
-//`define ENABLE_CONSOLE_SN // BASE MINIMA: SN76489 de consola fuera
+`define ENABLE_CONSOLE_SN   // _59: modos consola SG-1000/ColecoVision de vuelta (sn76489 auditado contra el patron GW5A capture+reset: variante benigna — captura dato valido de CPU, no reset a ceros)
 //`define ENABLE_TURBO      // BASE MINIMA: turbo F11/WSX fuera (turbo=0 fijo)
 
 module top
