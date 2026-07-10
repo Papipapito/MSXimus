@@ -101,7 +101,10 @@ entity scc_wave2 is
         dbg_scan_lsb: out   std_logic;  -- ff_ch_num(0): escaneo a reloj pleno
         dbg_mix_nz  : out   std_logic;  -- '1' = ff_mix /= 0 (el acumulador ve senal)
         -- _52dbg: tasa de CAPTURA real del latch final de salida
-        dbg_wavlatch: out   std_logic   -- togglea cada vez que ff_wave captura ff_mix
+        dbg_wavlatch: out   std_logic;  -- togglea cada vez que ff_wave captura ff_mix
+        -- _53dbg: ¿QUE captura el latch y llega al registro de salida?
+        dbg_capnz   : out   std_logic;  -- '1' = la ULTIMA captura fue con ff_mix /= 0
+        dbg_wave_nz : out   std_logic   -- '1' = ff_wave (registro INTERNO de salida) /= 0
     );
 end scc_wave2;
 
@@ -175,6 +178,7 @@ architecture rtl of scc_wave2 is
     signal ff_wave_dat      : std_logic_vector(  7 downto 0 );
     signal ff_wave          : std_logic_vector( 14 downto 0 );
     signal ff_wavlatch_tgl  : std_logic;    -- _52dbg: togglea en cada captura de ff_wave
+    signal ff_capnz         : std_logic;    -- _53dbg: la ultima captura fue /= 0
 begin
 
     ----------------------------------------------------------------
@@ -530,14 +534,28 @@ begin
         if( reset = '1' )then
             ff_wave         <= (others => '0');
             ff_wavlatch_tgl <= '0';
+            ff_capnz        <= '0';
         elsif( clk21m'event and clk21m = '1' )then
             if( ff_ch_num_dl = "000" )then
                 ff_wave         <= ff_mix;  -- 15bit 二の補数
                 ff_wavlatch_tgl <= not ff_wavlatch_tgl;
+                -- _53dbg: valor del acumulador EN EL INSTANTE de captura real
+                -- (misma condicion que el toggle): nivel = ultima captura /= 0.
+                -- Beeper sierra vivo ~31/32 del tiempo a '1' (solo la muestra
+                -- 0x00 captura cero); "captura ceros" (sintoma _52) = '0' fijo.
+                if( ff_mix /= "000000000000000" )then
+                    ff_capnz <= '1';
+                else
+                    ff_capnz <= '0';
+                end if;
             end if;
         end if;
     end process;
 
     wave <= ff_wave;
     dbg_wavlatch <= ff_wavlatch_tgl;    -- _52dbg
+    dbg_capnz    <= ff_capnz;           -- _53dbg
+    -- _53dbg: registro INTERNO de salida /= 0 (separa "ff_wave se queda a 0"
+    -- de "ff_wave tiene valor pero el cono ff_wave->puerto wave esta roto")
+    dbg_wave_nz  <= '1' when ( ff_wave /= "000000000000000" ) else '0';
 end rtl;

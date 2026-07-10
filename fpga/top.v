@@ -1870,6 +1870,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire dbg_scc_enable_w;   // panel _42dbg (declarado ANTES del uso — leccion EX3638)
     wire scc_dbg_vol_nz, scc_dbg_sel_nz, scc_dbg_freq_nz;   // _46dbg (idem)
     wire scc_dbg_ptr_lsb, scc_dbg_scan_lsb, scc_dbg_mix_nz;  // _51dbg (idem)
+    wire scc_dbg_wavlatch, scc_dbg_capnz, scc_dbg_wave_nz;   // _52/_53dbg (idem)
     scc_glue sccglue1 (
         .clk (clk_54m),             // v2.6: glue SCC a 54M (bus mismo dominio)
         .reset_n (bus_reset_n),
@@ -1985,7 +1986,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .dbg_freq_nz (scc_dbg_freq_nz),
         .dbg_ptr_lsb (scc_dbg_ptr_lsb),
         .dbg_scan_lsb (scc_dbg_scan_lsb),
-        .dbg_mix_nz (scc_dbg_mix_nz)
+        .dbg_mix_nz (scc_dbg_mix_nz),
+        .dbg_wavlatch (scc_dbg_wavlatch),
+        .dbg_capnz (scc_dbg_capnz),
+        .dbg_wave_nz (scc_dbg_wave_nz)
     );
 `else
     assign scc_wav  = 15'd0;        // BASE MINIMA v3.0: SCC fuera (aparcado)
@@ -3167,12 +3171,16 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         if (!bus_int_n && dbg_int_d) dbg_intdiv <= dbg_intdiv + 1'b1;  // flanco INT
     end
 `ifdef VIDEO720
-    // v3.1: PMOD0 = diagnostico del puente de video (LEDs activo-bajo: ON=activo)
-    assign dbg_pmod0[0] = ~dbg_bridge_w[0];   // LED1 parpadeo = VS del VDP vivo (frames saliendo)
-    assign dbg_pmod0[1] = ~dbg_bridge_w[1];   // LED2 ON = el puente CAPTURA pixeles (ventana activa)
-    assign dbg_pmod0[2] = ~dbg_bridge_w[2];   // LED3 ON = contenido NO-negro capturado (imagen real)
-    assign dbg_pmod0[3] = ~dbg_bridge_w[4];   // LED4 ON = hdmi_rst llegando al lado 74.25 (lock OK)
-    assign dbg_pmod0[4] = ~dbg_bridge_w[5];   // LED5 ON = ventana de lectura activa en el 720p
+    // POLITICA DE LEDs (v3.9, peticion del usuario): TODO apagado por defecto;
+    // solo se enciende lo que el diagnostico ACTIVO necesita, y solo en UN
+    // modulo (PMOD1). El panel de video del PMOD0 cumplio su mision (_37) y
+    // queda APAGADO (activo-bajo: 1 = LED off). Para reactivarlo, restaurar
+    // los assigns de dbg_bridge_w de la historia git (commit 1f36a67).
+    assign dbg_pmod0[0] = 1'b1;
+    assign dbg_pmod0[1] = 1'b1;
+    assign dbg_pmod0[2] = 1'b1;
+    assign dbg_pmod0[3] = 1'b1;
+    assign dbg_pmod0[4] = 1'b1;
 `else
     assign dbg_pmod0[0] = wait_io;            // LED ON = CPU RETENIDA EN WAIT (clavado=malo)
     assign dbg_pmod0[1] = ~ram_busy;          // LED ON = ram_busy activo (fijo=arbitro atascado)
@@ -3255,10 +3263,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc_dbg_mix_act;
     led_stretch #(.HOLD(27000000)) st_mixnz (.clk(clk_27m), .rst_n(bus_reset_n),
         .trig(scc_dbg_mix_nz), .active(scc_dbg_mix_act));
-    assign dbg_pmod1[0] = ~ptr_alive;             // LED1 ON = el PUNTERO avanza (freq counters vivos)
-    assign dbg_pmod1[1] = ~scan_alive;            // LED2 ON = el ESCANEO de canales vivo (13.5MHz)
-    assign dbg_pmod1[2] = ~scc_dbg_mix_act;       // LED3 ON = el ACUMULADOR de mezcla ve datos
-    assign dbg_pmod1[3] = ~scc_dbg_wav_act;       // LED4 ON = duty scc_wav (nivel != 0 sostenido)
+    // ===== PANEL MINIMO _53dbg (politica de LEDs v3.9: solo lo necesario) =====
+    // NOTA DE PROCESO: el cableado de la _52 se perdio (script encadenado al
+    // build en background fallo en silencio) — la _52 llevo el panel viejo:
+    // su LED2 era el ESCANEO, no la tasa de captura. Esta si mide lo nuevo.
+    assign dbg_pmod1[0] = ~scc_dbg_wave_nz;       // LED1 ON = ff_wave INTERNO tiene valor (~97% con tono)
+    assign dbg_pmod1[1] = ~scc_dbg_capnz;         // LED2 ON = la ULTIMA CAPTURA fue != 0 (OFF = captura CEROS)
+    assign dbg_pmod1[2] = ~(scc_wav != 15'd0);    // LED3 ON = el PUERTO de salida (scc_wav) tiene valor
+    assign dbg_pmod1[3] = 1'b1;                   // LED4 APAGADO (sin uso esta ronda)
 `else
     assign dbg_pmod1[0] = ~dbg_psgwr_led;     // LED ON = la CPU esta ESCRIBIENDO al PSG
     assign dbg_pmod1[1] = ~clk_1m8;           // parpadeo rapido (se ve medio-encendido) = ENA vivo
@@ -3283,7 +3295,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             if (scc_wav != wavtr_prev && wavtr_cnt != 16'hFFFF) wavtr_cnt <= wavtr_cnt + 16'd1;
         end
     end
-    assign dbg_pmod1[5] = ~wavtr_tone;            // LED6 ON = scc_wav CAMBIA (tono de verdad)
+    assign dbg_pmod1[5] = 1'b1;                   // LED6 APAGADO (sin uso esta ronda; wavtr_tone
+                                                  //  disponible en git si hiciera falta)
 `elsif ENABLE_USB_KBD
     assign dbg_pmod1[4] = ~(usb1_typ == 2'd1 || usb2_typ == 2'd1); // LED ON = teclado USB-A enumerado
     // v3.2: conerr solo con dispositivo enumerado — el puerto VACIO reintenta

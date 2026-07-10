@@ -164,6 +164,8 @@ module scc_tb_cen27;
     wire        dbg_scan_lsb_w;     // _51dbg: ff_ch_num(0), escaneo a reloj pleno
     wire        dbg_mix_nz_w;       // _51dbg: ff_mix /= 0
     wire        dbg_wavlatch_w;     // _52dbg: togglea en cada captura de ff_wave
+    wire        dbg_capnz_w;        // _53dbg: la ultima captura fue con ff_mix /= 0
+    wire        dbg_wave_nz_w;      // _53dbg: ff_wave (registro interno) /= 0
 
     scc_wave2 SccCh (
         .clk21m (clk27),
@@ -180,7 +182,9 @@ module scc_tb_cen27;
         .dbg_ptr_lsb (dbg_ptr_lsb_w),
         .dbg_scan_lsb (dbg_scan_lsb_w),
         .dbg_mix_nz (dbg_mix_nz_w),
-        .dbg_wavlatch (dbg_wavlatch_w)
+        .dbg_wavlatch (dbg_wavlatch_w),
+        .dbg_capnz (dbg_capnz_w),
+        .dbg_wave_nz (dbg_wave_nz_w)
         // dbg_vol_nz / dbg_sel_nz / dbg_freq_nz sin conectar
     );
 
@@ -320,6 +324,7 @@ module scc_tb_cen27;
     integer mix_nz_cnt, mon_cycles27;
     integer wavlatch_toggles;
     reg wavlatch_prev;
+    integer capnz_cnt, wave_nz_cnt;
     always @(posedge clk27) begin
         if (mon_en) begin
             mon_cycles27 = mon_cycles27 + 1;
@@ -330,6 +335,8 @@ module scc_tb_cen27;
             if (dbg_mix_nz_w === 1'b1) mix_nz_cnt = mix_nz_cnt + 1;
             if (dbg_wavlatch_w !== wavlatch_prev) wavlatch_toggles = wavlatch_toggles + 1;
             wavlatch_prev = dbg_wavlatch_w;
+            if (dbg_capnz_w === 1'b1) capnz_cnt = capnz_cnt + 1;
+            if (dbg_wave_nz_w === 1'b1) wave_nz_cnt = wave_nz_cnt + 1;
         end
     end
 
@@ -341,6 +348,7 @@ module scc_tb_cen27;
         scan_toggles = 0; scan_prev = dbg_scan_lsb_w;
         mix_nz_cnt = 0; mon_cycles27 = 0;
         wavlatch_toggles = 0; wavlatch_prev = dbg_wavlatch_w;
+        capnz_cnt = 0; wave_nz_cnt = 0;
         term_viol = 0;
         mon_en = 1;
     end endtask
@@ -477,6 +485,18 @@ module scc_tb_cen27;
                  wavlatch_toggles, mon_cycles27 / 6);
         check("N4 latch final CAPTURA a ritmo de scan (dbg_wavlatch ~ciclos/6)",
               (wavlatch_toggles > mon_cycles27 / 8) && (wavlatch_toggles < mon_cycles27 / 4));
+
+        // NUEVO (_53dbg): contenido de la captura + registro de salida.
+        // dbg_capnz = la ultima captura fue /= 0: con la onda CUADRADA del TB
+        // (todas las muestras /= 0) debe ser '1' ~100% (en placa con la
+        // sierra del beeper ~97% = 31/32, la muestra 0x00 captura cero).
+        // dbg_wave_nz = ff_wave interno /= 0: idem ~100% aqui, ~97% sierra.
+        // "Captura ceros" (sintoma _52 de placa) = ambos 0% fijo.
+        $display("  sondas _53dbg: capnz=%0d%% wave_nz=%0d%% del tiempo (tono cuadrado: esperado ~100%%)",
+                 (capnz_cnt * 100) / mon_cycles27,
+                 (wave_nz_cnt * 100) / mon_cycles27);
+        check("N5 la captura LLEVA senal y ff_wave la retiene (capnz+wave_nz)",
+              (capnz_cnt > (mon_cycles27 * 9) / 10) && (wave_nz_cnt > (mon_cycles27 * 9) / 10));
 
         // volumen a 0 -> salida plana a 0 (camino reg_vol -> multiplicador)
         mem_write(16'h988A, 8'h00);
