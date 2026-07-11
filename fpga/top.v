@@ -770,10 +770,7 @@ assign keyboard_addr = ppi_port_c[3:0];
 `ifdef ENABLE_WAIT
     wire wait_io;
     reg wait_io_ff = 1;
-    // P1-iter.2c (_67): flanco de inicio de lectura para el handshake turbo
-    reg bus_rd_n_q54 = 1'b1;
-    wire rd_lead;
-    assign rd_lead = bus_rd_n_q54 & ~bus_rd_n;
+
     reg [6:0] wait_cycles;
     reg [6:0] state_wait;
     localparam WAIT_IDLE = 7'd0;
@@ -790,10 +787,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         if (~bus_reset_n) begin
             state_wait <= WAIT_IDLE;
             wait_io_ff <= 1;
-            bus_rd_n_q54 <= 1'b1;
         end 
         else begin
-            bus_rd_n_q54 <= bus_rd_n;
             case (state_wait)
                 WAIT_IDLE: begin
                     // P1-iter.2 (_64): handshake de LECTURA con la SDRAM, SOLO en
@@ -802,11 +797,12 @@ assign keyboard_addr = ppi_port_c[3:0];
                     // la CPU leia basura ("se vuelve loco y se cuelga"; la nota
                     // iter.2 del port lo predijo). A 3.58 el termino es INERTE:
                     // camino validado byte-identico.
-                    // P1-iter.2c: solo COLISION REAL — flanco de inicio de lectura con la
-                    // SDRAM ya ocupada POR OTRO (VDP/refresh). El iter.2 original
-                    // disparaba en cada lectura (la propia lectura pone ram_busy)
-                    // y frenaba a 4.33 MHz medidos; sin conflicto no hay espera.
-                    if ( ram_write == 1 || (turbo_eff == 1 && rd_lead && bus_mreq_n == 0 && ram_busy == 1) || (ex_bus_iorq_n == 0)&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin  // P2: sin Compatible Mode (= v1.9 nano)
+                    // P1-iter.2d (_68): guard de la _66 (nivel, seguro — la _67 con flanco
+                    // corrompia lecturas: bench 10-12 'MHz' de basura) EXCEPTO en
+                    // ciclos M1: el freno M1 ya inserta su T-state y cubre la
+                    // latencia del fetch — el handshake encima lo doblaba. Solo
+                    // lecturas NO-M1 (operandos, LD (HL), stack) llevan handshake.
+                    if ( ram_write == 1 || (turbo_eff == 1 && bus_mreq_n == 0 && bus_rd_n == 0 && bus_m1_n == 1 && ram_busy == 1) || (ex_bus_iorq_n == 0)&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin  // P2: sin Compatible Mode (= v1.9 nano)
                         wait_io_ff <= 0;
                         state_wait <= WAIT_STATE1;
                     end
