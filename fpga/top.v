@@ -797,12 +797,17 @@ assign keyboard_addr = ppi_port_c[3:0];
                     // la CPU leia basura ("se vuelve loco y se cuelga"; la nota
                     // iter.2 del port lo predijo). A 3.58 el termino es INERTE:
                     // camino validado byte-identico.
-                    // P1-iter.2d (_68): guard de la _66 (nivel, seguro — la _67 con flanco
-                    // corrompia lecturas: bench 10-12 'MHz' de basura) EXCEPTO en
-                    // ciclos M1: el freno M1 ya inserta su T-state y cubre la
-                    // latencia del fetch — el handshake encima lo doblaba. Solo
-                    // lecturas NO-M1 (operandos, LD (HL), stack) llevan handshake.
-                    if ( ram_write == 1 || (turbo_eff == 1 && bus_mreq_n == 0 && bus_rd_n == 0 && bus_m1_n == 1 && ram_busy == 1) || (ex_bus_iorq_n == 0)&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin  // P2: sin Compatible Mode (= v1.9 nano)
+                    // P1-iter.2b (_66, DEFINITIVA): guard por NIVEL en TODA lectura
+                    // SDRAM turbo, ciclos M1 incluidos. Post-mortem de las variantes:
+                    //  - iter.2c (_67, flanco): bench 10-12 "MHz" de basura -> lecturas
+                    //    corruptas. RETIRADA.
+                    //  - iter.2d (_68, eximir M1): NI ARRANCA en turbo -> el T-state del
+                    //    freno M1 NO cubre la latencia real de la SDRAM; los fetch salian
+                    //    corruptos. RETIRADA.
+                    // Moraleja: cuando ram_busy=1 los datos NO estan; no hay margen en el
+                    // handshake. Ir mas alla de ~4.3 efectivos exige acelerar el propio
+                    // controlador de memoria (P1c), no apostar en el guard.
+                    if ( ram_write == 1 || (turbo_eff == 1 && bus_mreq_n == 0 && bus_rd_n == 0 && ram_busy == 1) || (ex_bus_iorq_n == 0)&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin  // P2: sin Compatible Mode (= v1.9 nano)
                         wait_io_ff <= 0;
                         state_wait <= WAIT_STATE1;
                     end
@@ -1455,7 +1460,11 @@ assign keyboard_addr = ppi_port_c[3:0];
         .adc_mosi (),
         .adc_miso (0),
 
+    `ifdef ENABLE_CONFIG
+        .maxspr_n    (~config_enable_8sprites),  // Sprite Limit 8/linea (menu, config2[6]); 1 = limite clasico 4
+    `else
         .maxspr_n    (1),
+    `endif
     `ifdef ENABLE_SCAN_LINES
         .scanlin_n   (~config_enable_scanlines),
     `else
@@ -2199,6 +2208,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire config_enable_megaram12;
     wire config_enable_ghost_scc;
     reg config_enable_sdcard;
+    wire config_enable_8sprites;
     wire config_enable_stereo;
     wire config_enable_16_9;
     reg config_reset_ff;
@@ -2311,6 +2321,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     //assign config_keyboard = config2_ff[4:3];
     assign config_enable_stereo = config2_ff[5];
     assign config_enable_16_9 = config2_ff[4];
+    // Sprite Limit 8/linea (SPMAXSPR del VDP; fix parpadeo screen 2). En el
+    // protocolo de #42 SOLO se almacenan los bits [5:0] (bit6=orden de guardar
+    // en flash, bit7=orden de reset) -> el bit de config va en el [3], LIBRE
+    // desde la P2 (era el Compatible Mode). En el MSXnano este toggle vive en
+    // el bit4 (alli el 16:9 no existe); en MSXimus el bit4 SIGUE siendo 16:9.
+    assign config_enable_8sprites = config2_ff[3];
     // ===== v1.9 Panasonic switched-I/O device 8 (T9769 turbo, estilo WSX) =====
     // Protocolo (ref. openMSX MSXMatsushita.cc): OUT &H40,8 selecciona el dispositivo;
     // leer $40 devuelve ~8 = 247 (deteccion). $41 write: SOLO bit0, activo-bajo
@@ -2380,7 +2396,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign config_sdcard_slot= 2'b11;
     assign config_reset = 0;
     wire config_enable_stereo;
+    wire config_enable_8sprites;
     assign config_enable_stereo = 0;
+    assign config_enable_8sprites = 0;
     wire config_enable_16_9;
     assign config_enable_16_9 = 0;
 

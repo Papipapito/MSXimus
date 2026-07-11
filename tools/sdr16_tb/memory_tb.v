@@ -178,6 +178,10 @@ module memory_tb;
     end
     endtask
 
+    // -------- T9: medida de latencia del barrido de fase --------
+    integer ph, rep, tries, hit, nlat;
+    real t0, t1, lat, max_lat, min_lat, sum_lat;
+
     // -------- scoreboard del test aleatorio --------
     localparam NRAND = 300;
     reg [22:0] rnd_addr [0:NRAND-1];
@@ -348,6 +352,45 @@ module memory_tb;
             $display("FAIL T8: guardia no forzo refresh con vram_write atascado (%0d -> %0d)", refc0, refc1);
         end
         $display("T8 guardia anti-inanicion OK (+%0d refresh con vram_write atascado)", refc1 - refc0);
+
+        // ---- T9: barrido de fase — latencia req->busy_baja de LECTURAS ----
+        // Lanza lecturas en todos los offsets de fase alcanzables respecto a
+        // la rejilla dl/dh y mide req->negedge(busy). Metrica de la iter.3:
+        // a 5.37 la holgura del Z80 (RD activo->muestreo) es ~280ns; toda
+        // latencia mayor = stall de 1 T-state entero via el handshake.
+        cpu_write(23'h033333, 8'h3C);
+        max_lat = 0; min_lat = 1000000; sum_lat = 0; nlat = 0;
+        for (ph = 0; ph < 16; ph = ph + 1) begin
+            for (rep = 0; rep < 4; rep = rep + 1) begin
+                hit = 0;
+                for (tries = 0; tries < 40; tries = tries + 1) begin
+                    if (hit == 0) begin
+                        @(negedge clk54);
+                        if (phc == ph[3:0]) hit = 1;
+                    end
+                end
+                if (hit == 1) begin
+                    ram_addr  = 23'h033333;
+                    ram_din   = 0;
+                    ram_write = 0;
+                    ram_req   = 1;
+                    t0 = $realtime;
+                    @(negedge ram_busy);
+                    t1 = $realtime;
+                    @(negedge clk54);
+                    check8(ram_dout, 8'h3C, "T9 read-back del barrido");
+                    ram_req = 0;
+                    @(negedge clk54);
+                    lat = t1 - t0;
+                    if (lat > max_lat) max_lat = lat;
+                    if (lat < min_lat) min_lat = lat;
+                    sum_lat = sum_lat + lat;
+                    nlat = nlat + 1;
+                end
+            end
+        end
+        $display("T9 barrido de fase: %0d lecturas, lat req->busy0  min=%0.0f  avg=%0.0f  MAX=%0.0f ns",
+                 nlat, min_lat, sum_lat / nlat, max_lat);
 
         // ---- resumen ----
         $display("---------------------------------------------");
