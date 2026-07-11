@@ -2991,28 +2991,24 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // ===== STANDALONE MERGE: discrete status LEDs (active low) — from MSXnano =====
     // LED[5] TURBO: solid = turbo ON (~4.13MHz); blink (~1.8Hz) = real-MSX speed (also "alive"). LED[4] SD busy;
     // LED[3] joy0 fire B; LED[2] joy0 fire A; LED[1] joy0 any dir; LED[0] joy1 any input
-    reg led_heartbeat = 1'b1;
-    reg [19:0] led_cnt;
+    // _71: LED de TURBO en los LEDs VISIBLES del 60K. En esta placa solo
+    // led[0] (G11) y led[1] (U12) tienen pin fisico; el indicador de turbo
+    // del nano vivia en led[5] = aqui sin pin (nunca visible). Codificacion
+    // AGNOSTICA a la polaridad (no confirmada en el 60K): parpadeo RAPIDO
+    // ~6.8Hz = turbo ON, LENTO ~1.7Hz = velocidad real MSX (y "estoy vivo").
+    // led[1] = actividad SD (transitoria: legible con cualquier polaridad).
+    reg [20:0] led_cnt;
     always @(posedge clk_54m or negedge bus_reset_n) begin
-        if (!bus_reset_n) begin
-            led_cnt       <= 0;
-            led_heartbeat <= 1'b1;
-        end else if (clk_enable_3m6_54) begin
-            if (led_cnt == 20'd999999) begin
-                led_cnt       <= 0;
-                led_heartbeat <= ~led_heartbeat;
-            end else begin
-                led_cnt <= led_cnt + 1;
-            end
-        end
+        if (!bus_reset_n) led_cnt <= 0;
+        else if (clk_enable_3m6_54) led_cnt <= led_cnt + 1'b1;
     end
 
-    assign led[5] = turbo ? 1'b0 : led_heartbeat;  // active-low: 0=solid lit (turbo ON), else heartbeat blink (real-MSX)
+    assign led[0] = turbo ? led_cnt[18] : led_cnt[20];  // VISIBLE (G11): rapido=turbo, lento=normal
+    assign led[1] = ~sd_busy_w;                         // VISIBLE (U12): actividad SD
+    assign led[5] = turbo ? 1'b0 : led_cnt[20];         // sin pin en el 60K (semantica nano conservada)
     assign led[4] = ~sd_busy_w;
     assign led[3] = ~joystick0[5];
     assign led[2] = ~joystick0[4];
-    assign led[1] = ~(|joystick0[3:0]);
-    assign led[0] = ~(|joystick1[5:0]);
 
     // ---- DEBUG BRING-UP 60K, PMOD0 = vitales + sondas de VIDEO ----
     //  [0] fuera de reset · [1] pack cargado · [2] Z80 ejecutando (M1)

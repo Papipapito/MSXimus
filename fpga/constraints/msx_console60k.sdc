@@ -99,6 +99,14 @@ set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {state_wait*/CE}
 set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {state_wait*/CE}] -hold -end 2
 set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/CE}] -setup -end 2
 set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/CE}] -hold -end 2
+# (_71: la misma familia puede aterrizar en los pines D de esos FSMs segun el
+#  roll — p.ej. RD_s0 -> mem1/sdram_seq_*/D. Identico argumento, mismos limites.)
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {mem1/?*?/D}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {mem1/?*?/D}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {state_wait*/D}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {state_wait*/D}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/D}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/D}] -hold -end 2
 
 # --- Dispositivos I/O cuasi-estaticos por protocolo de bus (~280 ns) ---
 set_false_path -from [get_clocks {clk_108m}] -to [get_pins {rtc1/?*?/?*}]
