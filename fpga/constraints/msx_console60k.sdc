@@ -83,6 +83,23 @@ set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/?*?/CE}]
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/?*?/CE}] -hold -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/Regs/RegsL_RegsL*/DI*}] -hold -end 2
 
+# --- P1b-por-constraint (_70): salidas del Z80 -> FSMs de memoria/wait ---
+# Espejo de las excepciones -to cpu1 de arriba: las SALIDAS del T80 (RD/WR/
+# IORQ samplers y estado) solo cambian en flancos HABILITADOS (3.58/5.37
+# efectivos = >=5 ciclos de 54M entre cambios) y sus consumidores (wait FSM,
+# mem1) son FSMs de NIVEL tolerantes a +1 ciclo de propagacion (medidas T9 de
+# tools/sdr16_tb: engage peor ~190ns de ~280ns de presupuesto; a 3.58 sobran
+# >150ns). Era la familia cronica de -0.2/-0.3 en cada re-roll (RD_s0 ->
+# ram_busy_s0 / state_wait / wait_io_ff, medio ciclo F->R para ~10 niveles).
+# ACOTADA por origen Y destino: ram_busy y demas señales full-rate que entran
+# a esos mismos CEs mantienen su restriccion de ciclo completo.
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {mem1/?*?/CE}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {mem1/?*?/CE}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {state_wait*/CE}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {state_wait*/CE}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/CE}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/CE}] -hold -end 2
+
 # --- Dispositivos I/O cuasi-estaticos por protocolo de bus (~280 ns) ---
 set_false_path -from [get_clocks {clk_108m}] -to [get_pins {rtc1/?*?/?*}]
 set_false_path -from [get_clocks {clk_54m}] -to [get_pins {rtc1/?*?/?*}]
