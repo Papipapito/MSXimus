@@ -801,17 +801,21 @@ assign keyboard_addr = ppi_port_c[3:0];
                         state_wait <= WAIT_STATE1;
                     end
                 end
+                // P1-iter.2b (_66): medir y liberar con el tren ACTIVO de la CPU
+                // (la intencion declarada del v2.1). Con el release fijo a 3m6,
+                // cada espera en turbo costaba hasta 280ns (cuantizacion del tren
+                // lento) y z80bench leia 4.11 en vez de 5.37 (medido en HW). A
+                // 3.58 (turbo_eff=0) las expresiones colapsan al 3m6 original:
+                // camino validado byte-identico. OJO: pulsos SIN gatear (los
+                // gateados estan parados por el propio wait -> deadlock).
                 WAIT_STATE1: begin
-                    if ( clk_enable_3m6_54 == 1 ) begin
+                    if ( (turbo_eff ? clk_enable_5m4_54 : clk_enable_3m6_54) == 1 ) begin
                         state_wait <= WAIT_STATE2;
                     end
                 end
-                // NOTA v1.9: el wait sigue midiendo y liberando con los pulsos 3m6
-                // fijos TAMBIEN en turbo (release 3m6-alineado con el CPU en tren
-                // 5m4 swallowed). Validado en HW: juegos/DOS en turbo sin fallos.
                 // P1-iter.2: en turbo, ademas, NO liberar con la SDRAM ocupada.
                 WAIT_STATE2: begin
-                    if ( clk_falling_3m6_54 == 1 && (turbo_eff == 0 || ram_busy == 0) ) begin
+                    if ( (turbo_eff ? clk_falling_5m4_54 : clk_falling_3m6_54) == 1 && (turbo_eff == 0 || ram_busy == 0) ) begin
                         wait_io_ff <= 1;
                         state_wait <= WAIT_STATE3;
                     end
