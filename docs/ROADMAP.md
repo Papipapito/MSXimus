@@ -27,8 +27,10 @@ Todo validado en HW (2026-07-11), serial de referencia **_71 + pack v5**:
 
 ## F0 — Cierre de etapa (CERRADO 2026-07-11)
 
-1. **Tag v1.1** = _72 + pack v5. Turbo **4.40 MHz** (iter.3-A), sprites 8/línea,
-   LED de turbo, menú con nota "(reiniciar físicamente)", timing limpio.
+1. **Tag v1.1** = _71 + pack v5 (validado en HW). Turbo **4.40 MHz**, sprites
+   8/línea, LED de turbo, menú con nota "(reiniciar físicamente)", timing
+   limpio. (La _72/iter.3-A resultó no arrancar y quedó RETIRADA; post-mortem
+   en `fpga/src/memory.v`.)
 2. **Turbo: 4.40 es el número de v1.1, aceptado.** Se midió que 4.40 es el
    techo práctico de la SDRAM compartida CPU/VDP (ver más abajo). El 5.37 real
    exigiría VRAM→BRAM, que **se aparca** (congelaría la BRAM al 92-97% y con
@@ -42,7 +44,8 @@ Todo validado en HW (2026-07-11), serial de referencia **_71 + pack v5**:
 la comparten 50/50 → la CPU recibe 1 slot por ventana de vídeo (6.75 MHz de
 cadencia). Las rejillas de slot (6.75) y de T-state turbo (5.369) son
 inconmensurables → el 25% de las lecturas pierde 1 T-state → 5.369/1.25 ≈ 4.30.
-Retoques baratos agotados (iter.2b=4.33, iter.3-A=4.40; iter.2c/2d corrompieron).
+Retoques baratos agotados (iter.2b=4.33-4.40 según roll; iter.2c/2d corrompieron
+lecturas; iter.3-A NI ARRANCA en HW — retirada, post-mortem en memory.v).
 **El único camino a ~5.37 es sacar la VRAM de la SDRAM (VRAM→BRAM), aparcado.**
 Ese mismo cambio curaría Screen 3 de raíz. Ver `docs/VRAM_BRAM_DESIGN.md`.
 
