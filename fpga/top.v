@@ -19,7 +19,8 @@
 `define WIFI_TAP_BL616TX  // _78diag: enlace ONBOARD real + espejo del TX del BL616 (V14) a E22 para pinchar
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 `define ENABLE_Y8950        // F2 (_79): MSX-Audio (Y8950) FM via jtopl2 (core ya vendido en fpga/jtopl/), puertos C0/C1. VALIDADO EN HW (juego OK)
-`define ENABLE_Y8950_ADPCM  // F2 (_80): ADPCM-B del Y8950 — y8950_adpcm.v (glue openMSX-exacto) + decoder jt10_adpcmb + RAM samples 32KB BSRAM (NMS-1205 de serie)
+`define ENABLE_Y8950_ADPCM  // F2 (_80): ADPCM-B del Y8950 — y8950_adpcm.v (glue openMSX-exacto) + decoder jt10_adpcmb + RAM samples 32KB BSRAM (NMS-1205 de serie). VALIDADO HW+VGMPlay
+`define ENABLE_Y8950_IRQ    // F2 (_81): IRQ del Y8950 (timers+EOS+BUF ya enmascarados) al /INT del Z80 (wired-AND como el Music Module real). Arranca todo enmascarado = sin IRQ hasta que el software la pida
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
@@ -1174,9 +1175,9 @@ assign keyboard_addr = ppi_port_c[3:0];
       `endif
     `endif
     `ifdef ENABLE_V9958
-        .INT_n     (bus_int_n & vdp_int),
+        .INT_n     (bus_int_n & vdp_int & y8950_int_n),  // _81: wired-AND con el Y8950
     `else
-        .INT_n     (bus_int_n),
+        .INT_n     (bus_int_n & y8950_int_n),
     `endif
         .NMI_n     (1),
         .BUSRQ_n   (1),
@@ -1915,6 +1916,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire        y8950_rd_r;
     wire [7:0]  y8950_dout;
     wire [15:0] y8950_wav;
+    wire        y8950_int_n;   // _81: hacia el /INT del Z80 (wired-AND)
     assign y8950_req_n = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_wr_n == 1'b0 ) ? 1'b0 : 1'b1;   // I/O:C0-C1h escritura
     assign y8950_rd_r  = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_rd_n == 1'b0 ) ? 1'b1 : 1'b0;   // I/O:C0-C1h lectura (status/dato)
 
@@ -1953,6 +1955,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0] y8950_status_c0;
     wire [7:0] y8950_data_c1;
     wire signed [15:0] y8950_adpcm_wav;
+    wire y8950_irq_w;
 
     y8950_adpcm uadpcm(
         .clk       (clk_54m),
@@ -1966,20 +1969,30 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .ft2       (jtopl2_dout[5]),
         .status    (y8950_status_c0),
         .data_dout (y8950_data_c1),
-        .irq       ( ),                  // sin cablear en _80 (como el FM)
+        .irq       (y8950_irq_w),        // flags visibles (ya enmascarados)
         .pcm_out   (y8950_adpcm_wav)
     );
     // C0 = status compuesto (timers+EOS+BUF_RDY+PCM_BSY); C1 = puerto de datos
     assign y8950_dout = bus_addr[0] ? y8950_data_c1 : y8950_status_c0;
+    // _81: al /INT del Z80 como en el Music Module real (activo-bajo). La
+    // mascara del reg 4 arranca toda tapada -> ni una IRQ hasta que el
+    // software la pida explicitamente.
+  `ifdef ENABLE_Y8950_IRQ
+    assign y8950_int_n = ~y8950_irq_w;
+  `else
+    assign y8950_int_n = 1'b1;
+  `endif
 `else
     wire signed [15:0] y8950_adpcm_wav = 16'sd0;
     assign y8950_dout = jtopl2_dout;     // _79: status del jtopl en C0/C1
+    assign y8950_int_n = 1'b1;
 `endif
 
 `else
     assign y8950_wav  = 16'd0;
     assign y8950_dout = 8'hFF;
     wire signed [15:0] y8950_adpcm_wav = 16'sd0;
+    assign y8950_int_n = 1'b1;
 `endif
 
     //scc & ghost scc
@@ -2247,6 +2260,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [15:0] audio_sample;
     wire [15:0] audio_sample_r;
     wire megaram_wrt;
+    wire y8950_int_n = 1'b1;   // _81: sin sonido no hay Y8950
 
 `endif
 

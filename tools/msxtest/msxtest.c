@@ -459,6 +459,23 @@ opll_end:
 void PrintU8Dec(u8 v);    // definidas mas abajo (seccion Sistema)
 void PrintU8Hex2(u8 v);
 
+//-----------------------------------------------------------------------------
+// IRQ del Y8950 (_81): gancho en H.KEYI que cuenta interrupciones del chip.
+// El KEYINT del BIOS ya ha salvado TODOS los registros antes de llamar al
+// hook, asi que una funcion C normal vale. El gancho DEBE bajar /INT
+// (reg4=0x80) o la maquina se queda en tormenta.
+//-----------------------------------------------------------------------------
+volatile u16 g_Y8950IrqCount;
+
+void Y8950IrqHook()
+{
+	if (g_MSXAudio_IndexPort & 0x80)        // bit7 = IRQ del Y8950
+	{
+		MSXAudio_SetRegister(0x04, 0x80);   // borra flags -> baja /INT
+		++g_Y8950IrqCount;
+	}
+}
+
 // offset de slot del operador 1 por canal (op2 = slot+3)
 const u8 g_AudOpOfs[9] = { 0, 1, 2, 8, 9, 10, 16, 17, 18 };
 
@@ -661,6 +678,40 @@ void TestY8950()
 		Print_DrawText(" Play:");
 		Print_DrawText(okp ? "OK" : "MAL");
 		Print_DrawText("          ");   // tapar el "probando..." anterior
+	}
+
+	// --- IRQ del Y8950 al /INT (_81): gancho H.KEYI + timer1 sin mascara ---
+	// En cores sin el cableado (_80 o anterior) cuenta 0 -> "sin cablear".
+	{
+		u8 hookSave[5];
+		u8* hook = (u8*)0xFD9A;             // H.KEYI
+
+		g_Y8950IrqCount = 0;
+		__asm__("di");
+		for (u8 i = 0; i < 5; ++i) hookSave[i] = hook[i];
+		hook[0] = 0xC3;                     // JP Y8950IrqHook
+		hook[1] = (u8)((u16)&Y8950IrqHook);
+		hook[2] = (u8)((u16)&Y8950IrqHook >> 8);
+		MSXAudio_SetRegister(0x04, 0x7C);   // parar + tapar todo
+		MSXAudio_SetRegister(0x04, 0x80);   // limpiar
+		MSXAudio_SetRegister(0x02, 0xC0);   // timer1 = 5.12ms
+		MSXAudio_SetRegister(0x04, 0x3D);   // T1 visible + ST1 (ADPCM tapado)
+		__asm__("ei");
+		WaitFramesOrSpace(30);              // ~0.25s contando (Halt despierta
+		                                    //  con cada IRQ, da igual: cuenta)
+		__asm__("di");
+		MSXAudio_SetRegister(0x04, 0x7C);   // parar de verdad + tapar
+		MSXAudio_SetRegister(0x04, 0x80);   // limpiar: baja /INT
+		for (u8 i = 0; i < 5; ++i) hook[i] = hookSave[i];
+		__asm__("ei");
+
+		Print_DrawTextAt(20, 5, "IRQ:");
+		if (g_Y8950IrqCount > 5)
+		{
+			Print_DrawText("OK ");
+			PrintU8Dec((u8)(g_Y8950IrqCount > 255 ? 255 : g_Y8950IrqCount));
+		}
+		else Print_DrawText("sin cablear");
 	}
 
 	Print_DrawTextAt(1, 8,  "Sonando: THE ENTERTAINER (Joplin)");
