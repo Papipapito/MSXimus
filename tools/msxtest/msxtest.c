@@ -3,8 +3,8 @@
 //
 // Recorre los sistemas criticos: todos los modos de pantalla del V9958,
 // sprites, comandos VDP, scroll fino, blink R#13 (el registro del bug MG2),
-// PSG (tonos/ruido/ENVOLVENTES), OPLL (MSX-Music), RTC, teclado, joystick,
-// turbo F11 (benchmark en vivo).
+// PSG (tonos/ruido/ENVOLVENTES), OPLL (MSX-Music), Y8950 (MSX-Audio FM _79:
+// deteccion+timers+musica), RTC, teclado, joystick, turbo F11 (benchmark).
 //
 // Flujo: antes de cada prueba grafica, una pantalla de texto explica QUE
 // DEBES VER; ESPACIO muestra la prueba; ESPACIO pasa a la siguiente.
@@ -14,6 +14,7 @@
 #include "msxgl.h"
 #include "psg.h"
 #include "msx-music.h"
+#include "msx-audio.h"
 #include "clock.h"
 #include "draw.h"
 #include "font/font_mgl_sample6.h"
@@ -448,6 +449,228 @@ opll_end:
 }
 
 //-----------------------------------------------------------------------------
+// Y8950 / MSX-AUDIO (FM del _79: jtopl2 en C0/C1; ADPCM-B pendiente).
+// A diferencia del OPLL, el OPL no tiene instrumentos de fabrica: hay que
+// programar los operadores. Deteccion + test de TIMERS (lo que los replayers
+// usan para el tempo) + MUSICA: The Entertainer (Scott Joplin 1902, dominio
+// publico) a 3 voces FM + bateria en modo ritmo del OPL.
+//-----------------------------------------------------------------------------
+
+void PrintU8Dec(u8 v);    // definidas mas abajo (seccion Sistema)
+void PrintU8Hex2(u8 v);
+
+// offset de slot del operador 1 por canal (op2 = slot+3)
+const u8 g_AudOpOfs[9] = { 0, 1, 2, 8, 9, 10, 16, 17, 18 };
+
+// F-num OPL (A4=440Hz, fs=3579545/72): fnum = f * 2^16 / 49716 (bloque 4 = octava de C4)
+const u16 g_AudFNum[12] = { 345, 365, 387, 410, 435, 460, 488, 517, 547, 580, 615, 651 };
+
+// instrumento = { m20, m40, m60, m80, c20, c40, c60, c80, fb/cnt }
+const u8 g_AudPiano[9] = { 0x01, 0x1C, 0xF4, 0x27,  0x01, 0x00, 0xF2, 0x45, 0x0C }; // honky-tonk
+const u8 g_AudBass[9]  = { 0x01, 0x10, 0xF6, 0x26,  0x01, 0x08, 0xF4, 0x36, 0x08 };
+const u8 g_AudComp[9]  = { 0x01, 0x1C, 0xF4, 0x27,  0x01, 0x14, 0xF2, 0x45, 0x0C }; // piano suave
+
+u8 g_AudShadowB0[9];   // ultimo B0 por canal (para key-off sin saltar de octava)
+
+void AudSetVoice(u8 ch, const u8* v)
+{
+	u8 s = g_AudOpOfs[ch];
+	MSXAudio_SetRegister(0x20 + s, v[0]);
+	MSXAudio_SetRegister(0x40 + s, v[1]);
+	MSXAudio_SetRegister(0x60 + s, v[2]);
+	MSXAudio_SetRegister(0x80 + s, v[3]);
+	MSXAudio_SetRegister(0x23 + s, v[4]);
+	MSXAudio_SetRegister(0x43 + s, v[5]);
+	MSXAudio_SetRegister(0x63 + s, v[6]);
+	MSXAudio_SetRegister(0x83 + s, v[7]);
+	MSXAudio_SetRegister(0xC0 + ch, v[8]);
+}
+
+void AudKeyOn(u8 ch, u8 note)   // note = numero MIDI (60 = C4); DEBE ser >= 12
+{
+	u8 blk = note / 12 - 1;
+	u16 fn = g_AudFNum[note % 12];
+	u8 b0 = 0x20 | (blk << 2) | (u8)(fn >> 8);
+	MSXAudio_SetRegister(0xB0 + ch, g_AudShadowB0[ch] & 0x1F); // key-off previo (retrigger)
+	MSXAudio_SetRegister(0xA0 + ch, (u8)fn);
+	MSXAudio_SetRegister(0xB0 + ch, b0);
+	g_AudShadowB0[ch] = b0;
+}
+
+void AudKeyOff(u8 ch)
+{
+	g_AudShadowB0[ch] &= 0x1F;
+	MSXAudio_SetRegister(0xB0 + ch, g_AudShadowB0[ch]);
+}
+
+//--- secuenciador: eventos {nota MIDI (0=silencio), duracion en semicorcheas}
+typedef struct { u8 note, dur; } MusEv;
+
+// The Entertainer — frase A (4 compases de 2/4 en bucle; el "pickup" D-D#-E
+// va plegado al final para que el bucle enlace). 32 semicorcheas/vuelta.
+const MusEv g_AudMelody[] = {
+	{72,2},{64,1},{72,2},{64,1},{72,8},           // C5 E4 C5 E4 C5~ (el hook; el
+	                                               //  5o C5 LIGADO = sincopa ragtime)
+	{72,1},{74,1},                                 // C5 D5
+	{75,1},{76,1},{72,1},{74,1},{76,2},{71,1},{74,1}, // D#5 E5 C5 D5 E5~ B4 D5
+	{72,5},{62,1},{63,1},{64,1},                   // C5 largo + pickup D4 D#4 E4
+};
+const MusEv g_AudBassSeq[] = {                     // stride (corcheas)
+	{48,2},{43,2},{48,2},{52,2},                   // C3 G2 C3 E3
+	{53,2},{54,2},{55,2},{43,2},                   // F3 F#3 G3 G2 (cromatica ragtime)
+	{48,2},{43,2},{45,2},{47,2},                   // C3 G2 A2 B2
+	{48,2},{55,2},{48,2},{ 0,2},                   // C3 G3 C3 (respiro)
+};
+const MusEv g_AudCompSeq[] = {                     // acompanamiento a contratiempo
+	{ 0,2},{67,2},{ 0,2},{64,2},                   // - G4 - E4
+	{ 0,2},{69,2},{ 0,2},{65,2},                   // - A4 - F4
+	{ 0,2},{67,2},{ 0,2},{62,2},                   // - G4 - D4
+	{ 0,2},{67,2},{64,2},{ 0,2},                   // - G4 E4 -
+};
+
+// bateria (modo ritmo OPL, reg BD): patron de 8 semicorcheas
+// bits: 0x10=bombo 0x08=caja 0x01=charles
+const u8 g_AudDrumPat[8] = { 0x11, 0x00, 0x01, 0x00, 0x09, 0x00, 0x01, 0x00 };
+
+typedef struct { const MusEv* seq; u8 len, ch, idx, left; } MusTrack;
+
+void AudTrackTick(MusTrack* t)
+{
+	if (t->left)
+	{
+		--t->left;
+		if (t->left == 1) AudKeyOff(t->ch);     // hueco de 1 tick (staccato ragtime)
+		if (t->left) return;
+	}
+	// avanzar al siguiente evento (con wrap = bucle)
+	{
+		const MusEv* e = &t->seq[t->idx];
+		t->idx = (u8)((t->idx + 1) % t->len);
+		t->left = e->dur;
+		if (e->note) AudKeyOn(t->ch, e->note);
+		else         AudKeyOff(t->ch);
+	}
+}
+
+void TestY8950()
+{
+	u8 st0, st1, st2;
+	bool det;
+
+	Screen0();
+	Print_DrawTextAt(1, 1, "MSX-AUDIO (Y8950) - FM nuevo _79");
+
+	// --- deteccion (mismo criterio que MSXgl: bits 1-2 indiferentes) ---
+	det = MSXAudio_Detect();
+	st0 = g_MSXAudio_IndexPort;
+	Print_DrawTextAt(1, 3, "Detectado: ");
+	Print_DrawText(det ? "SI" : "NO << FALLO");
+	Print_DrawText("  status=");
+	PrintU8Hex2(st0);
+	if (!det)
+	{
+		Print_DrawTextAt(1, 22, "ESPACIO para seguir");
+		WaitSpace();
+		return;
+	}
+
+	// --- test de TIMERS via status (el metodo de deteccion "AdLib") ---
+	// ¡OJO! En un MSX-Audio real el IRQ del Y8950 va al /INT del Z80 y el
+	// ISR del BIOS no lo limpia -> tormenta de interrupciones (verificado en
+	// openMSX: KEYINT re-entrando y stack cayendo). Por eso TODO el test de
+	// timer va con las interrupciones CERRADAS y espera ocupada, y el
+	// IRQ-RESET baja la linea ANTES del EI. (En el _79 irq_n no esta
+	// conectado, pero el ROM debe funcionar tambien con hardware real.)
+	// GOTCHA Y8950 (2a tormenta, cazada en openMSX): el reg 4 del Y8950 tiene
+	// MASCARAS tambien para EOS/BUF_RDY del ADPCM (bits 4:3), que un OPL2 no
+	// tiene. Escribir 0x04=0x01 las des-enmascara TODAS y el flag BUF_RDY
+	// (buffer ADPCM "listo", condicion de NIVEL) dispara un IRQ que el
+	// IRQ-RESET no puede matar (el flag re-salta al instante) -> tormenta al
+	// EI. Solucion = como el software MSX-Audio real: fuentes ADPCM SIEMPRE
+	// enmascaradas; solo T1 visible durante el test.
+	__asm__("di");
+	MSXAudio_SetRegister(0x04, 0x7C);            // parar + ENMASCARAR TODO
+	MSXAudio_SetRegister(0x04, 0x80);            // IRQ RESET -> flags a 0
+	st1 = g_MSXAudio_IndexPort;                  // debe tener bit7:5 a 0
+	MSXAudio_SetRegister(0x02, 0xC0);            // timer1 = (256-192)*80us = 5.1ms
+	MSXAudio_SetRegister(0x04, 0x3D);            // T1 des-enmascarado + ST1;
+	                                             //  T2/EOS/BUF_RDY enmascarados
+	for (volatile u16 w = 0; w < 8000; ++w) {}   // ~70ms ocupado >> 5.1ms
+	st2 = g_MSXAudio_IndexPort;                  // debe tener IRQ(b7)+FT1(b6)
+	// PARAR de verdad: con bit7=1 el OPL IGNORA el resto de bits (ST1 seguiria
+	// a 1 recargando -> en la 2a vuelta la deteccion leeria 0xC0 = falso NO).
+	// Primero parar+enmascarar, despues IRQ-RESET (baja /INT), y solo entonces EI.
+	MSXAudio_SetRegister(0x04, 0x7C);            // ST1=0 + todo enmascarado
+	MSXAudio_SetRegister(0x04, 0x80);            // borra flags + baja /INT
+	__asm__("ei");
+	Print_DrawTextAt(1, 5, "Timers: ");
+	if (((st1 & 0xE0) == 0) && ((st2 & 0xC0) == 0xC0)) Print_DrawText("OK");
+	else                                               Print_DrawText("FALLO");
+	Print_DrawText("  ");
+	PrintU8Hex2(st1); Print_DrawText("->"); PrintU8Hex2(st2);
+
+	Print_DrawTextAt(1, 8,  "Sonando: THE ENTERTAINER (Joplin)");
+	Print_DrawTextAt(1, 10, "3 voces FM programadas a registro");
+	Print_DrawTextAt(1, 11, "(sin preset: esto NO es el OPLL)");
+	Print_DrawTextAt(1, 12, "+ bateria del MODO RITMO del OPL");
+	Print_DrawTextAt(1, 20, "En bucle... ESPACIO = terminar");
+
+	// --- setup de voces ---
+	MSXAudio_SetRegister(0x01, 0x00);            // test off
+	MSXAudio_SetRegister(0x08, 0x00);            // CSM/NOTE-SEL off
+	for (u8 c = 0; c < 9; ++c) { g_AudShadowB0[c] = 0; AudKeyOff(c); }
+	AudSetVoice(0, g_AudPiano);
+	AudSetVoice(1, g_AudBass);
+	AudSetVoice(2, g_AudComp);
+	// bateria: operadores de ch6 (bombo), ch7 (charles+caja), ch8 (tom+plato)
+	{
+		// static const -> ROM directa (un const local SDCC lo copia a PILA
+		// byte a byte: ~140 bytes de codigo + 27 de stack tirados)
+		static const u8 drums[9]  = { 0x00, 0x08, 0xF8, 0x48,  0x00, 0x04, 0xF8, 0x48, 0x00 }; // BD
+		static const u8 drums7[9] = { 0x01, 0x00, 0xFB, 0x3B,  0x00, 0x08, 0xF8, 0x68, 0x00 }; // HH+SD
+		static const u8 drums8[9] = { 0x02, 0x0A, 0xF8, 0x68,  0x02, 0x0A, 0xF5, 0x35, 0x00 }; // TOM+CYM
+		AudSetVoice(6, drums);
+		AudSetVoice(7, drums7);
+		AudSetVoice(8, drums8);
+	}
+	// tono de los canales de percusion (fnum/bloque; key via reg BD)
+	MSXAudio_SetRegister(0xA6, 0x56); MSXAudio_SetRegister(0xB6, 0x09); // bombo ~65Hz
+	MSXAudio_SetRegister(0xA7, 0x0F); MSXAudio_SetRegister(0xB7, 0x0E); // caja ~200Hz
+	MSXAudio_SetRegister(0xA8, 0x3C); MSXAudio_SetRegister(0xB8, 0x0D); // tom ~120Hz
+	MSXAudio_SetRegister(0xBD, 0x20);            // modo ritmo ON, tambores off
+
+	// --- bucle del secuenciador ---
+	// semicorchea = 10 frames a 60Hz (90 BPM) u 8 a 50Hz (94 BPM): tempo
+	// ragtime casi identico en NTSC y PAL (byte 0x002B del BIOS, bit7=50Hz)
+	{
+		u8 tick = (*(volatile u8*)0x002B & 0x80) ? 8 : 10;
+		MusTrack trk[3];
+		u8 step = 0;
+		trk[0].seq = g_AudMelody;  trk[0].len = numberof(g_AudMelody);  trk[0].ch = 0;
+		trk[1].seq = g_AudBassSeq; trk[1].len = numberof(g_AudBassSeq); trk[1].ch = 1;
+		trk[2].seq = g_AudCompSeq; trk[2].len = numberof(g_AudCompSeq); trk[2].ch = 2;
+		for (u8 t = 0; t < 3; ++t) { trk[t].idx = 0; trk[t].left = 0; }
+
+		for (;;)
+		{
+			u8 hit = g_AudDrumPat[step & 7];
+			MSXAudio_SetRegister(0xBD, 0x20);              // key-off tambores
+			if (hit) MSXAudio_SetRegister(0xBD, 0x20 | hit);
+			for (u8 t = 0; t < 3; ++t) AudTrackTick(&trk[t]);
+			++step;
+			if (WaitFramesOrSpace(tick)) break;
+		}
+	}
+
+	// --- silencio total ---
+	for (u8 c = 0; c < 9; ++c) AudKeyOff(c);
+	MSXAudio_SetRegister(0xBD, 0x00);
+	MSXAudio_Mute();
+	Print_DrawTextAt(1, 22, "FIN Y8950 - ESPACIO");
+	WaitSpace();
+}
+
+//-----------------------------------------------------------------------------
 // Sistema: version MSX + RTC en vivo + benchmark de turbo F11
 //-----------------------------------------------------------------------------
 void PrintU8Dec(u8 v)
@@ -755,6 +978,7 @@ void main()
 	TestPSG();
 	TestSCC();
 	TestOPLL(fmType);
+	TestY8950();
 
 	// ---- 6. Entrada ----
 	TestInput();
@@ -765,8 +989,8 @@ void main()
 	Print_DrawTextAt(1, 4,  "Si todo salio como se anuncio:");
 	Print_DrawTextAt(1, 6,  "VDP (modos, sprites, comandos,");
 	Print_DrawTextAt(1, 7,  "scroll, blink), PSG+envolventes,");
-	Print_DrawTextAt(1, 8,  "SCC, OPLL FM, RTC, turbo F11,");
-	Print_DrawTextAt(1, 9,  "teclado y joystick: VALIDADOS.");
+	Print_DrawTextAt(1, 8,  "SCC, OPLL FM, Y8950 FM, RTC,");
+	Print_DrawTextAt(1, 9,  "turbo F11, teclado, joy: VALIDADOS.");
 	Print_DrawTextAt(1, 12, "Manual (ver LEEME): kanji, Coleco,");
 	Print_DrawTextAt(1, 13, "WiFi (sin pines aun), SD caliente.");
 	Print_DrawTextAt(1, 21, "ESPACIO = repetir todo el test");

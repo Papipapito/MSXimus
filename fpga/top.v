@@ -15,8 +15,10 @@
 // v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
 `define VIDEO720
 `define ENABLE_WIFI       // F1 (_73): WiFi UNAPI por el BL616 ONBOARD (UART en V14/U15, ver uwifi)
-`define WIFI_PMOD_TEST    // _77diag: UART del WiFi al PMOD1 (TX=E22, RX=D22) para PC-de-ESP por CH340
+//`define WIFI_PMOD_TEST  // (_77diag) UART del WiFi al PMOD1 — apagado
+`define WIFI_TAP_BL616TX  // _78diag: enlace ONBOARD real + espejo del TX del BL616 (V14) a E22 para pinchar
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
+`define ENABLE_Y8950        // F2 (_79): MSX-Audio (Y8950) FM via jtopl2 (core ya vendido en fpga/jtopl/), puertos C0/C1. ADPCM-B queda para un build posterior
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
@@ -689,6 +691,9 @@ assign keyboard_addr = ppi_port_c[3:0];
                      ( megaram_req == 1 ) ? ram_dout:
                      ( scc_rd_r == 1 ) ? scc_dout:
                      ( scc2x_rd_r == 1 ) ? scc2x_dout:
+                    `ifdef ENABLE_Y8950
+                     ( y8950_rd_r == 1 ) ? y8950_dout :   // C0/C1: status (IRQ/timer) del MSX-Audio
+                    `endif
                 `endif
                 `ifdef ENABLE_CONFIG
                      ( config_req == 1 && pana_sel == 1 ) ? pana_dout :
@@ -1898,6 +1903,40 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign jt2413_wav = 16'd0;      // BASE MINIMA v3.0: OPLL fuera
 `endif
 
+    // ===== Y8950 (MSX-Audio) — FM primero via jtopl2 (F2/_79) =====
+    // Puertos I/O C0h/C1h (unidad primaria): C0=registro/status, C1=dato.
+    // Mismo patron de escritura que el OPLL (write = !cs_n && !wr_n, con wr_n=0
+    // y cs_n = strobe de escritura). dout de jtopl es COMBINACIONAL (byte de
+    // status: IRQ/timer1/timer2) — se rutea al bus en lecturas de C0/C1, que es
+    // lo que la deteccion y los replayers de MSX-Audio necesitan. ADPCM-B en un
+    // build posterior (jt10_adpcmb + RAM de samples).
+    wire        y8950_req_n;
+    wire        y8950_rd_r;
+    wire [7:0]  y8950_dout;
+    wire [15:0] y8950_wav;
+    assign y8950_req_n = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_wr_n == 1'b0 ) ? 1'b0 : 1'b1;   // I/O:C0-C1h escritura
+    assign y8950_rd_r  = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_rd_n == 1'b0 ) ? 1'b1 : 1'b0;   // I/O:C0-C1h lectura (status/dato)
+
+`ifdef ENABLE_Y8950
+    jtopl2 y8950(
+        .rst  (~bus_reset_n),        // rst >= 6 ciclos clk&cen
+        .clk  (clk_54m),             // mismo dominio que el OPLL
+        .cen  (clk_enable_3m6_54),   // FM 3.58 MHz (identico al OPLL)
+        .din  (cpu_dout),
+        .addr (bus_addr[0]),         // 0=registro (C0), 1=dato (C1)
+        .cs_n (y8950_req_n),         // strobe de escritura (patron OPLL)
+        .wr_n (1'b0),
+        .dout (y8950_dout),
+        .irq_n( ),
+        // combined output
+        .snd  (y8950_wav),
+        .sample ( )
+    );
+`else
+    assign y8950_wav  = 16'd0;
+    assign y8950_dout = 8'hFF;
+`endif
+
     //scc & ghost scc
     wire [14:0] scc_wav;
     wire [7:0] scc_dout;
@@ -2127,7 +2166,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign scc2x_dout = 8'hFF;
 `endif
 
-    //mixer (L = PSG1+SCC1+OPLL, R = PSG2+SCC2+OPLL; mono = everything on both sides)
+    //mixer (L = PSG1+SCC1+OPLL+Y8950, R = PSG2+SCC2+OPLL+Y8950; mono = everything on both sides)
+    // Y8950 (MSX-Audio FM) se suma en ambos canales igual que el OPLL (mono).
 	reg [15:0] audio_sample;
 	reg [15:0] audio_sample_r;
 
@@ -2138,12 +2178,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
             if (config_enable_stereo == 1) begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav;
-                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav;
+                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav;
             end
             else begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav;
-                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav;
+                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav;
             end
         end
     end
@@ -3123,8 +3163,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod1[1] = 1'b1;
     assign dbg_pmod1[2] = 1'b1;
     assign dbg_pmod1[3] = 1'b1;
-`ifdef ENABLE_WIFI
-    assign dbg_pmod1[4] = bl616_uart_tx_w;   // E22 = UART TX del WiFi (espejo; en WIFI_PMOD_TEST es LA salida)
+`ifdef WIFI_TAP_BL616TX
+    assign dbg_pmod1[4] = bl616_jtagsel;     // E22 = ESPEJO del TX del BL616 (V14) para pinchar con el CH340
+`elsif ENABLE_WIFI
+    assign dbg_pmod1[4] = bl616_uart_tx_w;   // E22 = UART TX del WiFi (WIFI_PMOD_TEST)
 `else
     assign dbg_pmod1[4] = 1'b1;
 `endif
