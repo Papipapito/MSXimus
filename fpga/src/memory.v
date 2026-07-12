@@ -113,16 +113,19 @@ module memory_ctrl #(
             case ( sdram_seq )
                 3'd0 : begin
                     sdram_write <= 0;
-                    if  ( ram_req == 1 && video_dlclk == 1 ) begin
-                    // iter.3-A (_72): ventana de aceptacion = TODO el slot VDP
-                    // (antes solo dl&dh = su primera mitad, 25% del ciclo). Una
-                    // peticion que llegaba justo tras la ventana esperaba ~150ns
-                    // extra antes de EMPEZAR -> ~19% de lecturas turbo perdian
-                    // 1 T-state (z80bench 4.3-4.4 en vez de 5.37). Con todo el
-                    // slot: peor caso req->dato 250->213ns (TB T9), bajo el
-                    // umbral de stall (~280ns). El latch de sdram_addr en seq1
-                    // sigue cayendo >=1 ciclo de 108M antes del muestreo de fila
-                    // del motor (fase 0 del slot CPU). A 3.58 solo MEJORA margen.
+                    if  ( ram_req == 1 && ( video_dlclk == 1 && video_dhclk == 1 ) ) begin
+                    // iter.3-A RETIRADA (post-mortem _72/_73, 2026-07-12): se
+                    // probo aceptar en TODO el slot dl (sin dh) para subir el
+                    // turbo (TB T9: peor caso 250->213ns, 8/8 tests verdes)...
+                    // y en HW NI ARRANCA (ni a 3.58). Causa probable: aceptando
+                    // en el ultimo flanco 54M de la ventana, sdram_addr/write
+                    // (seq1) llegan DESPUES de que el motor 108M muestree el
+                    // slot -> escrituras tratadas como lecturas -> corrupcion.
+                    // El TB no lo caza: su modelo de fases dl/dh no reproduce
+                    // la fase real del VDP (vdp_ssg/DOTSTATE). La ventana dl&dh
+                    // (primera mitad) garantiza 2+ ciclos de 54M de margen y es
+                    // la UNICA validada. NO reabrir sin simular las fases
+                    // reales del vdp_ssg contra el motor.
                         sdram_seq <= 3'd1;
                         ram_busy <= 1;
                     end
