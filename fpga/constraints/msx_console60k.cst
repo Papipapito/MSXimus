@@ -102,7 +102,8 @@ IO_LOC  "dbg_pmod1[1]" W20; IO_PORT "dbg_pmod1[1]" IO_TYPE=LVCMOS33 DRIVE=8;
 IO_LOC  "dbg_pmod1[2]" F19; IO_PORT "dbg_pmod1[2]" IO_TYPE=LVCMOS33 DRIVE=8;
 IO_LOC  "dbg_pmod1[3]" F20; IO_PORT "dbg_pmod1[3]" IO_TYPE=LVCMOS33 DRIVE=8;
 IO_LOC  "dbg_pmod1[4]" E22; IO_PORT "dbg_pmod1[4]" IO_TYPE=LVCMOS33 DRIVE=8;
-IO_LOC  "dbg_pmod1[5]" D22; IO_PORT "dbg_pmod1[5]" IO_TYPE=LVCMOS33 DRIVE=8;
+// D22 (era dbg_pmod1[5]) -> uart_pmod_rx: RX del WiFi por PMOD1 en modo test
+IO_LOC  "uart_pmod_rx" D22; IO_PORT "uart_pmod_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 //  PMOD0 = vitales: reset_n, pack cargado, Z80 M1, SPI BL616, jtagseln
 IO_LOC  "dbg_pmod0[0]" V19; IO_PORT "dbg_pmod0[0]" IO_TYPE=LVCMOS33 DRIVE=8;
 IO_LOC  "dbg_pmod0[1]" V18; IO_PORT "dbg_pmod0[1]" IO_TYPE=LVCMOS33 DRIVE=8;

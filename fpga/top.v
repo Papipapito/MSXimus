@@ -15,6 +15,7 @@
 // v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
 `define VIDEO720
 `define ENABLE_WIFI       // F1 (_73): WiFi UNAPI por el BL616 ONBOARD (UART en V14/U15, ver uwifi)
+`define WIFI_PMOD_TEST    // _77diag: UART del WiFi al PMOD1 (TX=E22, RX=D22) para PC-de-ESP por CH340
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
@@ -54,8 +55,9 @@ module top
     // ---- DEBUG BRING-UP 60K: "electrocardiograma" por los dos PMODs ----
     //  (se retirará al terminar el bring-up; pines de C64Nano, LVCMOS33)
     //  PMOD1 io[0..5]=W19,W20,F19,F20,E22,D22 · PMOD0=V19,V18,G22,G21,E18
-    output wire [5:0] dbg_pmod1,
+    output wire [4:0] dbg_pmod1,   // (D22/bit5 liberado para uart_pmod_rx)
     output wire [4:0] dbg_pmod0,
+    input  wire uart_pmod_rx,      // PMOD1 D22: RX del WiFi en modo WIFI_PMOD_TEST (PC-de-ESP)
 
     //hdmi out
     output wire [2:0] data_p,
@@ -1389,7 +1391,11 @@ assign keyboard_addr = ppi_port_c[3:0];
         .iorq_i     (bus_iorq_n),
         .wrt_i      (bus_wr_n),
         .rd_i       (bus_rd_n),
-        .rx_i       (bl616_jtagsel),
+`ifdef WIFI_PMOD_TEST
+        .rx_i       (uart_pmod_rx),          // TEST: RX por PMOD1 D22 (CH340 TX / PC-de-ESP)
+`else
+        .rx_i       (bl616_jtagsel),         // onboard: V14 <- BL616 IO28 TX
+`endif
         .tx_o       (bl616_uart_tx_w),
         .adr_i      (bus_addr),
         .db_i       (cpu_dout),
@@ -3117,8 +3123,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod1[1] = 1'b1;
     assign dbg_pmod1[2] = 1'b1;
     assign dbg_pmod1[3] = 1'b1;
+`ifdef ENABLE_WIFI
+    assign dbg_pmod1[4] = bl616_uart_tx_w;   // E22 = UART TX del WiFi (espejo; en WIFI_PMOD_TEST es LA salida)
+`else
     assign dbg_pmod1[4] = 1'b1;
-    assign dbg_pmod1[5] = 1'b1;
+`endif
+    // dbg_pmod1[5]/D22 eliminado: pasa a uart_pmod_rx (input) para el modo PMOD test
 
     // ===== External WS2812B status strip (8 LEDs, e.g. CJMCU-2812-8) on the case =====
     // One data pin (ws2812_led) drives the whole chain; colours from internal state.
