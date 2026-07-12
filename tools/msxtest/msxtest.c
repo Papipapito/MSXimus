@@ -558,7 +558,7 @@ void TestY8950()
 	bool det;
 
 	Screen0();
-	Print_DrawTextAt(1, 1, "MSX-AUDIO (Y8950) - FM nuevo _79");
+	Print_DrawTextAt(1, 1, "MSX-AUDIO (Y8950) FM+ADPCM _80");
 
 	// --- deteccion (mismo criterio que MSXgl: bits 1-2 indiferentes) ---
 	det = MSXAudio_Detect();
@@ -608,6 +608,60 @@ void TestY8950()
 	else                                               Print_DrawText("FALLO");
 	Print_DrawText("  ");
 	PrintU8Hex2(st1); Print_DrawText("->"); PrintU8Hex2(st2);
+
+	// --- ADPCM-B (_80): subir sample a la RAM, releerlo y reproducirlo ---
+	// Region: start=0, stop=248|7 nibbles (~127 bytes). 128 escrituras
+	// (la que cruza stop dispara EOS; el wrap posterior es inocuo aqui
+	// porque el patron es uniforme en los 2 primeros bytes).
+	// ¡TODO BAJO DI!: des-enmascarar EOS/BUF con la unidad ociosa deja
+	// BUF_RDY=1 (condicion de NIVEL) -> IRQ -> tormenta en HW real/openMSX
+	// (mismo patron que el test de timers; verificado colgando openMSX).
+	{
+		u8 d1, d2;
+		bool okw, okr, okp;
+
+		Print_DrawTextAt(1, 7, "ADPCM: probando (zumbido corto)");
+		__asm__("di");
+		MSXAudio_SetRegister(0x04, 0x60);   // T1/T2 tapados, EOS/BUF visibles
+		MSXAudio_SetRegister(0x04, 0x80);   // limpiar flags
+		MSXAudio_SetRegister(0x07, 0x01);   // RESET del bloque ADPCM
+		MSXAudio_SetRegister(0x08, 0x00);   // RAM, modo 256K
+		MSXAudio_SetRegister(0x09, 0x00); MSXAudio_SetRegister(0x0A, 0x00);
+		MSXAudio_SetRegister(0x0B, 0x1F); MSXAudio_SetRegister(0x0C, 0x00);
+		MSXAudio_SetRegister(0x07, 0x60);   // modo escritura CPU->RAM
+		for (u8 i = 0; i < 128; ++i)
+			MSXAudio_SetRegister(0x0F, (i & 8) ? 0x22 : 0xAA);  // onda cuadrada suave
+		okw = (g_MSXAudio_IndexPort & 0x10) != 0;   // EOS al cruzar stop
+
+		MSXAudio_SetRegister(0x04, 0x80);   // limpiar
+		MSXAudio_SetRegister(0x07, 0x01);
+		MSXAudio_SetRegister(0x07, 0x20);   // modo lectura RAM->CPU
+		d1 = MSXAudio_GetRegister(0x0F);    // dummy 1
+		d1 = MSXAudio_GetRegister(0x0F);    // dummy 2
+		d1 = MSXAudio_GetRegister(0x0F);    // byte 0 (0xAA)
+		d2 = MSXAudio_GetRegister(0x0F);    // byte 1 (0xAA)
+		okr = (d1 == 0xAA) && (d2 == 0xAA);
+
+		MSXAudio_SetRegister(0x04, 0x80);
+		MSXAudio_SetRegister(0x07, 0x01);
+		MSXAudio_SetRegister(0x10, 0x00); MSXAudio_SetRegister(0x11, 0x30); // delta ~9.3kHz
+		MSXAudio_SetRegister(0x12, 0xF0);   // volumen alto
+		MSXAudio_SetRegister(0x07, 0xB0);   // PLAY desde RAM con REPEAT (zumbido)
+		for (volatile u16 w = 0; w < 40000; ++w) {}  // ~0.5s ocupado (DI: sin Halt)
+		okp = (g_MSXAudio_IndexPort & 0x10) != 0;    // EOS de cada vuelta
+		MSXAudio_SetRegister(0x07, 0x01);   // stop
+		MSXAudio_SetRegister(0x04, 0x7C);   // tapar TODO
+		MSXAudio_SetRegister(0x04, 0x80);   // limpiar: baja /INT antes de EI
+		__asm__("ei");
+
+		Print_DrawTextAt(1, 7, "ADPCM: W:");
+		Print_DrawText(okw ? "OK" : "MAL");
+		Print_DrawText(" R:");
+		Print_DrawText(okr ? "OK" : "MAL");
+		Print_DrawText(" Play:");
+		Print_DrawText(okp ? "OK" : "MAL");
+		Print_DrawText("          ");   // tapar el "probando..." anterior
+	}
 
 	Print_DrawTextAt(1, 8,  "Sonando: THE ENTERTAINER (Joplin)");
 	Print_DrawTextAt(1, 10, "3 voces FM programadas a registro");

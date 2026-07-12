@@ -45,6 +45,10 @@ add_file jtopl/jtopl_timers.v
 add_file jtopl/jtopll_mmr.v
 add_file jtopl/jtopll_reg.v
 add_file jtopl/jtopll_reg_ch.v
+add_file jt10/jt10_adpcmb.v
+add_file jt10/jt10_adpcmb_interpol.v
+add_file jt10/jt10_adpcm_div.v
+add_file src/y8950_adpcm.v
 add_file src/flash_rw.v
 add_file src/megaram.v
 add_file src/scc_wave2_ghdl.v

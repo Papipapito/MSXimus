@@ -18,7 +18,8 @@
 //`define WIFI_PMOD_TEST  // (_77diag) UART del WiFi al PMOD1 — apagado
 `define WIFI_TAP_BL616TX  // _78diag: enlace ONBOARD real + espejo del TX del BL616 (V14) a E22 para pinchar
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
-`define ENABLE_Y8950        // F2 (_79): MSX-Audio (Y8950) FM via jtopl2 (core ya vendido en fpga/jtopl/), puertos C0/C1. ADPCM-B queda para un build posterior
+`define ENABLE_Y8950        // F2 (_79): MSX-Audio (Y8950) FM via jtopl2 (core ya vendido en fpga/jtopl/), puertos C0/C1. VALIDADO EN HW (juego OK)
+`define ENABLE_Y8950_ADPCM  // F2 (_80): ADPCM-B del Y8950 — y8950_adpcm.v (glue openMSX-exacto) + decoder jt10_adpcmb + RAM samples 32KB BSRAM (NMS-1205 de serie)
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
@@ -1918,6 +1919,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign y8950_rd_r  = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_rd_n == 1'b0 ) ? 1'b1 : 1'b0;   // I/O:C0-C1h lectura (status/dato)
 
 `ifdef ENABLE_Y8950
+    wire [7:0] jtopl2_dout;          // status del jtopl: {~irq_n, ft1, ft2, 5'd6}
     jtopl2 y8950(
         .rst  (~bus_reset_n),        // rst >= 6 ciclos clk&cen
         .clk  (clk_54m),             // mismo dominio que el OPLL
@@ -1926,15 +1928,58 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .addr (bus_addr[0]),         // 0=registro (C0), 1=dato (C1)
         .cs_n (y8950_req_n),         // strobe de escritura (patron OPLL)
         .wr_n (1'b0),
-        .dout (y8950_dout),
+        .dout (jtopl2_dout),
         .irq_n( ),
         // combined output
         .snd  (y8950_wav),
         .sample ( )
     );
+
+`ifdef ENABLE_Y8950_ADPCM
+    // ===== ADPCM-B (_80): glue openMSX-exacto + decoder jt10 + 32KB BSRAM =====
+    // Strobes de 1 ciclo (54M) con doble registro: el dato del Z80 lleva ya
+    // decenas de ns estable cuando dispara el flanco detectado en d1&~d2.
+    reg  y8950_wr_d1, y8950_wr_d2, y8950_rdc1_d1, y8950_rdc1_d2;
+    wire y8950_wr_any = (bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_wr_n == 1'b0);
+    wire y8950_rdc1_any = (bus_iorq_n == 1'b0 && bus_addr[7:0] == 8'hC1 && bus_rd_n == 1'b0 && bus_m1_n == 1'b1);
+    always @(posedge clk_54m) begin
+        y8950_wr_d1   <= y8950_wr_any;   y8950_wr_d2   <= y8950_wr_d1;
+        y8950_rdc1_d1 <= y8950_rdc1_any; y8950_rdc1_d2 <= y8950_rdc1_d1;
+    end
+    wire y8950_wrc0_stb = y8950_wr_d1 & ~y8950_wr_d2 & ~bus_addr[0];
+    wire y8950_wrc1_stb = y8950_wr_d1 & ~y8950_wr_d2 &  bus_addr[0];
+    wire y8950_rdc1_stb = y8950_rdc1_d1 & ~y8950_rdc1_d2;
+
+    wire [7:0] y8950_status_c0;
+    wire [7:0] y8950_data_c1;
+    wire signed [15:0] y8950_adpcm_wav;
+
+    y8950_adpcm uadpcm(
+        .clk       (clk_54m),
+        .cen3m6    (clk_enable_3m6_54),
+        .rst_n     (bus_reset_n),
+        .wr_c0     (y8950_wrc0_stb),
+        .wr_c1     (y8950_wrc1_stb),
+        .rd_c1     (y8950_rdc1_stb),
+        .din       (cpu_dout),
+        .ft1       (jtopl2_dout[6]),
+        .ft2       (jtopl2_dout[5]),
+        .status    (y8950_status_c0),
+        .data_dout (y8950_data_c1),
+        .irq       ( ),                  // sin cablear en _80 (como el FM)
+        .pcm_out   (y8950_adpcm_wav)
+    );
+    // C0 = status compuesto (timers+EOS+BUF_RDY+PCM_BSY); C1 = puerto de datos
+    assign y8950_dout = bus_addr[0] ? y8950_data_c1 : y8950_status_c0;
+`else
+    wire signed [15:0] y8950_adpcm_wav = 16'sd0;
+    assign y8950_dout = jtopl2_dout;     // _79: status del jtopl en C0/C1
+`endif
+
 `else
     assign y8950_wav  = 16'd0;
     assign y8950_dout = 8'hFF;
+    wire signed [15:0] y8950_adpcm_wav = 16'sd0;
 `endif
 
     //scc & ghost scc
@@ -2175,15 +2220,19 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign scc_term = (map_sel == 2'b10) ? { scc_wav, 1'b0 } : 16'd0;  // SCC solo en modo SCC (no Konami4/ASCII)
 
 
+    // ADPCM-B del Y8950 (_80): mono en ambos canales como el FM; >>>1 de
+    // margen (el mixer suma sin saturacion)
+    wire [15:0] y8950_adpcm_term = {y8950_adpcm_wav[15], y8950_adpcm_wav[15:1]};
+
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
             if (config_enable_stereo == 1) begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav;
-                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav + y8950_adpcm_term;
+                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term;
             end
             else begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav;
-                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term;
+                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term;
             end
         end
     end
