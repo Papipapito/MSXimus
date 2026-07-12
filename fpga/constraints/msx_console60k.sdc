@@ -101,6 +101,21 @@ set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/CE}
 set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {wait_io_ff*/CE}] -hold -end 2
 # (_71: la misma familia puede aterrizar en los pines D de esos FSMs segun el
 #  roll — p.ej. RD_s0 -> mem1/sdram_seq_*/D. Identico argumento, mismos limites.)
+# (_73: y el ORIGEN puede ser un pin DO de la SSRAM interna del T80 (IStatus
+#  etc.), que el patron /Q no cubre. Mismo argumento: estado del Z80, cambia
+#  solo en flancos habilitados.)
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {mem1/?*?/CE}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {mem1/?*?/CE}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {mem1/?*?/D}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {mem1/?*?/D}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {state_wait*/CE}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {state_wait*/CE}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {state_wait*/D}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {state_wait*/D}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {wait_io_ff*/CE}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {wait_io_ff*/CE}] -hold -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {wait_io_ff*/D}] -setup -end 2
+set_multicycle_path -from [get_pins {cpu1/u0/IStatus*/DO*}] -to [get_pins {wait_io_ff*/D}] -hold -end 2
 set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {mem1/?*?/D}] -setup -end 2
 set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {mem1/?*?/D}] -hold -end 2
 set_multicycle_path -from [get_pins {cpu1/?*?/Q}] -to [get_pins {state_wait*/D}] -setup -end 2

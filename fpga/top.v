@@ -14,7 +14,7 @@
 // IMPORTANTE: VIDEO720 tambien esta `define'd en tn_vdp_v3_v9958/src/
 // v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
 `define VIDEO720
-//`define ENABLE_WIFI       // BASE MINIMA: WiFi/UART fuera
+`define ENABLE_WIFI       // F1 (_73): WiFi UNAPI por el BL616 ONBOARD (UART en V14/U15, ver uwifi)
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
@@ -81,11 +81,9 @@ module top
     output wire sd_dat2,     // 1
     output wire sd_dat3,     // 1
 
-`ifdef ENABLE_WIFI
-    //uart
-    output wire uart_tx,
-    input wire uart_rx,
-`endif 
+    // F1 (_73): los puertos uart_tx/uart_rx del ESP-01S (nano) NO existen en el
+    // 60K — la UART del WiFi va al BL616 ONBOARD por los pads ya constreñidos
+    // bl616_jtagsel (V14 = GPIO28 TX del BL616) y spi_irqn (U15 = GPIO27 RX).
 
     //usb uart
     output wire usb_uart_tx,
@@ -214,7 +212,15 @@ end
     // fabric (SPI del BL616) solo con el PLL en lock y sin petición de JTAG del
     // BL616 (bl616_jtagsel, PULL_UP). Sin término de botón: s2 es el reset MSX
     // y no debe flapear el modo JTAG.
+`ifdef ENABLE_WIFI
+    // F1 (_73): GPIO28 del BL616 pasa a ser su UART TX (idle ALTO + trafico) ->
+    // la mecanica jtagsel/companion queda invalida (el companion-SPI se
+    // sacrifica: el teclado sigue por el soft-host USB-A). JTAG fijo en modo
+    // JTAG: el flasheo del FPGA via partner queda intacto y sin flapeos.
+    assign jtagseln = 1'b0;
+`else
     assign jtagseln = clock_locked & ~bl616_jtagsel;
+`endif
 
     // ================================================================
     //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
@@ -1370,6 +1376,12 @@ assign keyboard_addr = ppi_port_c[3:0];
 
     assign uart_req = (bus_addr[7:1] == 7'b0000011 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0)? 1 : 0; // ESP ports 06-07h
 
+    // F1 (_73): la UART va al BL616 ONBOARD (firmware UNAPI propio, repo
+    // BL616-UNAPI-Firmware). RX = pad bl616_jtagsel (V14 <- GPIO28 TX del
+    // BL616, PULL_UP = idle UART correcto). TX = pad spi_irqn (U15 -> GPIO27
+    // RX del BL616), robado al companion (sacrificado en F1). Baud del core:
+    // 27M/31 = 870968; el firmware BL616 va a 869565 (-0.16%).
+    wire bl616_uart_tx_w;
     wifi uwifi (
         .clk_i      (clk_27m),
         .wait_o     (wait_uart),
@@ -1377,8 +1389,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .iorq_i     (bus_iorq_n),
         .wrt_i      (bus_wr_n),
         .rd_i       (bus_rd_n),
-        .rx_i       (uart_rx),
-        .tx_o       (uart_tx),
+        .rx_i       (bl616_jtagsel),
+        .tx_o       (bl616_uart_tx_w),
         .adr_i      (bus_addr),
         .db_i       (cpu_dout),
         .db_o       (uart_dout)
@@ -3115,7 +3127,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire joy_on   = (|joystick0[5:0]) | (|joystick1[5:0]);
     wire kbd_raw  = |keyboard;                            // any key held
 `ifdef ENABLE_WIFI
-    wire wifi_raw = ~uart_tx | ~uart_rx;                  // WiFi UART active (idle = high)
+    wire wifi_raw = ~bl616_uart_tx_w | ~bl616_jtagsel;    // WiFi UART active (idle = high; F1: enlace BL616)
 `else
     wire wifi_raw = 1'b0;                                 // BASE MINIMA: WiFi fuera
 `endif
@@ -3211,6 +3223,15 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [127:0] keyboard_spi;
     assign keyboard = keyboard_spi;
 `endif
+    // F1 (_73): el pad U15 (spi_irqn) se entrega a la UART del BL616 cuando el
+    // WiFi onboard esta activo; el companion (ya sin SPI: jtagseln=0) pierde su
+    // IRQ — teclado por soft-host USB-A, joysticks USB del companion inertes.
+    wire companion_irqn_w;
+`ifdef ENABLE_WIFI
+    assign spi_irqn = bl616_uart_tx_w;
+`else
+    assign spi_irqn = companion_irqn_w;
+`endif
     fpga_companion fpga_companion_inst
     (
         .clk (clk_27m),
@@ -3220,7 +3241,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .spi_csn (spi_csn),
         .spi_dir (spi_dir),
         .spi_dat (spi_dat),
-        .spi_irqn (spi_irqn),
+        .spi_irqn (companion_irqn_w),
 
         .keyboard (keyboard_spi),
         .joystick0 (joystick0),
