@@ -113,7 +113,16 @@ module memory_ctrl #(
             case ( sdram_seq )
                 3'd0 : begin
                     sdram_write <= 0;
-                    if  ( ram_req == 1 && ( video_dlclk == 1 && video_dhclk == 1 ) ) begin
+                    if  ( ram_req == 1 && video_dlclk == 1 ) begin
+                    // iter.3-A (_72): ventana de aceptacion = TODO el slot VDP
+                    // (antes solo dl&dh = su primera mitad, 25% del ciclo). Una
+                    // peticion que llegaba justo tras la ventana esperaba ~150ns
+                    // extra antes de EMPEZAR -> ~19% de lecturas turbo perdian
+                    // 1 T-state (z80bench 4.3-4.4 en vez de 5.37). Con todo el
+                    // slot: peor caso req->dato 250->213ns (TB T9), bajo el
+                    // umbral de stall (~280ns). El latch de sdram_addr en seq1
+                    // sigue cayendo >=1 ciclo de 108M antes del muestreo de fila
+                    // del motor (fase 0 del slot CPU). A 3.58 solo MEJORA margen.
                         sdram_seq <= 3'd1;
                         ram_busy <= 1;
                     end

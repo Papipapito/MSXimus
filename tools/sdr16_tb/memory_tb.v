@@ -392,6 +392,65 @@ module memory_tb;
         $display("T9 barrido de fase: %0d lecturas, lat req->busy0  min=%0.0f  avg=%0.0f  MAX=%0.0f ns",
                  nlat, min_lat, sum_lat / nlat, max_lat);
 
+        // ---- T9b: histograma respecto al T-state del turbo (186.3 ns @5.369) ----
+        // Reutiliza el mismo barrido pero clasifica cada latencia en cubos de T.
+        // Una lectura con lat<=186 CABE en 1 T-state (no stall); >186 fuerza
+        // waits. La fraccion >186 * (coste medio) = el deficit del turbo.
+        begin : hist
+            integer h0, h1, h2, h3, k;
+            real Tturbo;
+            Tturbo = 1000.0 / 5.369318;   // 186.3 ns
+            h0 = 0; h1 = 0; h2 = 0; h3 = 0;
+            for (ph = 0; ph < 16; ph = ph + 1) begin
+                for (rep = 0; rep < 6; rep = rep + 1) begin
+                    hit = 0;
+                    for (tries = 0; tries < 40; tries = tries + 1)
+                        if (hit == 0) begin @(negedge clk54); if (phc == ph[3:0]) hit = 1; end
+                    if (hit == 1) begin
+                        ram_addr = 23'h033333; ram_din = 0; ram_write = 0; ram_req = 1;
+                        t0 = $realtime; @(negedge ram_busy); t1 = $realtime;
+                        @(negedge clk54); ram_req = 0; @(negedge clk54);
+                        lat = t1 - t0;
+                        if      (lat <= Tturbo)       h0 = h0 + 1;   // 0 waits
+                        else if (lat <= 2.0*Tturbo)   h1 = h1 + 1;   // +1 T
+                        else if (lat <= 3.0*Tturbo)   h2 = h2 + 1;   // +2 T
+                        else                          h3 = h3 + 1;   // +3 T
+                    end
+                end
+            end
+            k = h0 + h1 + h2 + h3;
+            $display("T9b histograma @5.369 (T=%0.0fns): cabe=%0d(%0d%%)  +1T=%0d  +2T=%0d  +3T=%0d",
+                     Tturbo, h0, (100*h0)/k, h1, h2, h3);
+            $display("     coste medio extra por lectura = %0.3f T-states",
+                     (1.0*h1 + 2.0*h2 + 3.0*h3) / k);
+        end
+
+        // ---- T10: ritmo SOSTENIDO de servicio (techo del ancho de banda) ----
+        // Fija req y NUNCA lo baja durante un burst; cuenta cuantas lecturas
+        // completa el controlador por unidad de tiempo = maximo memory-bound.
+        // Si el periodo de servicio < 186ns, la SDRAM NO es el techo de 5.37.
+        begin : svc
+            integer nsvc; real tA, tB, per;
+            cpu_write(23'h044444, 8'h7E);
+            nsvc = 400;
+            @(negedge clk54); ram_addr = 23'h044444; ram_din = 0; ram_write = 0;
+            ram_req = 1;
+            @(posedge ram_busy);       // primera aceptacion
+            tA = $realtime;
+            for (n = 0; n < nsvc; n = n + 1) begin
+                @(negedge ram_busy);   // dato listo
+                @(negedge clk54); ram_req = 0;   // 1 ciclo de handshake (como el FSM real)
+                @(negedge clk54); ram_req = 1;
+                @(posedge ram_busy);
+            end
+            tB = $realtime;
+            ram_req = 0;
+            per = (tB - tA) / nsvc;
+            $display("T10 servicio sostenido: %0d lecturas, periodo=%0.1f ns -> %0.3f MHz de lecturas back-to-back",
+                     nsvc, per, 1000.0/per);
+            $display("     (T-state turbo=186.3ns=5.369MHz ; normal=277.8ns=3.600MHz)");
+        end
+
         // ---- resumen ----
         $display("---------------------------------------------");
         $display("stats modelo: writes=%0d reads=%0d refresh=%0d",

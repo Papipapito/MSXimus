@@ -25,17 +25,26 @@ Todo validado en HW (2026-07-11), serial de referencia **_71 + pack v5**:
 - Más lo de v1.0-beta1: 720p BRAM-bridge, 4:3/16:9/scanlines, PSG + doble
   SCC estéreo + OPLL, teclado USB soft-host, Nextor+microSD, megaram, logo v4.
 
-## F0 — Cierre de etapa (S, esta semana)
+## F0 — Cierre de etapa (CERRADO 2026-07-11)
 
-1. **Tag v1.1** con _71 + pack v5 (cuando Albert dé el visto bueno).
-2. **_72 = iter.3-A del turbo** (1 línea, YA validada en testbench): ensanchar
-   la ventana de aceptación del controlador SDRAM (`dl&dh` → `dl`). El barrido
-   T9 midió peor-caso 250→213ns, por debajo del umbral de stall a 5.37 →
-   candidata a acercar z80bench del 4.33 al ~5.37 real. Si se queda corta,
-   queda la palanca B (release de `ram_busy` al latch de fase 5/6).
-3. **Decidir el fork del menú/pack**: hoy el fuente vive en el árbol del nano
-   con el flag MSXIMUS. Separados los proyectos, traerlo al repo MSXimus
-   (carpeta `menu/`) cuando toque tocarlo de verdad, no antes.
+1. **Tag v1.1** = _72 + pack v5. Turbo **4.40 MHz** (iter.3-A), sprites 8/línea,
+   LED de turbo, menú con nota "(reiniciar físicamente)", timing limpio.
+2. **Turbo: 4.40 es el número de v1.1, aceptado.** Se midió que 4.40 es el
+   techo práctico de la SDRAM compartida CPU/VDP (ver más abajo). El 5.37 real
+   exigiría VRAM→BRAM, que **se aparca** (congelaría la BRAM al 92-97% y con
+   ella OPL4/V9990/frontend). Análisis completo en `docs/VRAM_BRAM_DESIGN.md`.
+3. **Fork del menú/pack**: el fuente vive aún en el árbol del nano con el flag
+   `MSXIMUS`. Traerlo al repo MSXimus (carpeta `menu/`) cuando toque tocarlo.
+
+## Turbo — techo medido y por qué 4.40 (no reabrir sin releer esto)
+
+`tools/sdr16_tb` (T9b/T10): la SDRAM sirve 6.75 MHz sostenido, pero CPU y VDP
+la comparten 50/50 → la CPU recibe 1 slot por ventana de vídeo (6.75 MHz de
+cadencia). Las rejillas de slot (6.75) y de T-state turbo (5.369) son
+inconmensurables → el 25% de las lecturas pierde 1 T-state → 5.369/1.25 ≈ 4.30.
+Retoques baratos agotados (iter.2b=4.33, iter.3-A=4.40; iter.2c/2d corrompieron).
+**El único camino a ~5.37 es sacar la VRAM de la SDRAM (VRAM→BRAM), aparcado.**
+Ese mismo cambio curaría Screen 3 de raíz. Ver `docs/VRAM_BRAM_DESIGN.md`.
 
 ## F1 — WiFi (doble vía, empezar domingo)
 
