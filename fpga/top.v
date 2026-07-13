@@ -2055,7 +2055,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         wdbg_rd37_d1 <= wdbg_rd37_w;   wdbg_rd37_d2 <= wdbg_rd37_d1;
     end
     wire wdbg_wr_stb   = wdbg_wr_d1 & ~wdbg_wr_d2;
-    wire wdbg_rd37_stb = wdbg_rd37_d1 & ~wdbg_rd37_d2;
+    // _88: prefetch encadenado en el flanco de BAJADA del IN (RD ya liberado,
+    // Z80 ya latcheo). Con el flanco de subida la DDR3 actualizaba rdata ANTES
+    // de que el Z80 latchease -> leia siempre 1 byte por delante (DIAG A/B del
+    // HW: read(i)=write(i+1)). Las escrituras no tienen esta carrera.
+    wire wdbg_rd37_stb = ~wdbg_rd37_d1 & wdbg_rd37_d2;
 
     reg  [21:0] wdbg_addr;
     reg         wdbg_req, wdbg_we, wdbg_inc_pend, wdbg_busy_d;
