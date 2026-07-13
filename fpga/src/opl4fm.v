@@ -123,9 +123,17 @@ opl3 u_opl3 (
 // raro y mal" = clipping duro x8). >>5 devuelve el 16-bit verdadero, al
 // mismo nivel que el snd del OPLL/Y8950 en el mixer. Clamp solo de guarda.
 // ---------------------------------------------------------------------------
+// _85: ¡OJO SEMANTICA VERILOG! Las CONCATENACIONES son UNSIGNED: con
+// ({sign,l} + {sign,r}) >>> 1 la suma era unsigned y el >>> degeneraba en
+// shift LOGICO -> cada muestra NEGATIVA se convertia en un positivo enorme
+// (media onda rectificada con picos = la "distorsion de volumen" del HW,
+// verificado en sim: -1000 -> +16776216). Extension de signo via wires
+// DECLARADOS signed para que toda la aritmetica sea signed.
+wire signed [24:0] sample_l_ext = {sample_l[23], sample_l};
+wire signed [24:0] sample_r_ext = {sample_r[23], sample_r};
 reg signed [24:0] mono_q;
 always @(posedge clk_opl3)
-    mono_q <= ({sample_l[23], sample_l} + {sample_r[23], sample_r}) >>> 1;
+    mono_q <= (sample_l_ext + sample_r_ext) >>> 1;
 
 wire signed [19:0] mono_n = mono_q[24:5];          // >>5: nivel nativo
 wire ovf = (mono_n[19:15] != {5{mono_n[19]}});     // guarda (casi nunca)
