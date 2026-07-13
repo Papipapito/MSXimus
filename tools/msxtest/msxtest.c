@@ -460,6 +460,41 @@ void PrintU8Dec(u8 v);    // definidas mas abajo (seccion Sistema)
 void PrintU8Hex2(u8 v);
 
 //-----------------------------------------------------------------------------
+// FRASE de voz ADPCM (v6): "MSXimus. MSX Audio funcionando." — 3.5s reales
+// codificados a ADPCM-B e INYECTADOS en los segmentos 8-11 del ROM por
+// tools/msxtest/inject_voice.py DESPUES del build (la zona plana esta llena).
+// Estas constantes deben coincidir con el injector.
+// El stream corre desde un thunk en RAM: la ventana 8000-9FFF es nuestro
+// propio codigo y hay que conmutarle el banco Konami-SCC (como el SCC test).
+//-----------------------------------------------------------------------------
+#define VOICE_SEG0  8
+#define VOICE_LEN   31429u    // bytes ADPCM (sync con inject_voice.py)
+#define VOICE_DELTA 0x5C00u   // 17.9 kHz
+
+u8 g_VozThunk[32];
+
+void VozStreamSeg(u8 seg, u16 len)
+{
+	u8* t = g_VozThunk; u8 i = 0;
+	t[i++]=0xF3;                                   // DI
+	t[i++]=0x3E; t[i++]=seg;                       // LD A,seg
+	t[i++]=0x32; t[i++]=0x00; t[i++]=0x90;         // LD (9000h),A (bank2=seg)
+	t[i++]=0x21; t[i++]=0x00; t[i++]=0x80;         // LD HL,8000h
+	t[i++]=0x01; t[i++]=(u8)len; t[i++]=(u8)(len>>8); // LD BC,len
+	t[i++]=0x7E;                                   // lp: LD A,(HL)
+	t[i++]=0xD3; t[i++]=0xC1;                      //     OUT (C1h),A
+	t[i++]=0x23;                                   //     INC HL
+	t[i++]=0x0B;                                   //     DEC BC
+	t[i++]=0x78; t[i++]=0xB1;                      //     LD A,B / OR C
+	t[i++]=0x20; t[i++]=0xF7;                      //     JR NZ,lp (-9)
+	t[i++]=0x3E; t[i++]=0x02;                      // LD A,2
+	t[i++]=0x32; t[i++]=0x00; t[i++]=0x90;         // LD (9000h),A (restaura)
+	t[i++]=0xFB;                                   // EI
+	t[i++]=0xC9;                                   // RET
+	((void(*)(void))(u16)&g_VozThunk[0])();
+}
+
+//-----------------------------------------------------------------------------
 // IRQ del Y8950 (_81): gancho en H.KEYI que cuenta interrupciones del chip.
 // El KEYINT del BIOS ya ha salvado TODOS los registros antes de llamar al
 // hook, asi que una funcion C normal vale. El gancho DEBE bajar /INT
@@ -712,6 +747,44 @@ void TestY8950()
 			PrintU8Dec((u8)(g_Y8950IrqCount > 255 ? 255 : g_Y8950IrqCount));
 		}
 		else Print_DrawText("sin cablear");
+	}
+
+	// --- FRASE de voz (v6): subir 31KB reales a la sample RAM y oirla ---
+	{
+		Print_DrawTextAt(1, 6, "Subiendo frase de voz (31KB)...");
+		__asm__("di");
+		MSXAudio_SetRegister(0x04, 0x7C);   // todo enmascarado
+		MSXAudio_SetRegister(0x04, 0x80);
+		MSXAudio_SetRegister(0x07, 0x01);   // reset ADPCM
+		MSXAudio_SetRegister(0x08, 0x00);   // RAM, 256K
+		MSXAudio_SetRegister(0x09, 0x00); MSXAudio_SetRegister(0x0A, 0x00);
+		MSXAudio_SetRegister(0x0B, 0xFF); MSXAudio_SetRegister(0x0C, 0xFF); // stop=max
+		MSXAudio_SetRegister(0x07, 0x60);   // modo escritura CPU->RAM
+		g_MSXAudio_IndexPort = 0x0F;        // reg de datos seleccionado
+		__asm__("ei");
+		VozStreamSeg(VOICE_SEG0,     8192);
+		VozStreamSeg(VOICE_SEG0 + 1, 8192);
+		VozStreamSeg(VOICE_SEG0 + 2, 8192);
+		VozStreamSeg(VOICE_SEG0 + 3, (u16)(VOICE_LEN - 24576u));
+
+		__asm__("di");
+		MSXAudio_SetRegister(0x07, 0x01);
+		MSXAudio_SetRegister(0x09, 0x00); MSXAudio_SetRegister(0x0A, 0x00);
+		MSXAudio_SetRegister(0x0B, (u8)((VOICE_LEN * 2u) >> 3));        // fin frase
+		MSXAudio_SetRegister(0x0C, (u8)(((VOICE_LEN * 2u) >> 3) >> 8));
+		MSXAudio_SetRegister(0x10, (u8)VOICE_DELTA);
+		MSXAudio_SetRegister(0x11, (u8)(VOICE_DELTA >> 8));
+		MSXAudio_SetRegister(0x12, 0xFF);   // volumen A TOPE (peticion usuario)
+		MSXAudio_SetRegister(0x07, 0xA0);   // reproducir UNA vez
+		__asm__("ei");
+		Print_DrawTextAt(1, 6, "FRASE: \"MSXimus...\" sonando    ");
+		WaitFramesOrSpace(240);             // ~4s (la frase dura 3.5)
+		__asm__("di");
+		MSXAudio_SetRegister(0x07, 0x01);   // stop
+		MSXAudio_SetRegister(0x04, 0x7C);
+		MSXAudio_SetRegister(0x04, 0x80);
+		__asm__("ei");
+		Print_DrawTextAt(1, 6, "FRASE: OK (3.5s, 17.9kHz, ADPCM)");
 	}
 
 	Print_DrawTextAt(1, 8,  "Sonando: THE ENTERTAINER (Joplin)");
