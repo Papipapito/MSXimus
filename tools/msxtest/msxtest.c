@@ -1028,6 +1028,72 @@ void TestOPL4FM()
 }
 
 //-----------------------------------------------------------------------------
+// DDR3 wave memory (_86): puerto debug 34h-37h del bring-up de la fase
+// wavetable del OPL4. 34/35/36 = direccion (escribir 36 dispara prefetch);
+// 37 OUT = escribir byte (autoinc) / IN = byte prefetchado (+prefetch de
+// addr+1). IN 36 = status {bit1=busy, bit0=ready}.
+//-----------------------------------------------------------------------------
+__sfr __at(0x34) g_WavA0;
+__sfr __at(0x35) g_WavA1;
+__sfr __at(0x36) g_WavA2;
+__sfr __at(0x37) g_WavDat;
+
+#define WAV_WAIT()  while (g_WavA2 & 0x02)
+
+void WavSetAddr(u8 a2, u8 a1, u8 a0)
+{
+	g_WavA0 = a0; g_WavA1 = a1; g_WavA2 = a2;   // el 36 dispara prefetch
+	WAV_WAIT();
+}
+
+void TestWaveDDR3()
+{
+	u8 st;
+	u16 errs = 0;
+
+	Screen0();
+	Print_DrawTextAt(1, 1, "DDR3 WAVE (OPL4 fase 2) _86");
+
+	st = g_WavA2;
+	Print_DrawTextAt(1, 3, "Calibracion DDR3: ");
+	if (st == 0xFF) { Print_DrawText("SIN SOPORTE (core <_86)"); goto ddr_end; }
+	Print_DrawText((st & 0x01) ? "OK" : "FALLO");
+	if (!(st & 0x01)) goto ddr_end;
+
+	// patron 1: 64 bytes consecutivos (lanes dentro de las rafagas de 16)
+	WavSetAddr(0x00, 0x01, 0x00);
+	for (u8 i = 0; i < 64; ++i) { g_WavDat = (u8)(i ^ 0xA5); WAV_WAIT(); }
+	WavSetAddr(0x00, 0x01, 0x00);
+	for (u8 i = 0; i < 64; ++i)
+	{
+		u8 v = g_WavDat; WAV_WAIT();
+		if (v != (u8)(i ^ 0xA5)) ++errs;
+	}
+
+	// patron 2: strides de 64KB (cruza filas y bancos de la DDR3)
+	for (u8 i = 0; i < 32; ++i)
+	{
+		WavSetAddr(i, 0x00, 0x33);
+		g_WavDat = (u8)(i * 7 + 1); WAV_WAIT();
+	}
+	for (u8 i = 0; i < 32; ++i)
+	{
+		u8 v;
+		WavSetAddr(i, 0x00, 0x33);
+		v = g_WavDat; WAV_WAIT();
+		if (v != (u8)(i * 7 + 1)) ++errs;
+	}
+
+	Print_DrawTextAt(1, 5, "W/R (96 bytes, 4MB): ");
+	if (errs == 0) Print_DrawText("OK");
+	else { Print_DrawText("ERRORES "); PrintU8Dec((u8)(errs > 255 ? 255 : errs)); }
+
+ddr_end:
+	Print_DrawTextAt(1, 22, "ESPACIO para seguir");
+	WaitSpace();
+}
+
+//-----------------------------------------------------------------------------
 // Sistema: version MSX + RTC en vivo + benchmark de turbo F11
 //-----------------------------------------------------------------------------
 void PrintU8Dec(u8 v)
@@ -1337,6 +1403,7 @@ void main()
 	TestOPLL(fmType);
 	TestY8950();
 	TestOPL4FM();
+	TestWaveDDR3();
 
 	// ---- 6. Entrada ----
 	TestInput();

@@ -44,6 +44,11 @@ add_file opl3/tremolo.sv
 add_file opl3/trick_sw_detection.sv
 add_file opl3/vibrato.sv
 add_file src/opl4fm.v
+# F2 (_86): DDR3 wave memory (IP + PLL del ddr3_framebuffer_gowin, Apache-2.0)
+add_file ddr3/ddr3_memory_interface.v
+add_file ddr3/pll_ddr3.v
+add_file ddr3/pll_mDRP_intf.v
+add_file src/wave_ddr3.v
 add_file jtopl/jt2413.v
 add_file jtopl/jtopl.v
 add_file jtopl/jtopl2.v

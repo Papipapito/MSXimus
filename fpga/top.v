@@ -21,7 +21,8 @@
 `define ENABLE_Y8950        // F2 (_79): MSX-Audio (Y8950) FM via jtopl2 (core ya vendido en fpga/jtopl/), puertos C0/C1. VALIDADO EN HW (juego OK)
 `define ENABLE_Y8950_ADPCM  // F2 (_80): ADPCM-B del Y8950 — y8950_adpcm.v (glue openMSX-exacto) + decoder jt10_adpcmb + RAM samples 32KB BSRAM (NMS-1205 de serie). VALIDADO HW+VGMPlay
 `define ENABLE_Y8950_IRQ    // F2 (_81): IRQ del Y8950 (timers+EOS+BUF ya enmascarados) al /INT del Z80 (wired-AND como el Music Module real). Arranca todo enmascarado = sin IRQ hasta que el software la pida
-`define ENABLE_OPL4FM       // F2 (_82): MoonSound FM (OPL3 de gtaylormb, fork mangOPL4 con fixes Gowin) en C4-C7 + stub wave 7E/7F. PLL propia 33.75MHz. Wavetable = fase 2 (DDR3)
+`define ENABLE_OPL4FM       // F2 (_82-_85): MoonSound FM (OPL3) en C4-C7 + stub wave 7E/7F. VALIDADO EN HW (reloj 96/98, limpio)
+`define ENABLE_WAVE_DDR3    // F2 (_86): bring-up de la DDR3 del SOM para la memoria de ondas OPL4 (cliente independiente + puerto debug I/O 34-37h). Fase wavetable
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
@@ -115,7 +116,25 @@ module top
     inout wire [15:0] IO_sdram_dq, // 16 bit bidirectional data bus (Console 60K: SDR externa W9825G6KH)
     output wire [12:0] O_sdram_addr, // 13 bit multiplexed address bus
     output wire [1:0] O_sdram_ba, // two banks
-    output wire [1:0] O_sdram_dqm // 16/2
+    output wire [1:0] O_sdram_dqm, // 16/2
+
+    // ---- _86: DDR3 del SOM (memoria de ondas OPL4; cliente independiente,
+    //      la SDRAM/memory.v NO se toca). Pines del ddr3_framebuffer_gowin.
+    output wire [14:0] ddr_addr,
+    output wire [2:0]  ddr_bank,
+    output wire        ddr_cs,
+    output wire        ddr_ras,
+    output wire        ddr_cas,
+    output wire        ddr_we,
+    output wire        ddr_ck,
+    output wire        ddr_ck_n,
+    output wire        ddr_cke,
+    output wire        ddr_odt,
+    output wire        ddr_reset_n,
+    output wire [1:0]  ddr_dm,
+    inout  wire [15:0] ddr_dq,
+    inout  wire [1:0]  ddr_dqs,
+    inout  wire [1:0]  ddr_dqs_n
 
     //output wire SLTSL3
 
@@ -707,6 +726,10 @@ assign keyboard_addr = ppi_port_c[3:0];
                     `ifdef ENABLE_OPL4FM
                      ( opl4fm_rd_w == 1 ) ? opl4fm_dout :     // C4-C7: status/shadow del OPL3
                      ( opl4wave_rd_w == 1 ) ? opl4wave_dout : // 7F: stub wave (device ID)
+                    `endif
+                    `ifdef ENABLE_WAVE_DDR3
+                     ( wdbg_rd36_w == 1 ) ? wdbg_status :     // 36h: {busy, ready}
+                     ( wdbg_rd37_w == 1 ) ? wdbg_rdata :      // 37h: byte DDR3 prefetchado
                     `endif
                 `endif
                 `ifdef ENABLE_CONFIG
@@ -2005,6 +2028,121 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign y8950_dout = 8'hFF;
     wire signed [15:0] y8950_adpcm_wav = 16'sd0;
     assign y8950_int_n = 1'b1;
+`endif
+
+    // ===== DDR3 wave memory (_86): bring-up + puerto debug 34h-37h =====
+    // 34h=addr[7:0] 35h=addr[15:8] 36h=addr[21:16] (write dispara prefetch)
+    // 37h: OUT=escribir byte (autoinc al completar) / IN=byte prefetchado
+    //      (y dispara prefetch de addr+1 — patron readData del ADPCM)
+    // IN 36h = status {6'b0, busy, ready}
+    wire        wdbg_rd36_w;
+    wire        wdbg_rd37_w;
+    wire [7:0]  wdbg_status;
+    wire [7:0]  wdbg_rdata;
+`ifdef ENABLE_WAVE_DDR3
+    wire wdbg_sel    = (bus_iorq_n == 1'b0) && (bus_m1_n == 1'b1) && (bus_addr[7:2] == 6'b001101);
+    wire wdbg_wr_any = wdbg_sel && (bus_wr_n == 1'b0);
+    wire wdbg_rd_any = wdbg_sel && (bus_rd_n == 1'b0);
+    assign wdbg_rd36_w = wdbg_rd_any && (bus_addr[1:0] == 2'b10);
+    assign wdbg_rd37_w = wdbg_rd_any && (bus_addr[1:0] == 2'b11);
+
+    reg wdbg_wr_d1, wdbg_wr_d2, wdbg_rd37_d1, wdbg_rd37_d2;
+    always @(posedge clk_54m) begin
+        wdbg_wr_d1   <= wdbg_wr_any;   wdbg_wr_d2   <= wdbg_wr_d1;
+        wdbg_rd37_d1 <= wdbg_rd37_w;   wdbg_rd37_d2 <= wdbg_rd37_d1;
+    end
+    wire wdbg_wr_stb   = wdbg_wr_d1 & ~wdbg_wr_d2;
+    wire wdbg_rd37_stb = wdbg_rd37_d1 & ~wdbg_rd37_d2;
+
+    reg  [21:0] wdbg_addr;
+    reg         wdbg_req, wdbg_we, wdbg_inc_pend, wdbg_busy_d;
+    reg  [7:0]  wdbg_wdata;
+    wire        wdbg_done, wdbg_ready;
+    wire        wdbg_busy = (wdbg_req != wdbg_done);
+    assign wdbg_status = {6'd0, wdbg_busy, wdbg_ready};
+
+    always @(posedge clk_54m or negedge bus_reset_n) begin
+        if (!bus_reset_n) begin
+            wdbg_addr <= 22'd0; wdbg_req <= 1'b0; wdbg_we <= 1'b0;
+            wdbg_wdata <= 8'd0; wdbg_inc_pend <= 1'b0; wdbg_busy_d <= 1'b0;
+        end
+        else begin
+            wdbg_busy_d <= wdbg_busy;
+            // autoinc diferido de las ESCRITURAS: al completar el handshake
+            // (la direccion debe quedarse quieta mientras la op esta en vuelo)
+            if (wdbg_busy_d && !wdbg_busy && wdbg_inc_pend) begin
+                wdbg_addr <= wdbg_addr + 22'd1;
+                wdbg_inc_pend <= 1'b0;
+            end
+            if (wdbg_wr_stb) begin
+                case (bus_addr[1:0])
+                2'b00: wdbg_addr[7:0]   <= cpu_dout;
+                2'b01: wdbg_addr[15:8]  <= cpu_dout;
+                2'b10: begin
+                    wdbg_addr[21:16] <= cpu_dout[5:0];
+                    if (!wdbg_busy) begin            // prefetch de la nueva dir
+                        wdbg_we <= 1'b0;
+                        wdbg_req <= ~wdbg_req;
+                    end
+                end
+                2'b11: if (!wdbg_busy) begin         // escribir byte
+                    wdbg_we <= 1'b1;
+                    wdbg_wdata <= cpu_dout;
+                    wdbg_req <= ~wdbg_req;
+                    wdbg_inc_pend <= 1'b1;
+                end
+                endcase
+            end
+            else if (wdbg_rd37_stb && !wdbg_busy) begin
+                // devolvio el byte prefetchado: encadenar prefetch de addr+1
+                wdbg_addr <= wdbg_addr + 22'd1;
+                wdbg_we <= 1'b0;
+                wdbg_req <= ~wdbg_req;
+            end
+        end
+    end
+
+    wave_ddr3 uwave (
+        .clk_host   (clk_54m),
+        .rst_n      (bus_reset_n),
+        .req_toggle (wdbg_req),
+        .we         (wdbg_we),
+        .addr       (wdbg_addr),
+        .wdata      (wdbg_wdata),
+        .rdata      (wdbg_rdata),
+        .done_toggle(wdbg_done),
+        .ready      (wdbg_ready),
+        .clk_27     (clk27_video),   // misma topologia que el ref de nand2mario
+        .clk_g50    (ex_clk_27m),    // pad de 50MHz (mal llamado)
+        .ddr_addr   (ddr_addr),
+        .ddr_bank   (ddr_bank),
+        .ddr_cs     (ddr_cs),
+        .ddr_ras    (ddr_ras),
+        .ddr_cas    (ddr_cas),
+        .ddr_we     (ddr_we),
+        .ddr_ck     (ddr_ck),
+        .ddr_ck_n   (ddr_ck_n),
+        .ddr_cke    (ddr_cke),
+        .ddr_odt    (ddr_odt),
+        .ddr_reset_n(ddr_reset_n),
+        .ddr_dm     (ddr_dm),
+        .ddr_dq     (ddr_dq),
+        .ddr_dqs    (ddr_dqs),
+        .ddr_dqs_n  (ddr_dqs_n)
+    );
+`else
+    assign wdbg_rd36_w = 1'b0;
+    assign wdbg_rd37_w = 1'b0;
+    assign wdbg_status = 8'hFF;
+    assign wdbg_rdata  = 8'hFF;
+    // DDR3 en reposo seguro
+    assign ddr_addr = 15'd0;  assign ddr_bank = 3'd0;
+    assign ddr_cs = 1'b1;     assign ddr_ras = 1'b1;
+    assign ddr_cas = 1'b1;    assign ddr_we = 1'b1;
+    assign ddr_ck = 1'b0;     assign ddr_ck_n = 1'b1;
+    assign ddr_cke = 1'b0;    assign ddr_odt = 1'b0;
+    assign ddr_reset_n = 1'b0; assign ddr_dm = 2'b11;
+    assign ddr_dq = 16'hzzzz; assign ddr_dqs = 2'bzz; assign ddr_dqs_n = 2'bzz;
 `endif
 
     // ===== MoonSound FM (_82): OPL3 en C4-C7 + stub wave 7E/7F =====
