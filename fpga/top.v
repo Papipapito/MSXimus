@@ -2283,7 +2283,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // ADPCM-B del Y8950 (_80) y MoonSound FM (_82): mono en ambos canales
     // como el FM del Y8950; >>>1 de margen (el mixer suma sin saturacion)
     wire [15:0] y8950_adpcm_term = {y8950_adpcm_wav[15], y8950_adpcm_wav[15:1]};
-    wire [15:0] opl4fm_term      = {opl4fm_wav[15], opl4fm_wav[15:1]};
+    // _83: OPL3 ya sale a nivel nativo (como jt2413_wav) — sin >>1
+    wire [15:0] opl4fm_term      = opl4fm_wav;
 
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin

@@ -116,21 +116,23 @@ opl3 u_opl3 (
 );
 
 // ---------------------------------------------------------------------------
-// audio: mono (L+R)/2 en clk_opl3, escala a 16 bits con SATURACION.
-// Rango efectivo del core ~ +/-2^17 dentro de los 24 bits (calibracion de
-// mangOPL4: su gain 64x mapea 2^17 a full-scale) -> >>2 = full-scale 16b.
+// audio: mono (L+R)/2 en clk_opl3, a NIVEL NATIVO del chip (_83).
+// El core saca sample = canal <<< 5 (DAC_LEFT_SHIFT en dac_prep.sv): rango
+// real +/-2^20, NO +/-2^17 — la "calibracion gain 64x" de mangOPL4 venia de
+// medir UNA voz; con musica real mi _82 recortaba sin parar (HW: "suena
+// raro y mal" = clipping duro x8). >>5 devuelve el 16-bit verdadero, al
+// mismo nivel que el snd del OPLL/Y8950 en el mixer. Clamp solo de guarda.
 // ---------------------------------------------------------------------------
 reg signed [24:0] mono_q;
 always @(posedge clk_opl3)
     mono_q <= ({sample_l[23], sample_l} + {sample_r[23], sample_r}) >>> 1;
 
-// saturacion de 25b>>2 a 16b: si los bits [24:17] no son todos iguales al
-// signo, satura
-wire ovf = (mono_q[24:17] != {8{mono_q[24]}});
+wire signed [19:0] mono_n = mono_q[24:5];          // >>5: nivel nativo
+wire ovf = (mono_n[19:15] != {5{mono_n[19]}});     // guarda (casi nunca)
 reg signed [15:0] pcm_opl3;
 always @(posedge clk_opl3) begin
-    if (ovf) pcm_opl3 <= mono_q[24] ? 16'sh8000 : 16'sh7FFF;
-    else     pcm_opl3 <= mono_q[17:2];
+    if (ovf) pcm_opl3 <= mono_n[19] ? 16'sh8000 : 16'sh7FFF;
+    else     pcm_opl3 <= mono_n[15:0];
 end
 
 // cruce a dominio host por registro simple (audio a 49.5kHz: sobra)
