@@ -23,6 +23,7 @@
 `define ENABLE_Y8950_IRQ    // F2 (_81): IRQ del Y8950 (timers+EOS+BUF ya enmascarados) al /INT del Z80 (wired-AND como el Music Module real). Arranca todo enmascarado = sin IRQ hasta que el software la pida
 `define ENABLE_OPL4FM       // F2 (_82-_85): MoonSound FM (OPL3) en C4-C7 + stub wave 7E/7F. VALIDADO EN HW (reloj 96/98, limpio)
 `define ENABLE_WAVE_DDR3    // F2 (_86): bring-up de la DDR3 del SOM para la memoria de ondas OPL4 (cliente independiente + puerto debug I/O 34-37h). Fase wavetable
+`define ENABLE_WAVE_LOADER  // F2 (_87): carga de la YRW801 (2MB) de flash 0x500000 a DDR3 en BACKGROUND tras el boot (no bloquea el arranque). Status: bit2 de IN 36h = cargando
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
@@ -224,9 +225,11 @@ end
     wire clk27_video;           // 27M intermedio de la cascada (SOLO alimenta pll_74)
     wire clk_hdmi;              // 74.25 MHz pixel 720p
     wire clk_hdmi5;             // 371.25 MHz TMDS x5
+    wire pll27_lock;            // _87: gatea el reset del PLL DDR3 (calib estable)
     pll_27 pll27_video (
         .clkin  (ex_clk_27m),   // pad 50 MHz
-        .clkout0(clk27_video)
+        .clkout0(clk27_video),
+        .lock_o (pll27_lock)
     );
     pll_74 pll74_video (
         .clkin  (clk27_video),
@@ -2059,12 +2062,24 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     reg  [7:0]  wdbg_wdata;
     wire        wdbg_done, wdbg_ready;
     wire        wdbg_busy = (wdbg_req != wdbg_done);
-    assign wdbg_status = {6'd0, wdbg_busy, wdbg_ready};
+
+    // ---- _87: loader YRW801 flash(0x500000, 2MB) -> DDR3 en background ----
+    reg         wl_active, wl_done, wl_primed;
+    reg  [1:0]  wl_state;
+    reg  [23:0] wl_flash_addr;
+    reg  [21:0] wl_count;
+    reg         wl_flash_rd, wl_flash_term;
+    localparam  WL_FLASH_BASE = 24'h500000;
+    localparam  WL_LEN        = 22'h200000;   // 2MB
+    assign wdbg_status = {5'd0, wl_active, wdbg_busy, wdbg_ready};
 
     always @(posedge clk_54m or negedge bus_reset_n) begin
         if (!bus_reset_n) begin
             wdbg_addr <= 22'd0; wdbg_req <= 1'b0; wdbg_we <= 1'b0;
             wdbg_wdata <= 8'd0; wdbg_inc_pend <= 1'b0; wdbg_busy_d <= 1'b0;
+            wl_active <= 1'b0; wl_done <= 1'b0; wl_primed <= 1'b0;
+            wl_state <= 2'd0; wl_flash_addr <= 24'd0; wl_count <= 22'd0;
+            wl_flash_rd <= 1'b0; wl_flash_term <= 1'b0;
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2074,7 +2089,58 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 wdbg_addr <= wdbg_addr + 22'd1;
                 wdbg_inc_pend <= 1'b0;
             end
-            if (wdbg_wr_stb) begin
+
+`ifdef ENABLE_WAVE_LOADER
+            // ---- loader en background: protocolo byte a byte del flash
+            //      (calcado del stream del pack) + puerto wave reutilizado ----
+            case (wl_state)
+            2'd0:   // esperar: pack streameado + DDR3 calibrada
+                if (flash_idle && wdbg_ready && !wl_done) begin
+                    wl_active <= 1'b1;
+                    wl_flash_addr <= WL_FLASH_BASE;
+                    wl_count <= WL_LEN;
+                    wl_primed <= 1'b0;
+                    wdbg_addr <= 22'd0;
+                    wl_state <= 2'd1;
+                end
+            2'd1: begin // bucle: capturar byte y escribirlo en DDR3
+                if (flash_busy == 1'b0) begin
+                    if (~wl_flash_rd) begin
+                        if (!flash_write_busy && !wdbg_busy) begin
+                            if (wl_primed) begin
+                                wdbg_wdata <= flash_dout;   // byte de la lectura previa
+                                wdbg_we <= 1'b1;
+                                wdbg_req <= ~wdbg_req;
+                                wdbg_inc_pend <= 1'b1;      // autoinc al completar
+                            end
+                            if (wl_count == 22'd0) begin
+                                wl_state <= 2'd2;
+                            end
+                            else begin
+                                wl_flash_addr <= wl_flash_addr + 24'd1;
+                                wl_count <= wl_count - 22'd1;
+                                wl_flash_rd <= 1'b1;
+                                wl_primed <= 1'b1;
+                            end
+                        end
+                    end
+                end
+                else wl_flash_rd <= 1'b0;
+            end
+            2'd2: begin // terminar el stream del flash y retirarse
+                wl_flash_term <= 1'b1;
+                if (!wdbg_busy) begin
+                    wl_flash_term <= 1'b0;
+                    wl_active <= 1'b0;
+                    wl_done <= 1'b1;
+                    wl_state <= 2'd3;
+                end
+            end
+            default: ;
+            endcase
+`endif
+
+            if (wdbg_wr_stb && !wl_active) begin
                 case (bus_addr[1:0])
                 2'b00: wdbg_addr[7:0]   <= cpu_dout;
                 2'b01: wdbg_addr[15:8]  <= cpu_dout;
@@ -2093,7 +2159,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 end
                 endcase
             end
-            else if (wdbg_rd37_stb && !wdbg_busy) begin
+            else if (wdbg_rd37_stb && !wdbg_busy && !wl_active) begin
                 // devolvio el byte prefetchado: encadenar prefetch de addr+1
                 wdbg_addr <= wdbg_addr + 22'd1;
                 wdbg_we <= 1'b0;
@@ -2114,6 +2180,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .ready      (wdbg_ready),
         .clk_27     (clk27_video),   // misma topologia que el ref de nand2mario
         .clk_g50    (ex_clk_27m),    // pad de 50MHz (mal llamado)
+        .pll27_lock (pll27_lock),    // _87: calibracion estable entre boots
         .ddr_addr   (ddr_addr),
         .ddr_bank   (ddr_bank),
         .ddr_cs     (ddr_cs),
@@ -2780,12 +2847,21 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .CS(mspi_cs),
         .MISO(mspi_miso),
         .MOSI(mspi_mosi),
+`ifdef ENABLE_WAVE_LOADER
+        // _87: el loader YRW801 toma el puerto de LECTURA cuando el pack ya
+        // esta streameado (flash_idle) — el FSM del pack queda parado en
+        // STATE_IDLE y el mux le devuelve el control al terminar
+        .addr(wl_active ? wl_flash_addr : ff_flash_addr),
+        .rd(wl_active ? wl_flash_rd : ff_flash_rd),
+        .terminate(wl_active ? wl_flash_term : ff_flash_terminate),
+`else
         .addr(ff_flash_addr),
         .rd(ff_flash_rd),
+        .terminate(ff_flash_terminate),
+`endif
         .dout(flash_dout),
         .data_ready(flash_data_ready),
         .busy(flash_busy),
-        .terminate(ff_flash_terminate),
         .write_enable(config_flash_write_ff),
         .write_din(flash_write_din),
         .write_busy(flash_write_busy),

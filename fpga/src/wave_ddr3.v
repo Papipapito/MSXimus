@@ -36,6 +36,7 @@ module wave_ddr3 (
     // ---- relojes ----
     input  wire        clk_27,        // 27MHz (cascada de video, como el ref)
     input  wire        clk_g50,       // pad 50MHz (ex_clk_27m)
+    input  wire        pll27_lock,    // _87: lock del arbol de 27 (como el ref)
 
     // ---- pines DDR3 (del SOM) ----
     output wire [14:0] ddr_addr,
@@ -56,15 +57,35 @@ module wave_ddr3 (
 );
 
 // ---------------------------------------------------------------------------
-// power-on delay para el reset del PLL DDR3 (el ref usa ~pll_lock_27; nuestro
-// pll_27 no expone lock -> retardo de ~1.3ms sobre el cristal, mismo efecto)
+// reset del PLL DDR3: power-on delay Y ADEMAS lock real del arbol de 27 (_87)
+// — el retardo fijo a secas de la _86 daba CALIBRACION DE LOTERIA entre
+// arranques (a veces soltaba el PLL con el 27 aun asentandose)
 // ---------------------------------------------------------------------------
 reg [15:0] por_cnt = 16'd0;
 reg        por_done = 1'b0;
 always @(posedge clk_g50) begin
     if (!por_done) begin
-        por_cnt <= por_cnt + 16'd1;
-        if (&por_cnt) por_done <= 1'b1;
+        if (pll27_lock) begin              // no contar hasta que el 27 este vivo
+            por_cnt <= por_cnt + 16'd1;
+            if (&por_cnt) por_done <= 1'b1;
+        end
+        else por_cnt <= 16'd0;
+    end
+end
+
+// _87: WATCHDOG de calibracion — si el PHY no calibra en ~42ms, pulso de
+// reset a la IP y reintento (cada ~42ms hasta conseguirlo)
+reg [21:0] wd_cnt = 22'd0;
+reg        wd_rst = 1'b0;
+wire       ip_rst_n = ~wd_rst;
+always @(posedge clk_g50) begin
+    if (init_calib_complete || !por_done) begin
+        wd_cnt <= 22'd0;
+        wd_rst <= 1'b0;
+    end
+    else begin
+        wd_cnt <= wd_cnt + 22'd1;
+        wd_rst <= (wd_cnt[21] && (wd_cnt[20:8] == 13'd0));  // pulso 256 ciclos/42ms
     end
 end
 
@@ -134,7 +155,7 @@ DDR3_Memory_Interface_Top u_ddr3 (
     .memory_clk      (memory_clk),
     .pll_stop        (pll_stop),
     .clk             (clk_g50),
-    .rst_n           (1'b1),
+    .rst_n           (ip_rst_n),     // _87: watchdog de recalibracion
     .cmd_ready       (app_rdy),
     .cmd             (app_cmd),
     .cmd_en          (app_en),

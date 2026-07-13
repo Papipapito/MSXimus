@@ -7,12 +7,14 @@
 //Device Version: B
 //Created Time: Thu Nov  7 22:59:55 2024
 
-module pll_27 (clkout0, clkin);
+module pll_27 (clkout0, clkin, lock_o);   // _87: lock expuesto (reset del PLL DDR3)
 
 output clkout0;
+output lock_o;
 input clkin;
 
 wire lock;
+assign lock_o = lock;
 wire clkout1;
 wire clkout2;
 wire clkout3;
