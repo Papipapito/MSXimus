@@ -736,6 +736,119 @@ ddr_end:
 	WaitSpace();
 }
 
+//-----------------------------------------------------------------------------
+// MoonSound WAVE (_89): motor PCM YMF278B (srg320) + YRW801 en DDR3.
+// Puertos 7E (selector/status) y 7F (dato); los regs wave requieren NEW2=1
+// (bank1 reg 05 bit1). El status de C4 lleva ahora bit1=LD (cargando header)
+// y bit0=BUSY del wave, como el chip real.
+//-----------------------------------------------------------------------------
+__sfr __at(0x7E) g_MoonSel;
+
+void MoonWr(u8 reg, u8 v) { g_MoonSel = reg; g_Opl4Wave = v; }
+u8   MoonRd(u8 reg) { g_MoonSel = reg; return g_Opl4Wave; }
+
+// espera a que el header de la onda termine de cargar (~300us; LD en bit1 del
+// STATUS C4 — leer C4 ademas rearma el flag como en el chip real)
+void MoonWaitLD()
+{
+	for (u16 t = 0; t < 2000; ++t)
+		if (!(g_Opl4Sel0 & 0x02)) return;
+}
+
+// programa y dispara una nota: wave 9 bits, fnum 10 bits, oct con signo
+void MoonKeyOn(u8 slot, u16 wave, u16 fnum, u8 oct)
+{
+	MoonWr(0x20 + slot, (u8)((fnum << 1) | (wave >> 8)));   // FNUM[6:0] | WTN8
+	MoonWr(0x38 + slot, (u8)((oct << 4) | ((fnum >> 7) << 1))); // OCT | FNUM[9:7]
+	MoonWr(0x50 + slot, 0x01);                              // TL=0 (max), LD=1
+	MoonWr(0x08 + slot, (u8)wave);                          // dispara carga header
+	MoonWaitLD();
+	MoonWr(0x68 + slot, 0x80);                              // KEY on, pan centro
+}
+
+void TestOPL4Wave()
+{
+	u8 id0, id1;
+	bool det;
+
+	Screen0();
+	Print_DrawTextAt(1, 1, "MOONSOUND WAVE (YMF278B) _89");
+
+	// NEW/NEW2 (imprescindible para tocar los regs wave)
+	Opl4Wr1(0x05, 0x03);
+
+	// deteccion: reg 02 = 0x20|modo. El stub de la _85-_88 devuelve 0x20
+	// SIEMPRE -> se escribe modo 0x11 y se relee: el motor real refleja 0x31
+	id0 = MoonRd(0x02);
+	MoonWr(0x02, 0x11);
+	id1 = MoonRd(0x02);
+	MoonWr(0x02, 0x00);
+	det = (id0 == 0x20) && (id1 == 0x31);
+
+	Print_DrawTextAt(1, 3, "Motor PCM: ");
+	Print_DrawText(det ? "SI" : "NO (stub/core viejo)");
+	Print_DrawText(" ");
+	PrintU8Hex2(id0); PrintU8Hex2(id1);
+	if (!det) goto wave_end;
+
+	// si el loader aun copia la YRW801, esperar (bit2 del puerto 36)
+	if (g_WavA2 != 0xFF && (g_WavA2 & 0x04))
+	{
+		Print_DrawTextAt(1, 5, "YRW801: cargando...");
+		while ((g_WavA2 & 0x04) && !KeyDown(KEY_SPACE)) Halt();
+	}
+
+	// YRW801 leida POR EL MOTOR (regs 3-6) vs puerto debug DDR3 (34-37):
+	// si coinciden, el camino motor->DDR3 esta entero
+	{
+		u8 be[8], bd[8], eq = 1;
+		MoonWr(0x02, 0x01);                  // MEMMODE on
+		MoonWr(0x03, 0x00); MoonWr(0x04, 0x00); MoonWr(0x05, 0x00);
+		for (u8 i = 0; i < 8; ++i) be[i] = MoonRd(0x06);
+		MoonWr(0x02, 0x00);
+		WavSetAddr(0x00, 0x00, 0x00);        // mismo origen via puerto debug
+		for (u8 i = 0; i < 8; ++i) { bd[i] = g_WavDat; WAV_WAIT(); }
+		for (u8 i = 0; i < 8; ++i) if (be[i] != bd[i]) eq = 0;
+		Print_DrawTextAt(1, 5, "Motor lee YRW801: ");
+		for (u8 i = 0; i < 8; ++i) PrintU8Hex2(be[i]);
+		Print_DrawTextAt(1, 6, eq ? "  == puerto debug: OK"
+		                          : "  != puerto debug: FALLO");
+	}
+
+	// RAM de muestras (0x200000+, el bit21 que faltaba): escribir y releer
+	{
+		u8 v0, v1, v2;
+		MoonWr(0x02, 0x01);
+		MoonWr(0x03, 0x20); MoonWr(0x04, 0x00); MoonWr(0x05, 0x00);
+		MoonWr(0x06, 0xA5); MoonWr(0x06, 0x5A); MoonWr(0x06, 0xC3);
+		MoonWr(0x03, 0x20); MoonWr(0x04, 0x00); MoonWr(0x05, 0x00);
+		v0 = MoonRd(0x06); v1 = MoonRd(0x06); v2 = MoonRd(0x06);
+		MoonWr(0x02, 0x00);
+		Print_DrawTextAt(1, 8, "RAM muestras 2MB: ");
+		Print_DrawText((v0 == 0xA5 && v1 == 0x5A && v2 == 0xC3) ? "OK" : "ERR ");
+		if (v0 != 0xA5) { PrintU8Hex2(v0); PrintU8Hex2(v1); PrintU8Hex2(v2); }
+	}
+
+	// sonido: arpegio + acorde con la onda 0 de la YRW801 (piano). OCT=1 =
+	// pitch nativo de la muestra; fnum aprox. por semitonos (1024*(2^(s/12)-1))
+	Print_DrawTextAt(1, 10, "Arpegio wave 0 (piano YRW801)...");
+	MoonWr(0xF9, 0x00);                      // mezcla PCM a 0dB (por si acaso)
+	MoonKeyOn(0, 0, 0, 1);                   // C  (pitch nativo)
+	for (volatile u16 w = 0; w < 30000; ++w) {}
+	MoonKeyOn(1, 0, 266, 1);                 // E  (+4 semitonos)
+	for (volatile u16 w = 0; w < 30000; ++w) {}
+	MoonKeyOn(2, 0, 510, 1);                 // G  (+7)
+	for (volatile u16 w = 0; w < 30000; ++w) {}
+	MoonKeyOn(3, 0, 0, 2);                   // C  (+octava)
+	Print_DrawTextAt(1, 12, "Acorde sonando - ESPACIO corta");
+	WaitSpace();
+	for (u8 s = 0; s < 4; ++s) MoonWr(0x68 + s, 0x40);   // key off + damp
+
+wave_end:
+	Print_DrawTextAt(1, 22, "ESPACIO para seguir");
+	WaitSpace();
+}
+
 //=============================================================================
 // MAIN
 //=============================================================================
@@ -753,13 +866,15 @@ void main()
 		Print_DrawTextAt(1, 5,  "2) MoonSound FM: detecta/reloj");
 		Print_DrawTextAt(1, 6,  "   + Entertainer en OPL3");
 		Print_DrawTextAt(1, 7,  "3) DDR3 wave: calibracion+W/R");
-		Print_DrawTextAt(1, 9,  "(la musica se corta con ESPACIO)");
+		Print_DrawTextAt(1, 8,  "4) MoonSound WAVE: motor PCM");
+		Print_DrawTextAt(1, 10, "(la musica se corta con ESPACIO)");
 		Print_DrawTextAt(1, 22, "ESPACIO = empezar");
 		WaitSpace();
 
 		TestY8950();
 		TestOPL4FM();
 		TestWaveDDR3();
+		TestOPL4Wave();
 
 		Screen0();
 		Print_DrawTextAt(1, 1, "FIN - ESPACIO = repetir");

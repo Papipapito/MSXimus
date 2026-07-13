@@ -240,7 +240,11 @@ begin
 end
 
 logic [2:0] mode = 3'd1;
-logic [23:0] video_data = 24'd0;
+// MSXimus _89: syn_preserve — Gowin fusionaba los video_data equivalentes
+// de las instancias NTSC y PAL en uno solo, doblando el fanout hacia los
+// dos codificadores TMDS y rompiendo timing por -0.17ns. Sin fusion cada
+// instancia alimenta solo su TMDS local. Cambio NO funcional.
+logic [23:0] video_data /* synthesis syn_preserve = 1 */ = 24'd0;
 logic [5:0] control_data = 6'd0;
 logic [11:0] data_island_data = 12'd0;
 

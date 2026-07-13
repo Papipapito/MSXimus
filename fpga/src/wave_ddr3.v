@@ -33,6 +33,25 @@ module wave_ddr3 (
     output reg         done_toggle,   // flip = operacion completada
     output wire        ready,         // calibracion DDR3 completada (sync)
 
+    // ---- puerto del motor PCM OPL4 (_89) ----
+    // El motor vive en eng_clk = clk_x1/2 = 37.125MHz (a 74.25 la cadena de
+    // envolvente del YMF278B necesita ~19ns y solo hay 13.5; a 37.125 tiene
+    // 27). Reloj GENERADO sincrono con clk_x1: los cruces son paths normales
+    // analizados por STA, no CDC. La FSM de este modulo sigue a clk_x1;
+    // eng_req dura 2 ciclos x1 (inofensivo: el latch de pendiente es
+    // idempotente) y la vuelta es un TOGGLE para que el dominio lento no
+    // pierda pulsos.
+    output wire        clk_x1_out,    // clk_x1 crudo: top hace el /2 (el net
+                                      // del divisor debe ser TOP-LEVEL para
+                                      // que el get_nets del .sdc lo encuentre,
+                                      // como VideoDHClk)
+    input  wire        eng_req,       // pulso 1 ciclo eng_clk = nueva operacion
+    input  wire        eng_we,
+    input  wire [21:0] eng_addr,
+    input  wire [7:0]  eng_wdata,
+    output reg  [7:0]  eng_rdata,     // registrado, estable hasta la proxima
+    output reg         eng_done_t,    // TOGGLE = operacion completada
+
     // ---- relojes ----
     input  wire        clk_27,        // 27MHz (cascada de video, como el ref)
     input  wire        clk_g50,       // pad 50MHz (ex_clk_27m)
@@ -197,12 +216,26 @@ DDR3_Memory_Interface_Top u_ddr3 (
 
 // ---------------------------------------------------------------------------
 // FSM del puerto de bytes (clk_x1): toggle-handshake 2FF con el lado MSX
+// + puerto del motor PCM (_89, mismo dominio, PRIORIDAD sobre el host: el
+//   motor tiene deadline duro — su CE esta congelado mientras espera)
 // ---------------------------------------------------------------------------
-reg req_s1, req_s2, req_ack;      // sync del toggle de peticion
+assign clk_x1_out = clk_x1;
+
+reg req_s1, req_s2, req_ack;      // sync del toggle de peticion (host)
 reg [7:0] rdata_x1;
 reg done_x1;                       // toggle de completado (dominio x1)
 
-// entrada cuasi-estatica: addr/we/wdata estables mientras dura el handshake
+reg        eng_pend;               // peticion del motor latcheada
+reg        eng_req_d;              // el pulso eng_req dura 2 ciclos x1: FLANCO
+reg        eng_we_l;
+reg [21:0] eng_addr_l;
+reg [7:0]  eng_wdata_l;
+
+reg        op_eng;                 // op en curso: 1=motor, 0=host
+reg        op_we;
+reg [21:0] op_addr;
+reg [7:0]  op_wdata;
+
 reg [1:0] st;
 localparam ST_IDLE = 2'd0, ST_ISSUE = 2'd1, ST_WAITRD = 2'd2;
 
@@ -213,6 +246,10 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         app_cmd <= 3'd0; app_addr <= 28'd0;
         app_wdf_data <= 128'd0; app_wdf_mask <= 16'hFFFF;
         st <= ST_IDLE; done_x1 <= 1'b0; rdata_x1 <= 8'd0;
+        eng_pend <= 1'b0; eng_req_d <= 1'b0; eng_we_l <= 1'b0;
+        eng_addr_l <= 22'd0; eng_wdata_l <= 8'd0;
+        op_eng <= 1'b0; op_we <= 1'b0; op_addr <= 22'd0; op_wdata <= 8'd0;
+        eng_rdata <= 8'd0; eng_done_t <= 1'b0;
     end
     else begin
         req_s1 <= req_toggle;
@@ -220,22 +257,45 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         app_en <= 1'b0;
         app_wdf_wren <= 1'b0;
 
+        eng_req_d <= eng_req;
+        if (eng_req && !eng_req_d) begin   // FLANCO: el pulso dura 2 ciclos x1
+            eng_pend   <= 1'b1;            // (sin esto la peticion se ejecutaba
+            eng_we_l   <= eng_we;          //  DOS veces y el toggle de done
+            eng_addr_l <= eng_addr;        //  quedaba en contrafase)
+            eng_wdata_l <= eng_wdata;
+        end
+
         case (st)
         ST_IDLE:
-            if ((req_s2 != req_ack) && init_calib_complete) begin
-                req_ack <= req_s2;
-                st <= ST_ISSUE;
+            if (init_calib_complete) begin
+                if (eng_pend) begin              // motor primero (deadline)
+                    eng_pend <= 1'b0;
+                    op_eng  <= 1'b1;
+                    op_we   <= eng_we_l;
+                    op_addr <= eng_addr_l;
+                    op_wdata <= eng_wdata_l;
+                    st <= ST_ISSUE;
+                end
+                else if (req_s2 != req_ack) begin
+                    req_ack <= req_s2;
+                    op_eng  <= 1'b0;
+                    op_we   <= we;              // host: cuasi-estatico
+                    op_addr <= addr;
+                    op_wdata <= wdata;
+                    st <= ST_ISSUE;
+                end
             end
         ST_ISSUE:
             if (app_rdy && app_wdf_rdy) begin
-                app_addr <= {7'd0, addr[21:4], 3'b000};  // rafaga alineada (unidades = palabras de 16b)
-                if (we) begin
+                app_addr <= {7'd0, op_addr[21:4], 3'b000};  // rafaga alineada (palabras de 16b)
+                if (op_we) begin
                     app_cmd <= 3'b000;
                     app_en <= 1'b1;
                     app_wdf_wren <= 1'b1;
-                    app_wdf_data <= {16{wdata}};
-                    app_wdf_mask <= ~(16'h0001 << addr[3:0]);   // DM: 1=no escribir
-                    done_x1 <= ~done_x1;                         // write = fire&forget
+                    app_wdf_data <= {16{op_wdata}};
+                    app_wdf_mask <= ~(16'h0001 << op_addr[3:0]);   // DM: 1=no escribir
+                    if (op_eng) eng_done_t <= ~eng_done_t;         // write = fire&forget
+                    else        done_x1 <= ~done_x1;
                     st <= ST_IDLE;
                 end
                 else begin
@@ -246,8 +306,14 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
             end
         ST_WAITRD:
             if (app_rd_data_valid) begin
-                rdata_x1 <= app_rd_data[addr[3:0]*8 +: 8];
-                done_x1 <= ~done_x1;
+                if (op_eng) begin
+                    eng_rdata <= app_rd_data[op_addr[3:0]*8 +: 8];
+                    eng_done_t <= ~eng_done_t;
+                end
+                else begin
+                    rdata_x1 <= app_rd_data[op_addr[3:0]*8 +: 8];
+                    done_x1 <= ~done_x1;
+                end
                 st <= ST_IDLE;
             end
         default: st <= ST_IDLE;

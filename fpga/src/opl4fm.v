@@ -36,6 +36,8 @@ module opl4fm (
     input  wire [7:0]  addr,
     input  wire [7:0]  din,
 
+    input  wire [1:0]  wave_status,  // _89: {LD,BUSY} del motor PCM (OR en C4/C6)
+
     output wire        fm_rd,        // lectura C4-C7 en curso (para el mux)
     output wire        wave_rd,      // lectura 7Fh en curso (stub wave)
     output wire [7:0]  dout,         // dato C4-C7 (status/shadow)
@@ -85,9 +87,11 @@ always @(posedge clk_host or negedge rst_n) begin
     end
 end
 
-// mux de lectura: status del core en C4/C6, registro shadow en C5/C7
+// mux de lectura: status del core en C4/C6, registro shadow en C5/C7.
+// _89: el status del YMF278B real mezcla los flags FM (timers, bits 5-7)
+// con los del wave (bit1=LD, bit0=BUSY) — se ORean los del motor PCM.
 wire [7:0] opl3_dout;
-assign dout = (addr[0] == 1'b0) ? opl3_dout :                 // C4/C6: status
+assign dout = (addr[0] == 1'b0) ? (opl3_dout | {6'b000000, wave_status}) : // C4/C6
               (addr[1] == 1'b0) ? shadow_b0[sel_reg_b0] :     // C5: bank 0
                                   shadow_b1[sel_reg_b1];      // C7: bank 1
 

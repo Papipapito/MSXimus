@@ -24,6 +24,7 @@
 `define ENABLE_OPL4FM       // F2 (_82-_85): MoonSound FM (OPL3) en C4-C7 + stub wave 7E/7F. VALIDADO EN HW (reloj 96/98, limpio)
 `define ENABLE_WAVE_DDR3    // F2 (_86): bring-up de la DDR3 del SOM para la memoria de ondas OPL4 (cliente independiente + puerto debug I/O 34-37h). Fase wavetable
 `define ENABLE_WAVE_LOADER  // F2 (_87): carga de la YRW801 (2MB) de flash 0x500000 a DDR3 en BACKGROUND tras el boot (no bloquea el arranque). Status: bit2 de IN 36h = cargando
+`define ENABLE_OPL4_WAVE    // F2 (_89): motor PCM 24 slots del OPL4 (YMF278B.sv de srg320 + permiso) en clk_x1 de la DDR3, CE fraccionario 44.1kHz con stall. REQUIERE ENABLE_WAVE_DDR3+LOADER. Con esto el MoonSound esta COMPLETO (FM+wavetable)
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
@@ -154,6 +155,7 @@ end
     // 3.58MHz CPU clock generated internally. (Ported verbatim from MSXnano/fpga/top.v.)
     wire [7:0] ex_bus_data;          // internal (no external bus); see assign below
     wire ex_bus_wait_n  = 1'b1;      // no external wait
+    wire opl4pcm_wait_n;             // _89: /WAIT del motor PCM OPL4 (IN 7Fh)
     wire ex_bus_int_n   = 1'b1;      // INT comes from internal VDP only
 
     wire clock_locked;
@@ -728,7 +730,11 @@ assign keyboard_addr = ppi_port_c[3:0];
                     `endif
                     `ifdef ENABLE_OPL4FM
                      ( opl4fm_rd_w == 1 ) ? opl4fm_dout :     // C4-C7: status/shadow del OPL3
+                     `ifdef ENABLE_OPL4_WAVE
+                     ( opl4pcm_rd_w == 1 ) ? opl4pcm_dout :   // 7E/7F: motor PCM real (_89)
+                     `else
                      ( opl4wave_rd_w == 1 ) ? opl4wave_dout : // 7F: stub wave (device ID)
+                     `endif
                     `endif
                     `ifdef ENABLE_WAVE_DDR3
                      ( wdbg_rd36_w == 1 ) ? wdbg_status :     // 36h: {busy, ready}
@@ -1201,15 +1207,15 @@ assign keyboard_addr = ppi_port_c[3:0];
     `endif
     `ifdef ENABLE_WIFI
       `ifndef ENABLE_WAIT_ADAPTIVE
-        .WAIT_n    (bus_wait_n & wait_uart),
+        .WAIT_n    (bus_wait_n & wait_uart & opl4pcm_wait_n),
       `else
-        .WAIT_n    (wait_uart),
+        .WAIT_n    (wait_uart & opl4pcm_wait_n),
       `endif
     `else
       `ifndef ENABLE_WAIT_ADAPTIVE
-        .WAIT_n    (bus_wait_n),
+        .WAIT_n    (bus_wait_n & opl4pcm_wait_n),
       `else
-        .WAIT_n    (1),
+        .WAIT_n    (opl4pcm_wait_n),
       `endif
     `endif
     `ifdef ENABLE_V9958
@@ -2182,6 +2188,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .rdata      (wdbg_rdata),
         .done_toggle(wdbg_done),
         .ready      (wdbg_ready),
+        .clk_x1_out (weng_x1),       // _89: puerto del motor PCM
+        .eng_req    (weng_req),
+        .eng_we     (weng_we),
+        .eng_addr   (weng_addr),
+        .eng_wdata  (weng_wdata),
+        .eng_rdata  (weng_rdata),
+        .eng_done_t (weng_done),
         .clk_27     (clk27_video),   // misma topologia que el ref de nand2mario
         .clk_g50    (ex_clk_27m),    // pad de 50MHz (mal llamado)
         .pll27_lock (pll27_lock),    // _87: calibracion estable entre boots
@@ -2233,6 +2246,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .m1_n      (bus_m1_n),
         .addr      (bus_addr[7:0]),
         .din       (cpu_dout),
+        .wave_status (opl4wave_status),  // _89: {LD,BUSY} del motor en C4/C6
         .fm_rd     (opl4fm_rd_w),
         .wave_rd   (opl4wave_rd_w),
         .dout      (opl4fm_dout),
@@ -2245,6 +2259,62 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign opl4fm_dout   = 8'hFF;
     assign opl4wave_dout = 8'hFF;
     assign opl4fm_wav    = 16'sd0;
+`endif
+
+    // ===== MoonSound WAVE (_89): motor PCM 24 slots (srg320) en clk_x1 =====
+    // El motor vive en el dominio clk_x1 de la propia DDR3 (74.25MHz) con CE
+    // fraccionario 33.8688MHz medio -> 44.1kHz exactos; el fetch de onda va
+    // directo al puerto eng_* de wave_ddr3 SIN CDC. Arranca en reset hasta
+    // que la DDR3 calibra Y el loader ha copiado la YRW801.
+    wire        opl4pcm_rd_w;
+    wire [7:0]  opl4pcm_dout;
+    wire [1:0]  opl4wave_status;
+    wire signed [15:0] opl4pcm_l, opl4pcm_r;
+    wire        weng_x1;                 // clk_x1 de la DDR3 (74.25MHz)
+    // reloj del motor = clk_x1/2. El divisor vive AQUI para que el net sea
+    // top-level y el create_generated_clock del .sdc lo encuentre (mismo
+    // patron que VideoDHClk). Nombre del net: opl4_clk37.
+    reg         opl4_clk37 = 1'b0;
+    always @(posedge weng_x1) opl4_clk37 <= ~opl4_clk37;
+    wire        weng_req, weng_we, weng_done;
+    wire [21:0] weng_addr;
+    wire [7:0]  weng_wdata, weng_rdata;
+`ifdef ENABLE_OPL4_WAVE
+    wire opl4pcm_rst_n = bus_reset_n & wdbg_ready & wl_done;
+
+    opl4_pcm uopl4pcm (
+        .rst_n       (bus_reset_n),
+        .clk_host    (clk_54m),
+        .iorq_n      (bus_iorq_n),
+        .rd_n        (bus_rd_n),
+        .wr_n        (bus_wr_n),
+        .m1_n        (bus_m1_n),
+        .addr        (bus_addr[7:0]),
+        .din         (cpu_dout),
+        .wave_rd     (opl4pcm_rd_w),
+        .wave_dout   (opl4pcm_dout),
+        .wave_wait_n (opl4pcm_wait_n),
+        .wave_status (opl4wave_status),
+        .pcm_l       (opl4pcm_l),
+        .pcm_r       (opl4pcm_r),
+        .clk_eng     (opl4_clk37),    // clk_x1/2 = 37.125MHz (divisor de arriba)
+        .eng_rst_n   (opl4pcm_rst_n),
+        .mem_req     (weng_req),
+        .mem_we      (weng_we),
+        .mem_addr    (weng_addr),
+        .mem_wdata   (weng_wdata),
+        .mem_rdata   (weng_rdata),
+        .mem_done_t  (weng_done)
+    );
+`else
+    assign opl4pcm_rd_w   = 1'b0;
+    assign opl4pcm_dout   = 8'hFF;
+    assign opl4pcm_wait_n = 1'b1;
+    assign opl4wave_status = 2'b00;
+    assign opl4pcm_l = 16'sd0;
+    assign opl4pcm_r = 16'sd0;
+    assign weng_req = 1'b0;  assign weng_we = 1'b0;
+    assign weng_addr = 22'd0; assign weng_wdata = 8'd0;
 `endif
 
     //scc & ghost scc
@@ -2491,15 +2561,23 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // _83: OPL3 ya sale a nivel nativo (como jt2413_wav) — sin >>1
     wire [15:0] opl4fm_term      = opl4fm_wav;
 
+    // _89: PCM del MoonSound (motor YMF278B). Mono = (L+R)/2 con extension de
+    // signo EXPLICITA (leccion _85: las concatenaciones son unsigned) y >>1
+    // de margen como el ADPCM; en estereo, L y R nativos a cada canal.
+    wire signed [16:0] opl4pcm_sum = {opl4pcm_l[15], opl4pcm_l} + {opl4pcm_r[15], opl4pcm_r};
+    wire [15:0] opl4pcm_term   = {opl4pcm_sum[16], opl4pcm_sum[16:2]};       // (L+R)/2 >>1
+    wire [15:0] opl4pcm_term_l = {opl4pcm_l[15], opl4pcm_l[15:1]};           // L>>1
+    wire [15:0] opl4pcm_term_r = {opl4pcm_r[15], opl4pcm_r[15:1]};           // R>>1
+
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
             if (config_enable_stereo == 1) begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
-                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term_l;
+                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term_r;
             end
             else begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
-                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term;
+                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term;
             end
         end
     end
@@ -2515,6 +2593,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [15:0] audio_sample_r;
     wire megaram_wrt;
     wire y8950_int_n = 1'b1;   // _81: sin sonido no hay Y8950
+    assign opl4pcm_wait_n = 1'b1;  // _89: sin sonido no hay motor PCM
 
 `endif
 
