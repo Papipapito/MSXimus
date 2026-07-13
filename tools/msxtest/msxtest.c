@@ -935,6 +935,31 @@ void TestOPL4FM()
 	Print_DrawText("  wave-id=");
 	PrintU8Hex2(wid);
 
+	// --- v7: MEDIR EL RELOJ REAL del OPL3 con su propio timer T1 ---
+	// T1 con preset 0 = 256 ticks de 80us = 20.48ms por desborde (a reloj
+	// nominal): ~98 desbordes en 2.0s. Si el core corre rapido (PLL mal),
+	// la cuenta sube proporcionalmente ("tono agudo" = cuenta alta).
+	// Mismo conteo en el Y8950 (reloj 3.58M conocido-bueno) como CONTROL.
+	// El flag queda pegado hasta el clear -> el polling no pierde desbordes.
+	// (el Y8950 no necesita control: su afinacion ya esta validada en HW, y
+	//  ademas su IRQ esta cableada — un flag visible aqui daria tormenta)
+	{
+		u16 t0; u16 cO = 0; u8 fifty;
+		fifty = (*(volatile u8*)0x002B & 0x80) ? 1 : 0;
+
+		Opl4Wr0(0x04, 0x60); Opl4Wr0(0x04, 0x80);
+		Opl4Wr0(0x02, 0x00);             // T1 periodo maximo (20.48ms/desborde)
+		Opl4Wr0(0x04, 0x01);             // arranca (OPL4 sin IRQ cableada = seguro)
+		t0 = *(volatile u16*)0xFC9E;     // JIFFY
+		while ((u16)(*(volatile u16*)0xFC9E - t0) < 120)
+			if (g_Opl4Sel0 & 0x40) { ++cO; Opl4Wr0(0x04, 0x80); }
+		Opl4Wr0(0x04, 0x60); Opl4Wr0(0x04, 0x80);
+
+		Print_DrawTextAt(1, 6, "Reloj: T1x2s=");
+		PrintU8Dec((u8)(cO > 255 ? 255 : cO));
+		Print_DrawText(fifty ? " (esperado 117)" : " (esperado 98)");
+	}
+
 	Print_DrawTextAt(1, 8,  "Sonando: THE ENTERTAINER (Joplin)");
 	Print_DrawTextAt(1, 10, "ahora en el OPL3 del MoonSound:");
 	Print_DrawTextAt(1, 11, "melodia + bajo, timbre OPL3");
@@ -979,6 +1004,14 @@ void TestOPL4FM()
 	}
 
 	for (u8 c = 0; c < 9; ++c) Opl4KeyOff(c);
+	// v7: mute de verdad — TL a tope en TODOS los operadores de ambos bancos
+	// (si el residual venia de estado corrupto, esto lo calla si o si)
+	for (u8 i = 0; i < 9; ++i)
+	{
+		u8 s = g_AudOpOfs[i];
+		Opl4Wr0(0x40 + s, 0x3F); Opl4Wr0(0x43 + s, 0x3F);
+		Opl4Wr1(0x40 + s, 0x3F); Opl4Wr1(0x43 + s, 0x3F);
+	}
 	Print_DrawTextAt(1, 22, "FIN OPL4-FM - ESPACIO");
 	WaitSpace();
 }
