@@ -8,9 +8,9 @@ DoPackage = true;
 DoDeploy  = false;
 DoRun     = false;
 
-ProjName    = "msxtest";
+ProjName    = "opl4test";
 ProjModules = [ ProjName ];
-LibModules  = [ "system", "bios", "vdp", "print", "input", "memory", "math", "psg", "msx-music", "draw", "clock" ];
+LibModules  = [ "system", "bios", "vdp", "print", "input", "memory", "math", "msx-audio" ];
 
 Machine = "2P";        // MSX2+ (SCREEN 10/12 = YJK del V9958)
 Target  = "ROM_KONAMI_SCC";  // mapper Konami SCC: prueba megaram + chip SCC
@@ -21,4 +21,6 @@ AppID        = "MT";
 
 Verbose           = true;
 CompileComplexity = "Default";
-Optim             = "Speed";  // v13: el codegen de siempre (SIZE rompia SCREEN4 en HW)
+// audio-only: cabe holgado con Speed (el codegen de siempre)
+                              // Optim=Speed (Higher=C286) -> basura/resets.
+                              // SIZE recupera varios KB. GUARD en build.sh.
