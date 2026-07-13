@@ -44,7 +44,6 @@ add_file opl3/tremolo.sv
 add_file opl3/trick_sw_detection.sv
 add_file opl3/vibrato.sv
 add_file src/opl4fm.v
-add_file src/pll_3375.v
 add_file jtopl/jt2413.v
 add_file jtopl/jtopl.v
 add_file jtopl/jtopl2.v

@@ -215,16 +215,12 @@ end
         .clkout1(clk_hdmi5)
     );
 
-`ifdef ENABLE_OPL4FM
-    // _82: reloj del MoonSound FM — 27x40/32 = 33.75 MHz exactos (VCO 1080,
-    // en rango legal). -0.35% vs los 33.8688 nominales; el pkg lo compensa
-    // (CLK_DIV_COUNT=682 -> fs 49.487 kHz, -0.06%).
-    wire clk_opl3;
-    pll_3375 pll_opl3 (
-        .clkin  (clk27_video),
-        .clkout0(clk_opl3)
-    );
-`endif
+    // _84: el OPL3 corre en clk_27m (PLLA principal, HERMANO de clk_54m):
+    // cruce host_if emparentado que el STA cronometra (la afifo llevaba
+    // ASYNC_REG de Xilinx que Gowin ignora — con PLLs distintos el CDC iba
+    // sin blindar: candidato a las escrituras poco fiables de la _82/_83).
+    // Sin 3er PLL. El pkg compensa: CLK_DIV_COUNT=545 -> fs 49.541 kHz
+    // (+0.05%). pll_3375.v queda en el arbol por si se quiere volver.
 
     // JTAG→SPI del companion (estilo C64Nano): los pines JTAG se entregan al
     // fabric (SPI del BL616) solo con el PLL en lock y sin petición de JTAG del
@@ -2021,7 +2017,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     opl4fm uopl4fm (
         .rst_n     (bus_reset_n),
         .clk_host  (clk_54m),
-        .clk_opl3  (clk_opl3),
+        .clk_opl3  (clk_27m),      // _84: reloj hermano (ver nota arriba)
         .iorq_n    (bus_iorq_n),
         .rd_n      (bus_rd_n),
         .wr_n      (bus_wr_n),

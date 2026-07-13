@@ -952,7 +952,16 @@ void TestOPL4FM()
 		Opl4Wr0(0x04, 0x01);             // arranca (OPL4 sin IRQ cableada = seguro)
 		t0 = *(volatile u16*)0xFC9E;     // JIFFY
 		while ((u16)(*(volatile u16*)0xFC9E - t0) < 120)
-			if (g_Opl4Sel0 & 0x40) { ++cO; Opl4Wr0(0x04, 0x80); }
+			if (g_Opl4Sel0 & 0x40)
+			{
+				++cO;
+				// v8: RE-ARRANCAR tras cada clear — este core aplica TODOS
+				// los bits del reg 4 en cada escritura (el 0x80 a secas
+				// tambien escribe ST1=0 y PARA el timer: el "T1x2s=001"
+				// de la v7 nos lo paramos nosotros mismos)
+				Opl4Wr0(0x04, 0x80);
+				Opl4Wr0(0x04, 0x01);
+			}
 		Opl4Wr0(0x04, 0x60); Opl4Wr0(0x04, 0x80);
 
 		Print_DrawTextAt(1, 6, "Reloj: T1x2s=");
@@ -1004,13 +1013,15 @@ void TestOPL4FM()
 	}
 
 	for (u8 c = 0; c < 9; ++c) Opl4KeyOff(c);
-	// v7: mute de verdad — TL a tope en TODOS los operadores de ambos bancos
-	// (si el residual venia de estado corrupto, esto lo calla si o si)
+	// v7: mute — TL a tope en TODOS los operadores de ambos bancos
+	// v8: + DESCONECTAR la salida (bits R/L del reg C0 a 0): aunque un
+	// canal siguiera oscilando con estado corrupto, sin salida no suena
 	for (u8 i = 0; i < 9; ++i)
 	{
 		u8 s = g_AudOpOfs[i];
 		Opl4Wr0(0x40 + s, 0x3F); Opl4Wr0(0x43 + s, 0x3F);
 		Opl4Wr1(0x40 + s, 0x3F); Opl4Wr1(0x43 + s, 0x3F);
+		Opl4Wr0(0xC0 + i, 0x00); Opl4Wr1(0xC0 + i, 0x00);
 	}
 	Print_DrawTextAt(1, 22, "FIN OPL4-FM - ESPACIO");
 	WaitSpace();
