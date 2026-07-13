@@ -776,6 +776,141 @@ void TestY8950()
 }
 
 //-----------------------------------------------------------------------------
+// MoonSound FM / OPL4-FM (_82): OPL3 (YMF262) en C4-C7 + stub wave 7E/7F.
+// Como el Y8950: sin instrumentos de fabrica, todo a registro. OJO OPL3:
+// el reg C0 lleva los bits R/L de salida (0x30) — sin ellos, silencio.
+//-----------------------------------------------------------------------------
+__sfr __at(0xC4) g_Opl4Sel0;    // write: reg bank 0 / read: STATUS
+__sfr __at(0xC5) g_Opl4Dat0;    // write: dato bank 0 / read: reg selecc.
+__sfr __at(0xC6) g_Opl4Sel1;    // write: reg bank 1 / read: status (espejo)
+__sfr __at(0xC7) g_Opl4Dat1;    // write: dato bank 1
+__sfr __at(0x7F) g_Opl4Wave;    // stub wave (lectura: device ID 0x20)
+
+void Opl4Wr0(u8 reg, u8 v) { g_Opl4Sel0 = reg; g_Opl4Dat0 = v; }
+void Opl4Wr1(u8 reg, u8 v) { g_Opl4Sel1 = reg; g_Opl4Dat1 = v; }
+
+void Opl4SetVoice(u8 ch, const u8* v)   // mismo formato de 9 bytes que g_AudPiano
+{
+	u8 s = g_AudOpOfs[ch];
+	Opl4Wr0(0x20 + s, v[0]); Opl4Wr0(0x40 + s, v[1]);
+	Opl4Wr0(0x60 + s, v[2]); Opl4Wr0(0x80 + s, v[3]);
+	Opl4Wr0(0x23 + s, v[4]); Opl4Wr0(0x43 + s, v[5]);
+	Opl4Wr0(0x63 + s, v[6]); Opl4Wr0(0x83 + s, v[7]);
+	Opl4Wr0(0xC0 + ch, 0x30 | v[8]);     // 0x30 = salida R+L (gotcha OPL3)
+}
+
+u8 g_Opl4ShadowB0[9];
+void Opl4KeyOn(u8 ch, u8 note)
+{
+	u8 blk = note / 12 - 1;
+	u16 fn = g_AudFNum[note % 12];       // misma tabla: fs OPL3 = 49.7k
+	u8 b0 = 0x20 | (blk << 2) | (u8)(fn >> 8);
+	Opl4Wr0(0xB0 + ch, g_Opl4ShadowB0[ch] & 0x1F);
+	Opl4Wr0(0xA0 + ch, (u8)fn);
+	Opl4Wr0(0xB0 + ch, b0);
+	g_Opl4ShadowB0[ch] = b0;
+}
+void Opl4KeyOff(u8 ch)
+{
+	g_Opl4ShadowB0[ch] &= 0x1F;
+	Opl4Wr0(0xB0 + ch, g_Opl4ShadowB0[ch]);
+}
+
+void TestOPL4FM()
+{
+	u8 st1, st2, rb, wid;
+	bool det, okrb;
+
+	Screen0();
+	Print_DrawTextAt(1, 1, "MOONSOUND FM (OPL4/OPL3) _82");
+
+	// --- deteccion AdLib por timers (bajo DI, la disciplina de siempre) ---
+	__asm__("di");
+	Opl4Wr0(0x04, 0x60);                 // mask T1+T2
+	Opl4Wr0(0x04, 0x80);                 // IRQ reset
+	st1 = g_Opl4Sel0;                    // status: bits 7:5 deben ser 0
+	Opl4Wr0(0x02, 0xC0);                 // T1 = (256-192)*80us = 5.12ms
+	Opl4Wr0(0x04, 0x01);                 // arranca T1 sin mascara
+	for (volatile u16 w = 0; w < 8000; ++w) {}
+	st2 = g_Opl4Sel0;                    // espera IRQ(b7)+FT1(b6)
+	Opl4Wr0(0x04, 0x60);                 // parar + mask
+	Opl4Wr0(0x04, 0x80);                 // limpiar
+	__asm__("ei");
+	det = ((st1 & 0xE0) == 0) && ((st2 & 0xC0) == 0xC0);
+
+	Print_DrawTextAt(1, 3, "Detectado: ");
+	Print_DrawText(det ? "SI" : "NO << FALLO");
+	Print_DrawText("  ");
+	PrintU8Hex2(st1); Print_DrawText("->"); PrintU8Hex2(st2);
+	if (!det)
+	{
+		Print_DrawTextAt(1, 22, "ESPACIO para seguir");
+		WaitSpace();
+		return;
+	}
+
+	// --- read-back de registros (shadow; el YMF278B real es legible) ---
+	Opl4Wr0(0x20, 0x55);
+	g_Opl4Sel0 = 0x20;                   // dejar seleccionado el reg 0x20
+	rb = g_Opl4Dat0;                     // lectura C5 = registro selecc.
+	okrb = (rb == 0x55);
+	Opl4Wr0(0x20, 0x00);
+	wid = g_Opl4Wave;                    // 7F: device ID (0x20 en el stub)
+
+	Print_DrawTextAt(1, 5, "Readback: ");
+	Print_DrawText(okrb ? "OK" : "MAL");
+	Print_DrawText("  wave-id=");
+	PrintU8Hex2(wid);
+
+	Print_DrawTextAt(1, 8,  "Sonando: THE ENTERTAINER (Joplin)");
+	Print_DrawTextAt(1, 10, "ahora en el OPL3 del MoonSound:");
+	Print_DrawTextAt(1, 11, "melodia + bajo, timbre OPL3");
+	Print_DrawTextAt(1, 20, "En bucle... ESPACIO = terminar");
+
+	// --- setup: modo OPL3 (NEW=1) + voces + player de 2 pistas ---
+	Opl4Wr1(0x05, 0x01);                 // NEW=1 (modo OPL3)
+	Opl4Wr0(0x01, 0x00);
+	Opl4Wr0(0xBD, 0x00);
+	for (u8 c = 0; c < 9; ++c) { g_Opl4ShadowB0[c] = 0; Opl4KeyOff(c); }
+	Opl4SetVoice(0, g_AudPiano);
+	Opl4SetVoice(1, g_AudBass);
+
+	{
+		MusTrack trk[2];
+		u8 tick = (*(volatile u8*)0x002B & 0x80) ? 8 : 10;
+		trk[0].seq = g_AudMelody;  trk[0].len = numberof(g_AudMelody);  trk[0].ch = 0;
+		trk[1].seq = g_AudBassSeq; trk[1].len = numberof(g_AudBassSeq); trk[1].ch = 1;
+		for (u8 t = 0; t < 2; ++t) { trk[t].idx = 0; trk[t].left = 0; }
+		for (;;)
+		{
+			// mismo secuenciador pero con key-on/off del OPL3
+			for (u8 t = 0; t < 2; ++t)
+			{
+				MusTrack* k = &trk[t];
+				if (k->left)
+				{
+					--k->left;
+					if (k->left == 1) Opl4KeyOff(k->ch);
+					if (k->left) continue;
+				}
+				{
+					const MusEv* e = &k->seq[k->idx];
+					k->idx = (u8)((k->idx + 1) % k->len);
+					k->left = e->dur;
+					if (e->note) Opl4KeyOn(k->ch, e->note);
+					else         Opl4KeyOff(k->ch);
+				}
+			}
+			if (WaitFramesOrSpace(tick)) break;
+		}
+	}
+
+	for (u8 c = 0; c < 9; ++c) Opl4KeyOff(c);
+	Print_DrawTextAt(1, 22, "FIN OPL4-FM - ESPACIO");
+	WaitSpace();
+}
+
+//-----------------------------------------------------------------------------
 // Sistema: version MSX + RTC en vivo + benchmark de turbo F11
 //-----------------------------------------------------------------------------
 void PrintU8Dec(u8 v)
@@ -1084,6 +1219,7 @@ void main()
 	TestSCC();
 	TestOPLL(fmType);
 	TestY8950();
+	TestOPL4FM();
 
 	// ---- 6. Entrada ----
 	TestInput();

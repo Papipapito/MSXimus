@@ -1,0 +1,142 @@
+// ============================================================================
+// opl4fm.v — MoonSound FM (OPL3/YMF262 del YMF278B) para MSXimus (_82)
+//
+// Integra el core gtaylormb/opl3_fpga (LGPL-3.0, fork antxiko/mangOPL4 con
+// los fixes de Gowin: TICK_COUNT entero en timers, pragma en control_ops)
+// mapeado en C4h-C7h como el MoonSound real. Adaptacion a MSXimus del
+// wrapper cartridge_opl3.sv de mangOPL4 (BSD-3, Jokin Miragaia) — gracias:
+//  - El host_if del core lleva FIFO asincrona clk_host->clk_opl3: se le dan
+//    las señales CRUDAS del bus (cs/rd/wr sostenidos) y el se apaña.
+//  - SHADOW REGS 2x256: el YMF278B real permite LEER los registros FM
+//    (openMSX YMF278B.cc: read C5/C7 = readReg del latch); el core de
+//    Taylor es solo-escritura -> espejo de escrituras del bus. Sin esto
+//    MoonBlaster FM y similares fallan el write/read-verify.
+//  - Status en C4 Y C6 (el chip real lo espeja en port&3 == 0 y 2).
+//  - Stub del puerto WAVE 7Eh/7Fh: lectura de 7F devuelve 0x20 (device ID
+//    del YMF278B) para que VGMPlay/players detecten "MoonSound" y toquen
+//    la parte FM. El software wave sonara incompleto: FASE 2 = wavetable
+//    real (YMF278B.sv de srg320 + DDR3). Documentado en el LEEME.
+//
+// Reloj: 33.75 MHz (PLLA propia, 27x40/32 exacto; -0.35% vs 33.8688 nominal
+// del MoonSound; pkg con CLK_DIV_COUNT=682 -> fs 49.487 kHz, -0.06%).
+// IRQ: NO cableada en _82 (la deteccion estandar va por polling del status;
+// mangOPL4 documenta que el cableado directo tormenta con VGMPlay — su
+// solucion pulso+gap queda para un build futuro si hace falta).
+// ============================================================================
+
+module opl4fm (
+    input  wire        rst_n,        // bus_reset_n
+    input  wire        clk_host,     // clk_54m (dominio del bus)
+    input  wire        clk_opl3,     // 33.75 MHz (pll_3375)
+
+    input  wire        iorq_n,
+    input  wire        rd_n,
+    input  wire        wr_n,
+    input  wire        m1_n,
+    input  wire [7:0]  addr,
+    input  wire [7:0]  din,
+
+    output wire        fm_rd,        // lectura C4-C7 en curso (para el mux)
+    output wire        wave_rd,      // lectura 7Fh en curso (stub wave)
+    output wire [7:0]  dout,         // dato C4-C7 (status/shadow)
+    output wire [7:0]  wave_dout,    // dato 7Fh (stub 0x20)
+    output reg signed [15:0] pcm_out // al mixer (registrado, dominio host)
+);
+
+// ---------------------------------------------------------------------------
+// decodificacion C4h-C7h (movida del wrapper mangOPL4)
+// ---------------------------------------------------------------------------
+wire cs_opl3 = (iorq_n == 1'b0) && (m1_n == 1'b1) && (addr[7:2] == 6'b110001);
+assign fm_rd = cs_opl3 && (rd_n == 1'b0);
+
+// stub wave 7Eh-7Fh: solo 7F drivea (7E flota en el chip real)
+wire cs_wave = (iorq_n == 1'b0) && (m1_n == 1'b1) && (addr[7:1] == 7'b0111111);
+assign wave_rd   = cs_wave && (rd_n == 1'b0) && addr[0];
+assign wave_dout = 8'h20;            // device ID del YMF278B (deteccion)
+
+// ---------------------------------------------------------------------------
+// shadow register file (read-back que el core no tiene)
+// ---------------------------------------------------------------------------
+reg [7:0] shadow_b0 [0:255];
+reg [7:0] shadow_b1 [0:255];
+reg [7:0] sel_reg_b0;
+reg [7:0] sel_reg_b1;
+
+reg  prev_wr_active;
+wire wr_active = cs_opl3 && (wr_n == 1'b0);
+wire wr_strobe = wr_active && !prev_wr_active;
+
+always @(posedge clk_host or negedge rst_n) begin
+    if (!rst_n) begin
+        prev_wr_active <= 1'b0;
+        sel_reg_b0 <= 8'd0;
+        sel_reg_b1 <= 8'd0;
+    end
+    else begin
+        prev_wr_active <= wr_active;
+        if (wr_strobe) begin
+            case (addr[1:0])
+                2'b00: sel_reg_b0 <= din;
+                2'b01: shadow_b0[sel_reg_b0] <= din;
+                2'b10: sel_reg_b1 <= din;
+                2'b11: shadow_b1[sel_reg_b1] <= din;
+            endcase
+        end
+    end
+end
+
+// mux de lectura: status del core en C4/C6, registro shadow en C5/C7
+wire [7:0] opl3_dout;
+assign dout = (addr[0] == 1'b0) ? opl3_dout :                 // C4/C6: status
+              (addr[1] == 1'b0) ? shadow_b0[sel_reg_b0] :     // C5: bank 0
+                                  shadow_b1[sel_reg_b1];      // C7: bank 1
+
+// ---------------------------------------------------------------------------
+// core OPL3 (fork mangOPL4; FIFO async interna clk_host->clk_opl3)
+// ---------------------------------------------------------------------------
+wire signed [23:0] sample_l, sample_r;   // opl3_pkg::DAC_OUTPUT_WIDTH = 24
+
+opl3 u_opl3 (
+    .clk               (clk_opl3),
+    .clk_host          (clk_host),
+    .clk_dac           (1'b0),
+    .ic_n              (rst_n),
+    .cs_n              (~cs_opl3),
+    .rd_n              (rd_n),
+    .wr_n              (wr_n),
+    .address           (addr[1:0]),
+    .din               (din),
+    .dout              (opl3_dout),
+    .sample_valid      ( ),
+    .sample_l          (sample_l),
+    .sample_r          (sample_r),
+    .led               ( ),
+    .irq_n             ( ),           // sin cablear en _82 (polling de status)
+    .force_clear_flags (1'b0)
+);
+
+// ---------------------------------------------------------------------------
+// audio: mono (L+R)/2 en clk_opl3, escala a 16 bits con SATURACION.
+// Rango efectivo del core ~ +/-2^17 dentro de los 24 bits (calibracion de
+// mangOPL4: su gain 64x mapea 2^17 a full-scale) -> >>2 = full-scale 16b.
+// ---------------------------------------------------------------------------
+reg signed [24:0] mono_q;
+always @(posedge clk_opl3)
+    mono_q <= ({sample_l[23], sample_l} + {sample_r[23], sample_r}) >>> 1;
+
+// saturacion de 25b>>2 a 16b: si los bits [24:17] no son todos iguales al
+// signo, satura
+wire ovf = (mono_q[24:17] != {8{mono_q[24]}});
+reg signed [15:0] pcm_opl3;
+always @(posedge clk_opl3) begin
+    if (ovf) pcm_opl3 <= mono_q[24] ? 16'sh8000 : 16'sh7FFF;
+    else     pcm_opl3 <= mono_q[17:2];
+end
+
+// cruce a dominio host por registro simple (audio a 49.5kHz: sobra)
+always @(posedge clk_host or negedge rst_n) begin
+    if (!rst_n) pcm_out <= 16'sd0;
+    else        pcm_out <= pcm_opl3;
+end
+
+endmodule

@@ -21,6 +21,7 @@
 `define ENABLE_Y8950        // F2 (_79): MSX-Audio (Y8950) FM via jtopl2 (core ya vendido en fpga/jtopl/), puertos C0/C1. VALIDADO EN HW (juego OK)
 `define ENABLE_Y8950_ADPCM  // F2 (_80): ADPCM-B del Y8950 — y8950_adpcm.v (glue openMSX-exacto) + decoder jt10_adpcmb + RAM samples 32KB BSRAM (NMS-1205 de serie). VALIDADO HW+VGMPlay
 `define ENABLE_Y8950_IRQ    // F2 (_81): IRQ del Y8950 (timers+EOS+BUF ya enmascarados) al /INT del Z80 (wired-AND como el Music Module real). Arranca todo enmascarado = sin IRQ hasta que el software la pida
+`define ENABLE_OPL4FM       // F2 (_82): MoonSound FM (OPL3 de gtaylormb, fork mangOPL4 con fixes Gowin) en C4-C7 + stub wave 7E/7F. PLL propia 33.75MHz. Wavetable = fase 2 (DDR3)
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
@@ -213,6 +214,17 @@ end
         .clkout0(clk_hdmi),
         .clkout1(clk_hdmi5)
     );
+
+`ifdef ENABLE_OPL4FM
+    // _82: reloj del MoonSound FM — 27x40/32 = 33.75 MHz exactos (VCO 1080,
+    // en rango legal). -0.35% vs los 33.8688 nominales; el pkg lo compensa
+    // (CLK_DIV_COUNT=682 -> fs 49.487 kHz, -0.06%).
+    wire clk_opl3;
+    pll_3375 pll_opl3 (
+        .clkin  (clk27_video),
+        .clkout0(clk_opl3)
+    );
+`endif
 
     // JTAG→SPI del companion (estilo C64Nano): los pines JTAG se entregan al
     // fabric (SPI del BL616) solo con el PLL en lock y sin petición de JTAG del
@@ -695,6 +707,10 @@ assign keyboard_addr = ppi_port_c[3:0];
                      ( scc2x_rd_r == 1 ) ? scc2x_dout:
                     `ifdef ENABLE_Y8950
                      ( y8950_rd_r == 1 ) ? y8950_dout :   // C0/C1: status (IRQ/timer) del MSX-Audio
+                    `endif
+                    `ifdef ENABLE_OPL4FM
+                     ( opl4fm_rd_w == 1 ) ? opl4fm_dout :     // C4-C7: status/shadow del OPL3
+                     ( opl4wave_rd_w == 1 ) ? opl4wave_dout : // 7F: stub wave (device ID)
                     `endif
                 `endif
                 `ifdef ENABLE_CONFIG
@@ -1995,6 +2011,37 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign y8950_int_n = 1'b1;
 `endif
 
+    // ===== MoonSound FM (_82): OPL3 en C4-C7 + stub wave 7E/7F =====
+    wire        opl4fm_rd_w;
+    wire        opl4wave_rd_w;
+    wire [7:0]  opl4fm_dout;
+    wire [7:0]  opl4wave_dout;
+    wire signed [15:0] opl4fm_wav;
+`ifdef ENABLE_OPL4FM
+    opl4fm uopl4fm (
+        .rst_n     (bus_reset_n),
+        .clk_host  (clk_54m),
+        .clk_opl3  (clk_opl3),
+        .iorq_n    (bus_iorq_n),
+        .rd_n      (bus_rd_n),
+        .wr_n      (bus_wr_n),
+        .m1_n      (bus_m1_n),
+        .addr      (bus_addr[7:0]),
+        .din       (cpu_dout),
+        .fm_rd     (opl4fm_rd_w),
+        .wave_rd   (opl4wave_rd_w),
+        .dout      (opl4fm_dout),
+        .wave_dout (opl4wave_dout),
+        .pcm_out   (opl4fm_wav)
+    );
+`else
+    assign opl4fm_rd_w   = 1'b0;
+    assign opl4wave_rd_w = 1'b0;
+    assign opl4fm_dout   = 8'hFF;
+    assign opl4wave_dout = 8'hFF;
+    assign opl4fm_wav    = 16'sd0;
+`endif
+
     //scc & ghost scc
     wire [14:0] scc_wav;
     wire [7:0] scc_dout;
@@ -2233,19 +2280,20 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign scc_term = (map_sel == 2'b10) ? { scc_wav, 1'b0 } : 16'd0;  // SCC solo en modo SCC (no Konami4/ASCII)
 
 
-    // ADPCM-B del Y8950 (_80): mono en ambos canales como el FM; >>>1 de
-    // margen (el mixer suma sin saturacion)
+    // ADPCM-B del Y8950 (_80) y MoonSound FM (_82): mono en ambos canales
+    // como el FM del Y8950; >>>1 de margen (el mixer suma sin saturacion)
     wire [15:0] y8950_adpcm_term = {y8950_adpcm_wav[15], y8950_adpcm_wav[15:1]};
+    wire [15:0] opl4fm_term      = {opl4fm_wav[15], opl4fm_wav[15:1]};
 
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
             if (config_enable_stereo == 1) begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav + y8950_adpcm_term;
-                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
+                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
             end
             else begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term;
-                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term;
+                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
+                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term;
             end
         end
     end

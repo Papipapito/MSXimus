@@ -10,6 +10,41 @@
 set_device -name GW5AT-60B GW5AT-LV60PG484AC1/I0
 
 # ----- Verilog -----
+# F2 (_82): MoonSound FM — core OPL3 de gtaylormb (fork antxiko/mangOPL4 con
+# fixes de Gowin, LGPL-3.0). El PAQUETE va PRIMERO (SystemVerilog).
+add_file opl3/opl3_pkg.sv
+add_file opl3/afifo.v
+add_file opl3/calc_envelope_shift.sv
+add_file opl3/calc_phase_inc.sv
+add_file opl3/calc_rhythm_phase.sv
+add_file opl3/channels.sv
+add_file opl3/clk_div.sv
+add_file opl3/control_operators.sv
+add_file opl3/dac_prep.sv
+add_file opl3/edge_detector.sv
+add_file opl3/envelope_generator.sv
+add_file opl3/host_if.sv
+add_file opl3/ksl_add_rom.sv
+add_file opl3/leds.sv
+add_file opl3/mem_multi_bank.sv
+add_file opl3/mem_multi_bank_reset.sv
+add_file opl3/mem_simple_dual_port.sv
+add_file opl3/mem_simple_dual_port_async_read.sv
+add_file opl3/operator.sv
+add_file opl3/opl3.sv
+add_file opl3/opl3_exp_lut.sv
+add_file opl3/opl3_log_sine_lut.sv
+add_file opl3/phase_generator.sv
+add_file opl3/pipeline_sr.sv
+add_file opl3/reset_sync.sv
+add_file opl3/synchronizer.sv
+add_file opl3/timer.sv
+add_file opl3/timers.sv
+add_file opl3/tremolo.sv
+add_file opl3/trick_sw_detection.sv
+add_file opl3/vibrato.sv
+add_file src/opl4fm.v
+add_file src/pll_3375.v
 add_file jtopl/jt2413.v
 add_file jtopl/jtopl.v
 add_file jtopl/jtopl2.v
