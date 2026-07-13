@@ -10,4 +10,20 @@
 #
 # 2026-07-12: ruta actualizada tras la reubicacion del workspace
 # (C:\Users\alber\msx-unapi-env -> proyectosAI\sdk-tools\msx-unapi-env).
-exec bash "/mnt/c/Users/alber/proyectosAI/sdk-tools/msx-unapi-env/msxbuild.sh" "$(cd "$(dirname "$0")" && pwd)"
+# 2026-07-13 (v12): GUARD de desbordamiento — el area plana del Konami-SCC es
+# 4000h-BFFFh; si el linker pasa de C000h el codigo queda INALCANZABLE y el
+# ROM "compila bien" pero se corrompe en ejecucion (basura/resets, nos paso
+# con la v11: Higher=C286). El build FALLA ruidosamente si se desborda.
+OUT=$(bash "/mnt/c/Users/alber/proyectosAI/sdk-tools/msx-unapi-env/msxbuild.sh" "$(cd "$(dirname "$0")" && pwd)" 2>&1)
+RC=$?
+echo "$OUT"
+HIGHER=$(echo "$OUT" | grep -oE "Higher=[0-9A-Fa-f]+h" | head -1 | sed 's/Higher=//;s/h//')
+if [ -n "$HIGHER" ]; then
+    if [ $((16#$HIGHER)) -gt $((16#C000)) ]; then
+        echo "*** ERROR: ROM DESBORDADA: Higher=${HIGHER}h > C000h (area plana 4000-BFFF) ***"
+        echo "*** El codigo por encima de C000 es INALCANZABLE: recorta o banquea ***"
+        exit 2
+    fi
+    echo "[guard] area plana OK: Higher=${HIGHER}h (tope C000h)"
+fi
+exit $RC

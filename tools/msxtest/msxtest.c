@@ -1060,33 +1060,79 @@ void TestWaveDDR3()
 	Print_DrawText((st & 0x01) ? "OK" : "FALLO");
 	if (!(st & 0x01)) goto ddr_end;
 
-	// patron 1: 64 bytes consecutivos (lanes dentro de las rafagas de 16)
-	WavSetAddr(0x00, 0x01, 0x00);
+	// v10: esperar al loader de la YRW801 si aun carga (bit2; ~7s tras boot)
+	if (g_WavA2 & 0x04)
+	{
+		Print_DrawTextAt(1, 5, "YRW801: cargando de flash...");
+		while ((g_WavA2 & 0x04) && !KeyDown(KEY_SPACE)) Halt();
+	}
+
+	// patron 1: 64 bytes consecutivos (lanes de rafaga) — MITAD ALTA de los
+	// 4MB (0x300100): la mitad baja 0-2MB es la YRW801, no pisarla
+	WavSetAddr(0x30, 0x01, 0x00);
 	for (u8 i = 0; i < 64; ++i) { g_WavDat = (u8)(i ^ 0xA5); WAV_WAIT(); }
-	WavSetAddr(0x00, 0x01, 0x00);
+	WavSetAddr(0x30, 0x01, 0x00);
 	for (u8 i = 0; i < 64; ++i)
 	{
 		u8 v = g_WavDat; WAV_WAIT();
 		if (v != (u8)(i ^ 0xA5)) ++errs;
 	}
 
-	// patron 2: strides de 64KB (cruza filas y bancos de la DDR3)
+	// patron 2: strides de 64KB entre 2MB y 4MB (cruza filas y bancos)
 	for (u8 i = 0; i < 32; ++i)
 	{
-		WavSetAddr(i, 0x00, 0x33);
+		WavSetAddr(0x20 | (i & 0x1F), 0x00, 0x33);
 		g_WavDat = (u8)(i * 7 + 1); WAV_WAIT();
 	}
 	for (u8 i = 0; i < 32; ++i)
 	{
 		u8 v;
-		WavSetAddr(i, 0x00, 0x33);
+		WavSetAddr(0x20 | (i & 0x1F), 0x00, 0x33);
 		v = g_WavDat; WAV_WAIT();
 		if (v != (u8)(i * 7 + 1)) ++errs;
 	}
 
-	Print_DrawTextAt(1, 5, "W/R (96 bytes, 4MB): ");
-	if (errs == 0) Print_DrawText("OK");
-	else { Print_DrawText("ERRORES "); PrintU8Dec((u8)(errs > 255 ? 255 : errs)); }
+	Print_DrawTextAt(1, 5, "W/R (2-4MB, rafagas+strides): ");
+	if (errs == 0) Print_DrawText("OK ");
+	else { Print_DrawText("ERR "); PrintU8Dec((u8)(errs > 255 ? 255 : errs)); }
+
+	// v11: DIAGNOSTICO de lanes/mascara del burst (para el ERR 096 del HW):
+	// A) escribir 16 bytes DISTINTOS (40h+i) seguidos en un burst y volcarlo
+	//    -> se ve si el lane de escritura/lectura esta desplazado/invertido
+	// B) burst limpio: escribir UN byte (77h) en el lane 5 y volcar los 16
+	//    -> se ve donde aterriza y si la mascara pisa a los vecinos
+	{
+		Print_DrawTextAt(1, 11, "DIAG A (esc 40-4F, leo):");
+		WavSetAddr(0x31, 0x00, 0x00);
+		for (u8 i = 0; i < 16; ++i) { g_WavDat = (u8)(0x40 + i); WAV_WAIT(); }
+		WavSetAddr(0x31, 0x00, 0x00);
+		Print_SetPosition(1, 12);
+		for (u8 i = 0; i < 16; ++i) { u8 v = g_WavDat; WAV_WAIT(); PrintU8Hex2(v); }
+
+		Print_DrawTextAt(1, 14, "DIAG B (77h en lane 5, leo):");
+		WavSetAddr(0x32, 0x00, 0x05);
+		g_WavDat = 0x77; WAV_WAIT();
+		WavSetAddr(0x32, 0x00, 0x00);
+		Print_SetPosition(1, 15);
+		for (u8 i = 0; i < 16; ++i) { u8 v = g_WavDat; WAV_WAIT(); PrintU8Hex2(v); }
+	}
+
+	// v10: YRW801 presente? — primeros 8 bytes de DDR3[0] (cabecera)
+	{
+		u8 b[8]; u8 ff = 1, zz = 1;
+		WavSetAddr(0x00, 0x00, 0x00);
+		for (u8 i = 0; i < 8; ++i)
+		{
+			b[i] = g_WavDat; WAV_WAIT();
+			if (b[i] != 0xFF) ff = 0;
+			if (b[i] != 0x00) zz = 0;
+		}
+		Print_DrawTextAt(1, 7, "YRW801[0..7]: ");
+		for (u8 i = 0; i < 8; ++i) PrintU8Hex2(b[i]);
+		Print_DrawTextAt(1, 9, (ff || zz)
+			? "  (vacia: flashea yrw801.rom en 0x500000)"
+			: "  (datos presentes: ROM cargada)         ");
+	}
 
 ddr_end:
 	Print_DrawTextAt(1, 22, "ESPACIO para seguir");

@@ -21,3 +21,6 @@ AppID        = "MT";
 
 Verbose           = true;
 CompileComplexity = "Default";
+Optim             = "SIZE";   // v12: el area plana (4000-BFFF) desbordo con
+                              // Optim=Speed (Higher=C286) -> basura/resets.
+                              // SIZE recupera varios KB. GUARD en build.sh.
