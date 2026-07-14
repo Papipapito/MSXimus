@@ -46,14 +46,29 @@ module opl4fm (
 );
 
 // ---------------------------------------------------------------------------
+// _91: BUS REGISTRADO antes del decode. El T80 saca IORQ/WR/addr en el
+// flanco de BAJADA de clk_54m y este modulo consume en el de SUBIDA: el
+// cono de decode era un path de MEDIO ciclo (9.26ns) que llevaba desde la
+// _82 pasando por los pelos segun la loteria de placement. Registrar el
+// bus da el ciclo entero; el retardo (18.5ns) es nada frente al ciclo I/O
+// del Z80 (~1us).
+// ---------------------------------------------------------------------------
+reg        iorq_r, rd_r, wr_r, m1_r;
+reg [7:0]  addr_r, din_r;
+always @(posedge clk_host) begin
+    iorq_r <= iorq_n; rd_r <= rd_n; wr_r <= wr_n; m1_r <= m1_n;
+    addr_r <= addr;   din_r <= din;
+end
+
+// ---------------------------------------------------------------------------
 // decodificacion C4h-C7h (movida del wrapper mangOPL4)
 // ---------------------------------------------------------------------------
-wire cs_opl3 = (iorq_n == 1'b0) && (m1_n == 1'b1) && (addr[7:2] == 6'b110001);
-assign fm_rd = cs_opl3 && (rd_n == 1'b0);
+wire cs_opl3 = (iorq_r == 1'b0) && (m1_r == 1'b1) && (addr_r[7:2] == 6'b110001);
+assign fm_rd = cs_opl3 && (rd_r == 1'b0);
 
 // stub wave 7Eh-7Fh: solo 7F drivea (7E flota en el chip real)
-wire cs_wave = (iorq_n == 1'b0) && (m1_n == 1'b1) && (addr[7:1] == 7'b0111111);
-assign wave_rd   = cs_wave && (rd_n == 1'b0) && addr[0];
+wire cs_wave = (iorq_r == 1'b0) && (m1_r == 1'b1) && (addr_r[7:1] == 7'b0111111);
+assign wave_rd   = cs_wave && (rd_r == 1'b0) && addr_r[0];
 assign wave_dout = 8'h20;            // device ID del YMF278B (deteccion)
 
 // ---------------------------------------------------------------------------
@@ -65,7 +80,7 @@ reg [7:0] sel_reg_b0;
 reg [7:0] sel_reg_b1;
 
 reg  prev_wr_active;
-wire wr_active = cs_opl3 && (wr_n == 1'b0);
+wire wr_active = cs_opl3 && (wr_r == 1'b0);
 wire wr_strobe = wr_active && !prev_wr_active;
 
 always @(posedge clk_host or negedge rst_n) begin
@@ -77,11 +92,11 @@ always @(posedge clk_host or negedge rst_n) begin
     else begin
         prev_wr_active <= wr_active;
         if (wr_strobe) begin
-            case (addr[1:0])
-                2'b00: sel_reg_b0 <= din;
-                2'b01: shadow_b0[sel_reg_b0] <= din;
-                2'b10: sel_reg_b1 <= din;
-                2'b11: shadow_b1[sel_reg_b1] <= din;
+            case (addr_r[1:0])
+                2'b00: sel_reg_b0 <= din_r;
+                2'b01: shadow_b0[sel_reg_b0] <= din_r;
+                2'b10: sel_reg_b1 <= din_r;
+                2'b11: shadow_b1[sel_reg_b1] <= din_r;
             endcase
         end
     end
@@ -91,9 +106,9 @@ end
 // _89: el status del YMF278B real mezcla los flags FM (timers, bits 5-7)
 // con los del wave (bit1=LD, bit0=BUSY) — se ORean los del motor PCM.
 wire [7:0] opl3_dout;
-assign dout = (addr[0] == 1'b0) ? (opl3_dout | {6'b000000, wave_status}) : // C4/C6
-              (addr[1] == 1'b0) ? shadow_b0[sel_reg_b0] :     // C5: bank 0
-                                  shadow_b1[sel_reg_b1];      // C7: bank 1
+assign dout = (addr_r[0] == 1'b0) ? (opl3_dout | {6'b000000, wave_status}) : // C4/C6
+              (addr_r[1] == 1'b0) ? shadow_b0[sel_reg_b0] :   // C5: bank 0
+                                    shadow_b1[sel_reg_b1];    // C7: bank 1
 
 // ---------------------------------------------------------------------------
 // core OPL3 (fork mangOPL4; FIFO async interna clk_host->clk_opl3)
@@ -106,10 +121,10 @@ opl3 u_opl3 (
     .clk_dac           (1'b0),
     .ic_n              (rst_n),
     .cs_n              (~cs_opl3),
-    .rd_n              (rd_n),
-    .wr_n              (wr_n),
-    .address           (addr[1:0]),
-    .din               (din),
+    .rd_n              (rd_r),
+    .wr_n              (wr_r),
+    .address           (addr_r[1:0]),
+    .din               (din_r),
     .dout              (opl3_dout),
     .sample_valid      ( ),
     .sample_l          (sample_l),

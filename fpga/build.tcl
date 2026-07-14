@@ -49,6 +49,10 @@ add_file ddr3/ddr3_memory_interface.v
 add_file ddr3/pll_ddr3.v
 add_file ddr3/pll_mDRP_intf.v
 add_file src/wave_ddr3.v
+# F2 (_89): motor PCM 24 slots del OPL4 (srg320, BSD-3/MAME, con permiso).
+# ymf278b_gowin.v es GENERADO por sv2v desde opl4wave/*.sv (ver convert.sh)
+add_file opl4wave/ymf278b_gowin.v
+add_file src/opl4_pcm.v
 add_file jtopl/jt2413.v
 add_file jtopl/jtopl.v
 add_file jtopl/jtopl2.v
@@ -115,10 +119,6 @@ add_file tn_vdp_v3_v9958/src/hdmi/serializer.sv
 add_file tn_vdp_v3_v9958/src/hdmi/source_product_description_info_frame.sv
 add_file tn_vdp_v3_v9958/src/hdmi/tmds_channel.sv
 add_file tn_vdp_v3_v9958/src/v9958_top.v
-# F2 (_89): motor PCM 24 slots del OPL4 (srg320, BSD-3/MAME, con permiso).
-# ymf278b_gowin.v es GENERADO por sv2v desde opl4wave/*.sv (ver convert.sh)
-add_file opl4wave/ymf278b_gowin.v
-add_file src/opl4_pcm.v
 add_file top.v
 
 # ----- Reloj GW5A: un solo PLLA (108/54/27/135) + secuencia de init mDRP -----

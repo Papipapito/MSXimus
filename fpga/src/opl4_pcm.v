@@ -68,19 +68,31 @@ module opl4_pcm (
 
 // ===========================================================================
 // LADO HOST: decodificacion + strobes + latches de peticion
+// _91: bus REGISTRADO antes del decode (el T80 lanza en el flanco de bajada
+// de clk_54m y aqui se consume en el de subida: el decode directo era un
+// path de MEDIO ciclo que dependia de la loteria de placement; con el bus
+// registrado hay ciclo entero y el retardo de 18.5ns es irrelevante frente
+// al ciclo I/O del Z80).
 // ===========================================================================
-wire cs_fm = (iorq_n == 1'b0) && (m1_n == 1'b1) && (addr[7:2] == 6'b110001);
-wire cs_wv = (iorq_n == 1'b0) && (m1_n == 1'b1) && (addr[7:1] == 7'b0111111);
+reg        iorq_r, rd_r, wr_r, m1_r;
+reg [7:0]  addr_r, din_r;
+always @(posedge clk_host) begin
+    iorq_r <= iorq_n; rd_r <= rd_n; wr_r <= wr_n; m1_r <= m1_n;
+    addr_r <= addr;   din_r <= din;
+end
 
-assign wave_rd = cs_wv && (rd_n == 1'b0);
+wire cs_fm = (iorq_r == 1'b0) && (m1_r == 1'b1) && (addr_r[7:2] == 6'b110001);
+wire cs_wv = (iorq_r == 1'b0) && (m1_r == 1'b1) && (addr_r[7:1] == 7'b0111111);
+
+assign wave_rd = cs_wv && (rd_r == 1'b0);
 
 // mapeo puerto MSX -> pin A[2:0] del YMF278B:
 //   C4->0 C5->1 C6->2 C7->3 (FM)   7E->4 7F->5 (wave)
-wire [2:0] a3 = addr[7] ? {1'b0, addr[1:0]} : {2'b10, addr[0]};
+wire [2:0] a3 = addr_r[7] ? {1'b0, addr_r[1:0]} : {2'b10, addr_r[0]};
 
-wire wr_act = (cs_fm | cs_wv) && (wr_n == 1'b0);
-wire rd_dat = cs_wv && (rd_n == 1'b0) && addr[0];          // IN 7Fh (dato)
-wire rd_st  = cs_fm && (rd_n == 1'b0) && (addr[0] == 1'b0); // IN C4/C6 (status)
+wire wr_act = (cs_fm | cs_wv) && (wr_r == 1'b0);
+wire rd_dat = cs_wv && (rd_r == 1'b0) && addr_r[0];          // IN 7Fh (dato)
+wire rd_st  = cs_fm && (rd_r == 1'b0) && (addr_r[0] == 1'b0); // IN C4/C6 (status)
 
 reg wr_act_d, rd_dat_d, rd_st_d;
 reg        wr_t, rd_t, st_t;        // toggles de peticion (host -> x1)
@@ -99,7 +111,7 @@ always @(posedge clk_host or negedge rst_n) begin
         rd_st_d  <= rd_st;
         if (wr_act && !wr_act_d) begin
             req_a3  <= a3;
-            req_dat <= din;
+            req_dat <= din_r;
             wr_t    <= ~wr_t;
         end
         else if (rd_dat && !rd_dat_d)
@@ -110,9 +122,17 @@ always @(posedge clk_host or negedge rst_n) begin
 end
 
 // vuelta: dato de lectura + status + PCM (todos cuasi-estaticos tras toggle)
-reg rdd_h1, rdd_h2, rdd_ack;        // toggle "lectura completada"
+// _91: los cruces host<->motor estan declarados ASINCRONOS en el .sdc
+// (correcto para los 2FF), pero eso significa que el router NO vigila el
+// retardo de los PAYLOADS (req_a3/req_dat/rd_data_x/pcm): si el payload
+// llega mas tarde que el toggle sincronizado, se consume corrupto. Con
+// place2 colaba de chiripa; con place1 el motor "desaparecio" (0000 en la
+// deteccion). Fix: consumir el toggle UNA ETAPA MAS TARDE en ambos
+// sentidos -> el payload gana ~2 ciclos extra de asentamiento y el
+// funcionamiento deja de depender de la loteria de rutado.
+reg rdd_h1, rdd_h2, rdd_h3, rdd_ack;   // toggle "lectura completada"
 reg [7:0] rd_data_h;
-reg pcm_h1, pcm_h2, pcm_ack;
+reg pcm_h1, pcm_h2, pcm_h3, pcm_ack;
 reg st_b1, st_b2, ld_b1, ld_b2;     // bits de status (nivel, 2FF)
 
 // (señales del dominio x1 declaradas abajo)
@@ -124,20 +144,20 @@ reg        busy_x, ld_x;            // x1: status muestreado con bus en reposo
 
 always @(posedge clk_host or negedge rst_n) begin
     if (!rst_n) begin
-        rdd_h1 <= 1'b0; rdd_h2 <= 1'b0; rdd_ack <= 1'b0; rd_data_h <= 8'd0;
-        pcm_h1 <= 1'b0; pcm_h2 <= 1'b0; pcm_ack <= 1'b0;
+        rdd_h1 <= 1'b0; rdd_h2 <= 1'b0; rdd_h3 <= 1'b0; rdd_ack <= 1'b0; rd_data_h <= 8'd0;
+        pcm_h1 <= 1'b0; pcm_h2 <= 1'b0; pcm_h3 <= 1'b0; pcm_ack <= 1'b0;
         pcm_l <= 16'sd0; pcm_r <= 16'sd0;
         st_b1 <= 1'b0; st_b2 <= 1'b0; ld_b1 <= 1'b0; ld_b2 <= 1'b0;
     end
     else begin
-        rdd_h1 <= rd_done_t;  rdd_h2 <= rdd_h1;
-        if (rdd_h2 != rdd_ack) begin
-            rdd_ack   <= rdd_h2;
-            rd_data_h <= rd_data_x;   // estable: cambio hace >=2 ciclos host
+        rdd_h1 <= rd_done_t;  rdd_h2 <= rdd_h1;  rdd_h3 <= rdd_h2;
+        if (rdd_h3 != rdd_ack) begin
+            rdd_ack   <= rdd_h3;
+            rd_data_h <= rd_data_x;   // estable: cambio hace >=3 ciclos host
         end
-        pcm_h1 <= pcm_t_x;  pcm_h2 <= pcm_h1;
-        if (pcm_h2 != pcm_ack) begin
-            pcm_ack <= pcm_h2;
+        pcm_h1 <= pcm_t_x;  pcm_h2 <= pcm_h1;  pcm_h3 <= pcm_h2;
+        if (pcm_h3 != pcm_ack) begin
+            pcm_ack <= pcm_h3;
             pcm_l   <= pcm_l_x;
             pcm_r   <= pcm_r_x;
         end
@@ -148,7 +168,7 @@ end
 
 assign wave_status = {ld_b2, st_b2};
 // 7E = status (como el chip: todo A!=5 lee status); 7F = ultimo dato leido
-assign wave_dout = addr[0] ? rd_data_h : {6'b000000, ld_b2, st_b2};
+assign wave_dout = addr_r[0] ? rd_data_h : {6'b000000, ld_b2, st_b2};
 
 // /WAIT durante IN 7Fh: el round-trip al motor son ~300-600ns (la lectura de
 // reg6 dispara su propio fetch DDR3, que congela el CE del motor un rato) y
@@ -188,19 +208,19 @@ end
 wire erst_n = ers[1];
 
 // --- sync de toggles host -> x1 ---
-reg wr_s1, wr_s2, wr_ackx;
-reg rd_s1, rd_s2, rd_ackx;
-reg st_s1, st_s2, st_ackx;
+reg wr_s1, wr_s2, wr_s3, wr_ackx;
+reg rd_s1, rd_s2, rd_s3, rd_ackx;
+reg st_s1, st_s2, st_s3, st_ackx;
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
-        wr_s1 <= 1'b0; wr_s2 <= 1'b0;
-        rd_s1 <= 1'b0; rd_s2 <= 1'b0;
-        st_s1 <= 1'b0; st_s2 <= 1'b0;
+        wr_s1 <= 1'b0; wr_s2 <= 1'b0; wr_s3 <= 1'b0;
+        rd_s1 <= 1'b0; rd_s2 <= 1'b0; rd_s3 <= 1'b0;
+        st_s1 <= 1'b0; st_s2 <= 1'b0; st_s3 <= 1'b0;
     end
     else begin
-        wr_s1 <= wr_t; wr_s2 <= wr_s1;
-        rd_s1 <= rd_t; rd_s2 <= rd_s1;
-        st_s1 <= st_t; st_s2 <= st_s1;
+        wr_s1 <= wr_t; wr_s2 <= wr_s1; wr_s3 <= wr_s2;
+        rd_s1 <= rd_t; rd_s2 <= rd_s1; rd_s3 <= rd_s2;
+        st_s1 <= st_t; st_s2 <= st_s1; st_s3 <= st_s2;
     end
 end
 
@@ -272,21 +292,21 @@ always @(posedge clk_eng or negedge erst_n) begin
             busy_x <= e_do[0];
             ld_x   <= e_do[1];
             bf_cnt <= 4'd0;
-            if (wr_s2 != wr_ackx) begin
-                wr_ackx <= wr_s2;
+            if (wr_s3 != wr_ackx) begin
+                wr_ackx <= wr_s3;
                 e_a  <= req_a3;     // cuasi-estatico (toggle hace >=2 ciclos)
                 e_di <= req_dat;
                 e_cs_n <= 1'b0; e_wr_n <= 1'b0;
                 bf <= BF_WLOW;
             end
-            else if (rd_s2 != rd_ackx) begin
-                rd_ackx <= rd_s2;
+            else if (rd_s3 != rd_ackx) begin
+                rd_ackx <= rd_s3;
                 e_a <= 3'd5;  bf_is_st <= 1'b0;
                 e_cs_n <= 1'b0; e_rd_n <= 1'b0;
                 bf <= BF_RLOW;
             end
-            else if (st_s2 != st_ackx) begin
-                st_ackx <= st_s2;
+            else if (st_s3 != st_ackx) begin
+                st_ackx <= st_s3;
                 e_a <= 3'd0;  bf_is_st <= 1'b1;
                 e_cs_n <= 1'b0; e_rd_n <= 1'b0;
                 bf <= BF_RLOW;
