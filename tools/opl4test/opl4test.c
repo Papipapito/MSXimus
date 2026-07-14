@@ -829,17 +829,21 @@ void TestOPL4Wave()
 		if (v0 != 0xA5) { PrintU8Hex2(v0); PrintU8Hex2(v1); PrintU8Hex2(v2); }
 	}
 
-	// sonido: arpegio + acorde con la onda 0 de la YRW801 (piano). OCT=1 =
-	// pitch nativo de la muestra; fnum aprox. por semitonos (1024*(2^(s/12)-1))
-	Print_DrawTextAt(1, 10, "Arpegio wave 0 (piano YRW801)...");
+	// sonido: arpegio + acorde con la onda 303 de la YRW801 — un split del
+	// GRAND PIANO real (33650 muestras, envolvente f2/14 de piano). ¡OJO: la
+	// onda 0 del banco es un loop de zumbido de 42 muestras — el "grito" de
+	// la primera prueba era la onda, no el motor (validado contra openMSX
+	// semantics en sim: decode 12-bit clavado muestra a muestra)!
+	// OCT=1 = pitch nativo; fnum por semitonos (1024*(2^(s/12)-1))
+	Print_DrawTextAt(1, 10, "Arpegio wave 303 (Grand Piano)...");
 	MoonWr(0xF9, 0x00);                      // mezcla PCM a 0dB (por si acaso)
-	MoonKeyOn(0, 0, 0, 1);                   // C  (pitch nativo)
+	MoonKeyOn(0, 303, 0, 1);                 // fundamental (pitch nativo)
 	for (volatile u16 w = 0; w < 30000; ++w) {}
-	MoonKeyOn(1, 0, 266, 1);                 // E  (+4 semitonos)
+	MoonKeyOn(1, 303, 266, 1);               // +4 semitonos (3a mayor)
 	for (volatile u16 w = 0; w < 30000; ++w) {}
-	MoonKeyOn(2, 0, 510, 1);                 // G  (+7)
+	MoonKeyOn(2, 303, 510, 1);               // +7 (5a justa)
 	for (volatile u16 w = 0; w < 30000; ++w) {}
-	MoonKeyOn(3, 0, 0, 2);                   // C  (+octava)
+	MoonKeyOn(3, 303, 0, 2);                 // +octava
 	Print_DrawTextAt(1, 12, "Acorde sonando - ESPACIO corta");
 	WaitSpace();
 	for (u8 s = 0; s < 4; ++s) MoonWr(0x68 + s, 0x40);   // key off + damp
