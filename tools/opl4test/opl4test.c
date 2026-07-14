@@ -766,6 +766,98 @@ void MoonKeyOn(u8 slot, u16 wave, u16 fnum, u8 oct)
 	MoonWr(0x68 + slot, 0x80);                              // KEY on, pan centro
 }
 
+//--- player wavetable: multisample del Grand Piano YRW801 -------------------
+// splits {onda, raiz MIDI} por track; slot = base del track + indice de split
+const u16 g_MoonWave[5] = { 300, 301, 302, 303, 304 };
+const u8  g_MoonRoot[5] = {  38,  55,  62,  67,  75 };   // D2 G3 D4 G4 D#5
+// fnum = 1024*(2^(s/12)-1), s=0..11
+const u16 g_MoonFN[12] = { 0, 61, 125, 194, 266, 343, 424, 510, 602, 699, 801, 910 };
+
+u8 g_MoonLastSlot[3];      // ultimo slot sonando por track (0xFF = ninguno)
+
+// slots: track0 (melodia) usa splits 2/3/4 en slots 0-2;
+//        track1 (bajo)    usa splits 0/1   en slots 3-4;
+//        track2 (acomp)   usa splits 2/3   en slots 5-6
+u8 MoonPickSlot(u8 track, u8 note, u8* split)
+{
+	if (track == 1) { *split = (note < 47) ? 0 : 1; return 3 + *split; }
+	if (track == 2) { *split = (note < 65) ? 2 : 3; return 5 + (*split - 2); }
+	*split = (note < 65) ? 2 : (note < 71) ? 3 : 4;
+	return (u8)(*split - 2);
+}
+
+void MoonNoteOff(u8 track)
+{
+	if (g_MoonLastSlot[track] != 0xFF)
+		MoonWr(0x68 + g_MoonLastSlot[track], 0x40);   // KEY=0 + DAMP
+}
+
+void MoonNoteOn(u8 track, u8 note)
+{
+	u8 split, slot;
+	i8 s, oct;
+	u16 fn;
+	slot = MoonPickSlot(track, note, &split);
+	s = (i8)(note - g_MoonRoot[split]);
+	oct = 1;
+	while (s < 0)   { s += 12; --oct; }
+	while (s >= 12) { s -= 12; ++oct; }
+	fn = g_MoonFN[(u8)s];
+	MoonNoteOff(track);
+	MoonWr(0x20 + slot, (u8)((fn << 1) | (g_MoonWave[split] >> 8)));
+	MoonWr(0x38 + slot, (u8)(((u8)oct << 4) | (u8)((fn >> 7) << 1)));
+	MoonWr(0x68 + slot, 0x80);                        // KEY on, pan centro
+	g_MoonLastSlot[track] = slot;
+}
+
+void MoonEntertainer()
+{
+	// setup: cargar el header de cada slot (una vez) + niveles por pista
+	const u8 slot_split[7] = { 2, 3, 4, 0, 1, 2, 3 };
+	const u8 slot_tl[7]    = { 2, 2, 2, 8, 8, 14, 14 };  // melodia/bajo/acomp
+	for (u8 k = 0; k < 7; ++k)
+	{
+		u16 w = g_MoonWave[slot_split[k]];
+		MoonWr(0x68 + k, 0x00);                       // key off
+		MoonWr(0x20 + k, (u8)(w >> 8));               // WTN8 (fnum 0)
+		MoonWr(0x50 + k, (u8)((slot_tl[k] << 1) | 1)); // TL + LD
+		MoonWr(0x08 + k, (u8)w);                      // dispara carga header
+		MoonWaitLD();
+	}
+	for (u8 k = 0; k < 3; ++k) g_MoonLastSlot[k] = 0xFF;
+
+	{
+		MusTrack trk[3];
+		u8 tick = (*(volatile u8*)0x002B & 0x80) ? 8 : 10;
+		trk[0].seq = g_AudMelody;  trk[0].len = numberof(g_AudMelody);
+		trk[1].seq = g_AudBassSeq; trk[1].len = numberof(g_AudBassSeq);
+		trk[2].seq = g_AudCompSeq; trk[2].len = numberof(g_AudCompSeq);
+		for (u8 k = 0; k < 3; ++k) { trk[k].ch = k; trk[k].idx = 0; trk[k].left = 0; }
+		for (;;)
+		{
+			for (u8 k = 0; k < 3; ++k)
+			{
+				MusTrack* m = &trk[k];
+				if (m->left)
+				{
+					--m->left;
+					if (m->left == 1) MoonNoteOff(k);   // staccato ragtime
+					if (m->left) continue;
+				}
+				{
+					const MusEv* e = &m->seq[m->idx];
+					m->idx = (u8)((m->idx + 1) % m->len);
+					m->left = e->dur;
+					if (e->note) MoonNoteOn(k, e->note);
+					else         MoonNoteOff(k);
+				}
+			}
+			if (WaitFramesOrSpace(tick)) break;
+		}
+	}
+	for (u8 k = 0; k < 7; ++k) MoonWr(0x68 + k, 0x40);   // todo off + damp
+}
+
 void TestOPL4Wave()
 {
 	u8 id0, id1;
@@ -829,24 +921,19 @@ void TestOPL4Wave()
 		if (v0 != 0xA5) { PrintU8Hex2(v0); PrintU8Hex2(v1); PrintU8Hex2(v2); }
 	}
 
-	// sonido: arpegio + acorde con la onda 303 de la YRW801 — un split del
-	// GRAND PIANO real (33650 muestras, envolvente f2/14 de piano). ¡OJO: la
-	// onda 0 del banco es un loop de zumbido de 42 muestras — el "grito" de
-	// la primera prueba era la onda, no el motor (validado contra openMSX
-	// semantics en sim: decode 12-bit clavado muestra a muestra)!
-	// OCT=1 = pitch nativo; fnum por semitonos (1024*(2^(s/12)-1))
-	Print_DrawTextAt(1, 10, "Arpegio wave 303 (Grand Piano)...");
-	MoonWr(0xF9, 0x00);                      // mezcla PCM a 0dB (por si acaso)
-	MoonKeyOn(0, 303, 0, 1);                 // fundamental (pitch nativo)
-	for (volatile u16 w = 0; w < 30000; ++w) {}
-	MoonKeyOn(1, 303, 266, 1);               // +4 semitonos (3a mayor)
-	for (volatile u16 w = 0; w < 30000; ++w) {}
-	MoonKeyOn(2, 303, 510, 1);               // +7 (5a justa)
-	for (volatile u16 w = 0; w < 30000; ++w) {}
-	MoonKeyOn(3, 303, 0, 2);                 // +octava
-	Print_DrawTextAt(1, 12, "Acorde sonando - ESPACIO corta");
-	WaitSpace();
-	for (u8 s = 0; s < 4; ++s) MoonWr(0x68 + s, 0x40);   // key off + damp
+	// --- THE ENTERTAINER en el GRAND PIANO wavetable de la YRW801 ---
+	// Multisample real: la melodia/bajo/acompanamiento eligen el SPLIT del
+	// piano mas cercano a cada nota (raices medidas por autocorrelacion del
+	// loop: onda 300=D2, 301=G3, 302=D4, 303=G4, 304=D#5). Un slot por
+	// track+split (7 slots), headers cargados UNA vez en el setup; cambiar
+	// de nota solo toca F-num/octava. (La onda 0 del banco es un zumbido de
+	// 42 muestras: el "grito" del primer arpegio era la onda, no el motor.)
+	Print_DrawTextAt(1, 10, "THE ENTERTAINER (Joplin) ahora");
+	Print_DrawTextAt(1, 11, "en el GRAND PIANO wavetable:");
+	Print_DrawTextAt(1, 12, "3 pistas, multisample YRW801");
+	Print_DrawTextAt(1, 20, "En bucle... ESPACIO = terminar");
+	MoonWr(0xF9, 0x00);                      // mezcla PCM a 0dB
+	MoonEntertainer();
 
 wave_end:
 	Print_DrawTextAt(1, 22, "ESPACIO para seguir");
