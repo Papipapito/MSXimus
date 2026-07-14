@@ -231,6 +231,17 @@ reg        eng_we_l;
 reg [21:0] eng_addr_l;
 reg [7:0]  eng_wdata_l;
 
+// _92: buffer de UNA linea de rafaga (16B) para el motor. El motor hace 4
+// fetches por slot y muestra (pares ofs/ofs+1 de dos ventanas) que caen
+// casi siempre en la MISMA linea que la DDR3 ya lee entera: sin buffer,
+// cada byte era una transaccion completa (~350ns) y con 7+ slots el motor
+// agotaba el presupuesto de CE y corria un 20% LENTO (medido en sim:
+// 27.3us/muestra en vez de 22.676 -> "lento y descompasado" en HW).
+// Con el buffer, los hits se sirven en 2 ciclos y no congelan el CE.
+reg [127:0] eng_line;
+reg [17:0]  eng_line_tag;          // addr[21:4]
+reg         eng_line_v;
+
 reg        op_eng;                 // op en curso: 1=motor, 0=host
 reg        op_we;
 reg [21:0] op_addr;
@@ -248,6 +259,7 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         st <= ST_IDLE; done_x1 <= 1'b0; rdata_x1 <= 8'd0;
         eng_pend <= 1'b0; eng_req_d <= 1'b0; eng_we_l <= 1'b0;
         eng_addr_l <= 22'd0; eng_wdata_l <= 8'd0;
+        eng_line <= 128'd0; eng_line_tag <= 18'd0; eng_line_v <= 1'b0;
         op_eng <= 1'b0; op_we <= 1'b0; op_addr <= 22'd0; op_wdata <= 8'd0;
         eng_rdata <= 8'd0; eng_done_t <= 1'b0;
     end
@@ -259,10 +271,17 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
 
         eng_req_d <= eng_req;
         if (eng_req && !eng_req_d) begin   // FLANCO: el pulso dura 2 ciclos x1
-            eng_pend   <= 1'b1;            // (sin esto la peticion se ejecutaba
-            eng_we_l   <= eng_we;          //  DOS veces y el toggle de done
-            eng_addr_l <= eng_addr;        //  quedaba en contrafase)
-            eng_wdata_l <= eng_wdata;
+            if (!eng_we && eng_line_v && (eng_addr[21:4] == eng_line_tag)) begin
+                // HIT en la linea: servir al vuelo, sin transaccion DDR3
+                eng_rdata  <= eng_line[eng_addr[3:0]*8 +: 8];
+                eng_done_t <= ~eng_done_t;
+            end
+            else begin
+                eng_pend   <= 1'b1;        // MISS o escritura: camino normal
+                eng_we_l   <= eng_we;      // (sin el flanco la peticion se
+                eng_addr_l <= eng_addr;    //  ejecutaba DOS veces y el toggle
+                eng_wdata_l <= eng_wdata;  //  de done quedaba en contrafase)
+            end
         end
 
         case (st)
@@ -294,6 +313,8 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     app_wdf_wren <= 1'b1;
                     app_wdf_data <= {16{op_wdata}};
                     app_wdf_mask <= ~(16'h0001 << op_addr[3:0]);   // DM: 1=no escribir
+                    if (op_addr[21:4] == eng_line_tag)
+                        eng_line_v <= 1'b0;        // _92: no servir datos rancios
                     if (op_eng) eng_done_t <= ~eng_done_t;         // write = fire&forget
                     else        done_x1 <= ~done_x1;
                     st <= ST_IDLE;
@@ -309,6 +330,9 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                 if (op_eng) begin
                     eng_rdata <= app_rd_data[op_addr[3:0]*8 +: 8];
                     eng_done_t <= ~eng_done_t;
+                    eng_line     <= app_rd_data;   // _92: cachear la linea leida
+                    eng_line_tag <= op_addr[21:4];
+                    eng_line_v   <= 1'b1;
                 end
                 else begin
                     rdata_x1 <= app_rd_data[op_addr[3:0]*8 +: 8];
