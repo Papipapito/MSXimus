@@ -2075,10 +2075,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 
     // ---- _87: loader YRW801 flash(0x500000, 2MB) -> DDR3 en background ----
     reg         wl_active, wl_done, wl_primed;
-    reg  [1:0]  wl_state;
+    reg  [2:0]  wl_state;
     reg  [23:0] wl_flash_addr;
     reg  [21:0] wl_count;
     reg         wl_flash_rd, wl_flash_term;
+    reg  [6:0]  wl_tcnt;       // _90: timeout del cierre del stream rancio
     localparam  WL_FLASH_BASE = 24'h500000;
     localparam  WL_LEN        = 22'h200000;   // 2MB
     assign wdbg_status = {5'd0, wl_active, wdbg_busy, wdbg_ready};
@@ -2088,8 +2089,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wdbg_addr <= 22'd0; wdbg_req <= 1'b0; wdbg_we <= 1'b0;
             wdbg_wdata <= 8'd0; wdbg_inc_pend <= 1'b0; wdbg_busy_d <= 1'b0;
             wl_active <= 1'b0; wl_done <= 1'b0; wl_primed <= 1'b0;
-            wl_state <= 2'd0; wl_flash_addr <= 24'd0; wl_count <= 22'd0;
-            wl_flash_rd <= 1'b0; wl_flash_term <= 1'b0;
+            wl_state <= 3'd0; wl_flash_addr <= 24'd0; wl_count <= 22'd0;
+            wl_flash_rd <= 1'b0; wl_flash_term <= 1'b0; wl_tcnt <= 7'd0;
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2104,16 +2105,37 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             // ---- loader en background: protocolo byte a byte del flash
             //      (calcado del stream del pack) + puerto wave reutilizado ----
             case (wl_state)
-            2'd0:   // esperar: pack streameado + DDR3 calibrada
+            3'd0:   // esperar: pack streameado + DDR3 calibrada
                 if (flash_idle && wdbg_ready && !wl_done) begin
                     wl_active <= 1'b1;
                     wl_flash_addr <= WL_FLASH_BASE;
                     wl_count <= WL_LEN;
                     wl_primed <= 1'b0;
+                    wl_tcnt <= 7'd0;
                     wdbg_addr <= 22'd0;
-                    wl_state <= 2'd1;
+                    wl_state <= 3'd4;
                 end
-            2'd1: begin // bucle: capturar byte y escribirlo en DDR3
+            3'd4: begin // _90: CERRAR el stream rancio del pack ANTES de leer.
+                // El FSM del pack pone su terminate en el MISMO ciclo en que
+                // wl_active le roba el mux: el terminate se perdia, el stream
+                // del pack quedaba ABIERTO y nuestras lecturas continuaban en
+                // 0x480006 (zona borrada = FF) en vez de abrir en 0x500000.
+                // La YRW801 acababa copiada desplazada +0x7FFFA. Bug desde la
+                // _87, enmascarado porque la zona siempre habia estado vacia.
+                wl_flash_term <= 1'b1;
+                wl_tcnt <= wl_tcnt + 7'd1;
+                if (flash_busy) begin          // DONE alcanzado: se esta cerrando
+                    wl_flash_term <= 1'b0;
+                    wl_state <= 3'd5;
+                end
+                else if (wl_tcnt[6]) begin     // 64 ciclos sin reaccion: ya estaba
+                    wl_flash_term <= 1'b0;     // cerrado (la carrera fue al reves)
+                    wl_state <= 3'd1;
+                end
+            end
+            3'd5:   // esperar el cierre completo (LOAD_CMD: busy=0, CS alto)
+                if (!flash_busy) wl_state <= 3'd1;
+            3'd1: begin // bucle: capturar byte y escribirlo en DDR3
                 if (flash_busy == 1'b0) begin
                     if (~wl_flash_rd) begin
                         if (!flash_write_busy && !wdbg_busy) begin
@@ -2124,10 +2146,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                                 wdbg_inc_pend <= 1'b1;      // autoinc al completar
                             end
                             if (wl_count == 22'd0) begin
-                                wl_state <= 2'd2;
+                                wl_state <= 3'd2;
                             end
                             else begin
-                                wl_flash_addr <= wl_flash_addr + 24'd1;
+                                // _90: NO incrementar antes de la 1a lectura — la
+                                // flash latchea addr con el PRIMER rd (off-by-one:
+                                // el stream abria en BASE+1)
+                                if (wl_primed) wl_flash_addr <= wl_flash_addr + 24'd1;
                                 wl_count <= wl_count - 22'd1;
                                 wl_flash_rd <= 1'b1;
                                 wl_primed <= 1'b1;
@@ -2137,13 +2162,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 end
                 else wl_flash_rd <= 1'b0;
             end
-            2'd2: begin // terminar el stream del flash y retirarse
+            3'd2: begin // terminar el stream del flash y retirarse
                 wl_flash_term <= 1'b1;
                 if (!wdbg_busy) begin
                     wl_flash_term <= 1'b0;
                     wl_active <= 1'b0;
                     wl_done <= 1'b1;
-                    wl_state <= 2'd3;
+                    wl_state <= 3'd3;
                 end
             end
             default: ;
