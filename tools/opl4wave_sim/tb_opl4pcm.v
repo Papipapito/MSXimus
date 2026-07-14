@@ -38,6 +38,7 @@ wire        mem_req, mem_we;
 wire [21:0] mem_addr;
 wire [7:0]  mem_wdata;
 reg  [7:0]  mem_rdata = 0;
+reg  [127:0] mem_rline = 0;
 reg         mem_done_t = 0;
 
 opl4_pcm dut (
@@ -49,7 +50,7 @@ opl4_pcm dut (
     .pcm_l(pcm_l), .pcm_r(pcm_r),
     .clk_eng(clk_eng), .eng_rst_n(eng_rst_n),
     .mem_req(mem_req), .mem_we(mem_we), .mem_addr(mem_addr),
-    .mem_wdata(mem_wdata), .mem_rdata(mem_rdata), .mem_done_t(mem_done_t)
+    .mem_wdata(mem_wdata), .mem_rdata(mem_rdata), .mem_rline(mem_rline), .mem_done_t(mem_done_t)
 );
 
 // ---- memoria de ondas falsa: latencia DDR3 20-24 ciclos ----
@@ -59,6 +60,7 @@ reg [21:0] p_addr;
 reg [7:0]  p_dat;
 reg [5:0]  p_cnt, p_lat;
 integer    n_reads = 0, n_writes = 0;
+integer    li;
 reg mem_req_d = 0;
 always @(posedge clk_x1) begin
     mem_req_d <= mem_req;
@@ -75,7 +77,12 @@ always @(posedge clk_x1) begin
         p_cnt <= p_cnt + 1;
         if (p_cnt == p_lat) begin
             if (p_we) begin wavemem[p_addr] <= p_dat; n_writes = n_writes + 1; end
-            else      begin mem_rdata <= wavemem[p_addr]; n_reads = n_reads + 1; end
+            else      begin
+                mem_rdata <= wavemem[p_addr];
+                for (li = 0; li < 16; li = li + 1)
+                    mem_rline[li*8 +: 8] <= wavemem[{p_addr[21:4], 4'b0000} + li];
+                n_reads = n_reads + 1;
+            end
             mem_done_t <= ~mem_done_t;    // toggle, como el wave_ddr3 real
             p_pend <= 0;
         end

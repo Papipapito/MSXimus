@@ -63,6 +63,7 @@ module opl4_pcm (
     output reg  [21:0] mem_addr,
     output reg  [7:0]  mem_wdata,
     input  wire [7:0]  mem_rdata,      // registrado en wave_ddr3, estable
+    input  wire [127:0] mem_rline,     // _94: linea entera de la ultima lectura
     input  wire        mem_done_t      // TOGGLE = completada
 );
 
@@ -353,6 +354,13 @@ always @(posedge clk_eng or negedge erst_n) begin
 end
 
 // --- puerto de memoria: flanco de MRD/MWR -> peticion a wave_ddr3 ---
+// _94: CACHE DE LINEA EN ESTE DOMINIO (clk_eng). La _92/_93 la tenian dentro
+// de wave_ddr3 sirviendo hits a traves del cruce 37/74 y en la placa las
+// escrituras del motor se perdian (la sim del sandwich exonero la logica:
+// era fisica del cruce). Ahora wave_ddr3 vuelve al puerto PROBADO de la _91
+// y la cache vive aqui: los hits alimentan MDI sin salir del dominio y sin
+// transaccion DDR3 (el motor hace 4 fetches/slot/muestra que caen casi
+// siempre en la misma linea de 16B: sin cache iba un 20% lento con 7 slots).
 wire [20:0] e_ma;
 wire [7:0]  e_mdo;
 wire        e_mrd_n, e_mwr_n;
@@ -361,6 +369,16 @@ wire [9:0]  e_mcs_n;
 // los chip-selects: MCS_N[1]=0 <=> MEM_A[21]=1
 wire [21:0] e_addr22 = {~e_mcs_n[1], e_ma};
 
+reg [127:0] lb_line;               // cache de linea (16B)
+reg [17:0]  lb_tag;                // addr[21:4]
+reg         lb_v;
+reg         lb_hit;                // el ultimo fetch se sirvio de la cache
+reg         lb_fast;               // hit en curso: completa al ciclo siguiente
+reg [7:0]   lb_byte;
+
+// MDI del motor: byte de la cache en hit, si no el del puerto
+wire [7:0] mdi_eff = lb_hit ? lb_byte : mem_rdata;
+
 reg mrd_d1, mwr_d1, done_d1;
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
@@ -368,27 +386,55 @@ always @(posedge clk_eng or negedge erst_n) begin
         mem_req <= 1'b0; mem_we <= 1'b0;
         mem_addr <= 22'd0; mem_wdata <= 8'd0;
         mem_inflight <= 1'b0;
+        lb_line <= 128'd0; lb_tag <= 18'd0; lb_v <= 1'b0;
+        lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
     end
     else begin
         mrd_d1 <= ~e_mrd_n;
         mwr_d1 <= ~e_mwr_n;
         done_d1 <= mem_done_t;
         mem_req <= 1'b0;
+        if (lb_fast) begin
+            // hit del ciclo anterior: lb_byte ya es valido -> soltar el CE.
+            // ¡OJO: el hit DEBE sujetar la CYCLE1 de muestreo como cualquier
+            // fetch! Sin esto el motor muestreaba MDI rancio cuando el CE va
+            // a tope (cazado por el golden compare: err 8643 vs 11.7).
+            lb_fast <= 1'b0;
+            mem_inflight <= 1'b0;
+        end
         if (~e_mrd_n && !mrd_d1) begin
-            mem_req  <= 1'b1;
-            mem_we   <= 1'b0;
-            mem_addr <= e_addr22;
-            mem_inflight <= 1'b1;      // congela la CYCLE1_CE hasta el done
+            if (lb_v && (e_addr22[21:4] == lb_tag)) begin
+                lb_hit  <= 1'b1;                       // HIT: sin transaccion
+                lb_byte <= lb_line[e_addr22[3:0]*8 +: 8];
+                lb_fast <= 1'b1;                       // completa en 1 ciclo
+                mem_inflight <= 1'b1;                  // sujeta la CYCLE1
+            end
+            else begin
+                lb_hit   <= 1'b0;
+                mem_req  <= 1'b1;
+                mem_we   <= 1'b0;
+                mem_addr <= e_addr22;
+                mem_inflight <= 1'b1;  // congela la CYCLE1_CE hasta el done
+            end
         end
         else if (~e_mwr_n && !mwr_d1) begin
+            lb_hit    <= 1'b0;
             mem_req   <= 1'b1;
             mem_we    <= 1'b1;
             mem_addr  <= e_addr22;
             mem_wdata <= e_mdo;
             mem_inflight <= 1'b1;      // tambien en escritura: serializa
+            if (e_addr22[21:4] == lb_tag)
+                lb_v <= 1'b0;          // no servir datos rancios tras escribir
         end
-        else if (mem_done_t != done_d1)
+        else if (mem_done_t != done_d1) begin
             mem_inflight <= 1'b0;
+            if (!mem_we) begin
+                lb_line <= mem_rline;  // fill: la linea entera del ultimo miss
+                lb_tag  <= mem_addr[21:4];
+                lb_v    <= 1'b1;
+            end
+        end
     end
 end
 
@@ -425,7 +471,7 @@ YMF278B u_engine (
     .IRQ_N  (),                 // el motor no genera IRQ (stub FM)
 
     .MA     (e_ma),
-    .MDI    (mem_rdata),        // registrado en wave_ddr3, estable
+    .MDI    (mdi_eff),          // byte de cache en hit / puerto en miss
     .MDO    (e_mdo),
     .MRD_N  (e_mrd_n),
     .MWR_N  (e_mwr_n),
