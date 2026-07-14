@@ -221,7 +221,14 @@ DDR3_Memory_Interface_Top u_ddr3 (
 // ---------------------------------------------------------------------------
 assign clk_x1_out = clk_x1;
 
-reg req_s1, req_s2, req_ack;      // sync del toggle de peticion (host)
+// _93: los payloads del puerto host (addr/we/wdata, dominio clk_54m) van
+// junto al toggle de peticion por rutas que el router NO vigila (grupos
+// asincronos) — la MISMA clase de bug que mato el motor en la _91, aqui en
+// el puerto del loader: el placement de la _92 alargo la ruta del payload,
+// el FSM consumia direcciones corruptas y la YRW801 acababa dispersa por
+// la DDR3 (HW: _91 ok / _92 FF con la misma flash). Medicina probada:
+// consumir el toggle UNA etapa mas tarde (3FF) en AMBOS sentidos.
+reg req_s1, req_s2, req_s3, req_ack;   // sync del toggle de peticion (host)
 reg [7:0] rdata_x1;
 reg done_x1;                       // toggle de completado (dominio x1)
 
@@ -252,7 +259,7 @@ localparam ST_IDLE = 2'd0, ST_ISSUE = 2'd1, ST_WAITRD = 2'd2;
 
 always @(posedge clk_x1 or posedge ddr_rst) begin
     if (ddr_rst) begin
-        req_s1 <= 1'b0; req_s2 <= 1'b0; req_ack <= 1'b0;
+        req_s1 <= 1'b0; req_s2 <= 1'b0; req_s3 <= 1'b0; req_ack <= 1'b0;
         app_en <= 1'b0; app_wdf_wren <= 1'b0;
         app_cmd <= 3'd0; app_addr <= 28'd0;
         app_wdf_data <= 128'd0; app_wdf_mask <= 16'hFFFF;
@@ -266,6 +273,7 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
     else begin
         req_s1 <= req_toggle;
         req_s2 <= req_s1;
+        req_s3 <= req_s2;
         app_en <= 1'b0;
         app_wdf_wren <= 1'b0;
 
@@ -295,8 +303,8 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     op_wdata <= eng_wdata_l;
                     st <= ST_ISSUE;
                 end
-                else if (req_s2 != req_ack) begin
-                    req_ack <= req_s2;
+                else if (req_s3 != req_ack) begin
+                    req_ack <= req_s3;
                     op_eng  <= 1'b0;
                     op_we   <= we;              // host: cuasi-estatico
                     op_addr <= addr;
@@ -348,18 +356,19 @@ end
 // ---------------------------------------------------------------------------
 // vuelta al dominio MSX: done + rdata (cuasi-estatico tras el toggle) + ready
 // ---------------------------------------------------------------------------
-reg done_h1, done_h2;
+reg done_h1, done_h2, done_h3;   // _93: 3FF (el payload rdata_x1 viaja con el toggle)
 reg calib_h1, calib_h2;
 always @(posedge clk_host or negedge rst_n) begin
     if (!rst_n) begin
-        done_h1 <= 1'b0; done_h2 <= 1'b0; done_toggle <= 1'b0;
+        done_h1 <= 1'b0; done_h2 <= 1'b0; done_h3 <= 1'b0; done_toggle <= 1'b0;
         calib_h1 <= 1'b0; calib_h2 <= 1'b0; rdata <= 8'd0;
     end
     else begin
         done_h1 <= done_x1;
         done_h2 <= done_h1;
-        if (done_h2 != done_toggle) begin
-            done_toggle <= done_h2;
+        done_h3 <= done_h2;
+        if (done_h3 != done_toggle) begin
+            done_toggle <= done_h3;
             rdata <= rdata_x1;     // estable: done_x1 cambio hace >=2 ciclos
         end
         calib_h1 <= init_calib_complete;
