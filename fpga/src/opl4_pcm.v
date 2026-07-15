@@ -501,16 +501,72 @@ always @(posedge clk_eng or negedge erst_n) begin
     end
 end
 
-// --- captura de OUT1 (PCM puro) + toggle por muestra ---
+// --- RECLOCK de salida (_98): FIFO 16 + consumidor a ritmo FIJO ---
+// EL HALLAZGO de la saga _95-_97: los VALORES del motor eran perfectos
+// (bit-exactos vs golden) pero sus TIEMPOS no — el stall del deadline
+// congela la CE y el credito la recupera en rafagas: con 7 slots la sim
+// midio periodos de 7.6 a 136us (nominal 22.676, sigma 6.9us) y el error
+// de sample-and-hold en el DAC IGUALA la potencia de la señal (SNR -0.4dB)
+// = el "ruido y crujidos" del HW, con el drone periodico de las rafagas.
+// Las sims de valores/periodo-medio no lo veian; la telemetria tampoco
+// (no hay nada roto: solo llega a destiempo).
+//
+// Fix: el productor escribe cada muestra en un FIFO de 16 cuando sale;
+// el consumidor la saca con un acumulador IDENTICO (6272/6875, /768)
+// pero SIN stall = metronomo exacto a 44.1kHz en el MISMO reloj ->
+// tasas matematicamente clavadas, cero deriva. El credito CONSERVA el
+// computo de muestras, asi que el nivel del FIFO vuelve solo a su punto
+// tras cada excursion (max vista 136us = 6 muestras; arrancamos con 8).
+// Subflujo: repetir la ultima (sin click). Sobreflujo: imposible con
+// tasas clavadas (guardado igual). El lado host no cambia: pcm_t_x
+// ahora simplemente late uniforme.
 wire [15:0] o1_l, o1_r;
+reg  [31:0] rf_mem [0:15];
+reg  [3:0]  rf_wp, rf_rp;
+reg         rf_run;                    // consumidor armado (nivel >= 8)
+reg  [23:0] oacc;                      // acumulador del consumidor (sin stall)
+reg  [9:0]  odiv;                      // /768 del consumidor
+reg  [9:0]  pdiv;                      // /768 del PRODUCTOR (cuenta CEs)
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
         pcm_l_x <= 16'sd0; pcm_r_x <= 16'sd0; pcm_t_x <= 1'b0;
+        rf_wp <= 4'd0; rf_rp <= 4'd0; rf_run <= 1'b0;
+        oacc <= 24'd0; odiv <= 10'd0; pdiv <= 10'd0;
     end
-    else if ({o1_l, o1_r} != {pcm_l_x, pcm_r_x}) begin
-        pcm_l_x <= o1_l;
-        pcm_r_x <= o1_r;
-        pcm_t_x <= ~pcm_t_x;           // cambia 1 vez por muestra (22.7us)
+    else begin
+        // PRODUCTOR: una escritura por muestra del motor = cada 768 CE
+        // (la CE es la que stalla; el o1 vigente en la frontera es la
+        // muestra recien terminada — offset constante, inofensivo)
+        if (ce) begin
+            if (pdiv == 10'd767) begin
+                pdiv <= 10'd0;
+                if (rf_wp + 4'd1 != rf_rp) begin   // guardado (no deberia darse)
+                    rf_mem[rf_wp] <= {o1_l, o1_r};
+                    rf_wp <= rf_wp + 4'd1;
+                end
+            end
+            else pdiv <= pdiv + 10'd1;
+        end
+        // CONSUMIDOR: mismo acumulador SIN stall = 44.1kHz de metronomo
+        if (!rf_run) begin
+            if ((rf_wp - rf_rp) >= 4'd8) rf_run <= 1'b1;   // nivel mod 16
+            oacc <= 24'd0; odiv <= 10'd0;
+        end
+        else begin
+            if (oacc + CE_INC >= CE_MOD) begin
+                oacc <= oacc + CE_INC - CE_MOD;
+                if (odiv == 10'd767) begin
+                    odiv <= 10'd0;
+                    if (rf_rp != rf_wp) begin
+                        {pcm_l_x, pcm_r_x} <= rf_mem[rf_rp];
+                        rf_rp <= rf_rp + 4'd1;
+                    end                       // subflujo: repite la ultima
+                    pcm_t_x <= ~pcm_t_x;      // late UNIFORME pase lo que pase
+                end
+                else odiv <= odiv + 10'd1;
+            end
+            else oacc <= oacc + CE_INC;
+        end
     end
 end
 
