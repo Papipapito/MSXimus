@@ -909,7 +909,9 @@ void TestOPL4Wave()
 	Print_DrawText(det ? "SI" : "NO (stub/core viejo)");
 	Print_DrawText(" ");
 	PrintU8Hex2(id0); PrintU8Hex2(id1);
-	PrintDiagLine(20);                   // _95: aqui se ve SI el motor late
+	PrintDiagLine(18);                   // _95: aqui se ve SI el motor late
+	                                     // (fila 18: la 20 la pisa "En bucle"
+	                                     //  y los espacios son transparentes)
 	if (!det) goto wave_end;
 
 	// si el loader aun copia la YRW801, esperar (bit2 del puerto 36)

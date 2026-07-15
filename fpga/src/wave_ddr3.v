@@ -252,6 +252,7 @@ reg done_x1;                       // toggle de completado (dominio x1)
 
 reg        eng_pend;               // peticion del motor latcheada
 reg        eng_req_d;              // el pulso eng_req dura 2 ciclos x1: FLANCO
+reg        eng_lat;                // _97: etapa de asentado del payload
 reg        eng_we_l;
 reg [21:0] eng_addr_l;
 reg [7:0]  eng_wdata_l;
@@ -294,7 +295,7 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         app_cmd <= 3'd0; app_addr <= 28'd0;
         app_wdf_data <= 128'd0; app_wdf_mask <= 16'hFFFF;
         st <= ST_IDLE; done_x1 <= 1'b0; rdata_x1 <= 8'd0;
-        eng_pend <= 1'b0; eng_req_d <= 1'b0; eng_we_l <= 1'b0;
+        eng_pend <= 1'b0; eng_req_d <= 1'b0; eng_lat <= 1'b0; eng_we_l <= 1'b0;
         eng_addr_l <= 22'd0; eng_wdata_l <= 8'd0;
         eng_rline <= 128'd0;
         op_eng <= 1'b0; op_we <= 1'b0; op_addr <= 22'd0; op_wdata <= 8'd0;
@@ -311,10 +312,23 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         app_wdf_wren <= 1'b0;
 
         eng_req_d <= eng_req;
-        if (eng_req && !eng_req_d) begin   // FLANCO: el pulso dura 2 ciclos x1
-            eng_pend   <= 1'b1;            // (sin el flanco la peticion se
-            eng_we_l   <= eng_we;          //  ejecutaba DOS veces y el toggle
-            eng_addr_l <= eng_addr;        //  de done quedaba en contrafase)
+        // _97: el PAYLOAD (addr/we/wdata) se captura UN ciclo x1 DESPUES del
+        // flanco — la misma disciplina de asentado que curo el fill (_96),
+        // aplicada al sentido de IDA. El motor lanza eng_req y el payload en
+        // el MISMO flanco eng (que coincide con un flanco x1): capturar el
+        // payload en el primer x1 del pulso es la carrera same-edge otra vez
+        // (22 bits de direccion en la loteria de hold -> fetches de
+        // direcciones equivocadas = crujidos + drone de la _96 en HW, con
+        // telemetria LIMPIA). Un ciclo despues el payload lleva >=13.5ns
+        // quieto (opl4_pcm mantiene mem_addr/we/wdata estables hasta el
+        // done). El pulso dura 2 ciclos x1: el flanco sigue detectandose
+        // igual (sin el edge-detect la peticion se ejecutaba DOS veces y el
+        // toggle de done quedaba en contrafase).
+        eng_lat <= (eng_req && !eng_req_d);
+        if (eng_lat) begin
+            eng_pend   <= 1'b1;
+            eng_we_l   <= eng_we;          // asentado: captura limpia
+            eng_addr_l <= eng_addr;
             eng_wdata_l <= eng_wdata;
         end
 
