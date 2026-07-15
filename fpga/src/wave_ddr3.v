@@ -162,7 +162,12 @@ pll_ddr3 pll_ddr3_inst (
     .clkout0(),
     .clkout2(memory_clk),
     .clkin  (clk_27),
-    .reset  (~por_done),
+    .reset  (~por_done | rc_pulse),   // _101: la recal forzada resetea TAMBIEN
+                                      // el PLL — re-lock completo con fase
+                                      // nueva = billete de ojo INDEPENDIENTE
+                                      // (solo resetear la IP daba ojos
+                                      // correlacionados: la misma corrupcion
+                                      // 18D6C2 en boots distintos)
     .mdclk  (clk_g50),
     .mdopc  (mdrp_op),
     .mdainc (mdrp_inc),

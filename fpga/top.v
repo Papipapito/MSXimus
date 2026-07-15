@@ -2150,8 +2150,18 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     reg  [2:0]  wl_vres_i;     // indice de escritura del bloque de resultados
     reg  [7:0]  wl_fb;         // byte de flash en comparacion
     reg         wl_recal_tgl;  // toggle -> wave_ddr3.recal_req
+    // _101: SONDEO RAPIDO — la loteria del ojo dio ~1 bueno de 10 en HW;
+    // verificar 2MB por billete (~5s) era demasiado caro. Ahora cada billete
+    // se sondea con 64KB (copia+verify ~0.3s) y SOLO con sondeo limpio se
+    // hace la copia+verificacion completa. Hasta 24 billetes; recal profunda
+    // (PLL incluido) + retardo LFSR entre billetes para decorrelar.
+    reg         wl_probe;      // 1=pasada de sondeo (64KB), 0=pasada completa
+    reg  [4:0]  wl_att;        // billetes gastados (el acta lo publica)
+    reg  [7:0]  wl_lfsr;       // retardo pseudoaleatorio entre billetes
     localparam  WL_FLASH_BASE = 24'h500000;
     localparam  WL_LEN        = 22'h200000;   // 2MB
+    localparam  WL_PROBE_LEN  = 22'h010000;   // 64KB de sondeo
+    localparam  WL_MAX_ATT    = 5'd24;
     localparam  WL_RES_ADDR   = 22'h3FFFF8;   // bloque de resultados en RAM
     // _95: status ampliado — el ROM lo imprime tal cual en el test 3
     assign wdbg_status = {wl_err, wl_retries, wl_done, wl_active, wdbg_busy, wdbg_ready};
@@ -2166,6 +2176,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wl_retries <= 3'd0; wl_err <= 1'b0;
             wl_verify <= 1'b0; wl_verr <= 16'd0; wl_vfirst <= 22'h3FFFFF;
             wl_vres_i <= 3'd0; wl_fb <= 8'd0; wl_recal_tgl <= 1'b0;
+            wl_probe <= 1'b1; wl_att <= 5'd0; wl_lfsr <= 8'hA5;
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2179,12 +2190,16 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `ifdef ENABLE_WAVE_LOADER
             // ---- loader en background: protocolo byte a byte del flash
             //      (calcado del stream del pack) + puerto wave reutilizado ----
+            // _101: LFSR libre — fase impredecible al muestrearlo en el
+            // retardo entre billetes (x^8+x^6+x^5+x^4, maximal)
+            wl_lfsr <= {wl_lfsr[6:0], wl_lfsr[7]^wl_lfsr[5]^wl_lfsr[4]^wl_lfsr[3]};
             case (wl_state)
             4'd0:   // esperar: pack streameado + DDR3 calibrada
                 if (flash_idle && wdbg_ready && !wl_done) begin
                     wl_active <= 1'b1;
                     wl_flash_addr <= WL_FLASH_BASE;
-                    wl_count <= WL_LEN;
+                    wl_probe <= 1'b1;                  // _101: sondeo primero
+                    wl_count <= WL_PROBE_LEN;
                     wl_primed <= 1'b0;
                     wl_tcnt <= 22'd0;
                     wdbg_addr <= 22'd0;
@@ -2272,7 +2287,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                         // _100: copia hecha -> pasada de VERIFICACION
                         wl_verify <= 1'b1;
                         wl_flash_addr <= WL_FLASH_BASE;
-                        wl_count <= WL_LEN;
+                        wl_count <= wl_probe ? WL_PROBE_LEN : WL_LEN;
                         wl_primed <= 1'b0;
                         wdbg_addr <= 22'd0;
                         wl_verr <= 16'd0;
@@ -2334,7 +2349,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 else if (!wdbg_busy) begin
                     wdbg_we <= 1'b1;
                     wdbg_wdata <= (wl_vres_i == 3'd0) ? 8'h56 :             // 'V'
-                                  (wl_vres_i == 3'd1) ? {5'd0, wl_retries} :
+                                  (wl_vres_i == 3'd1) ? {3'd0, wl_att} :    // billetes
                                   (wl_vres_i == 3'd2) ? wl_verr[7:0] :
                                   (wl_vres_i == 3'd3) ? wl_verr[15:8] :
                                   (wl_vres_i == 3'd4) ? wl_vfirst[7:0] :
@@ -2348,25 +2363,43 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                     else wl_vres_i <= wl_vres_i + 3'd1;
                 end
             end
-            4'd12: begin // decidir: limpio, reintentar con recal, o rendirse
-                // (cap a 3 intentos de verify: cada uno cuesta ~5s de boot;
-                //  los reintentos por atasco de copia siguen llegando a 7)
-                if (wl_verr == 16'd0 || wl_retries >= 3'd3) begin
-                    if (wl_verr != 16'd0) wl_err <= 1'b1;
-                    wl_done   <= 1'b1;
+            4'd12: begin // decidir: limpio, mas billetes, o rendirse
+                if (wl_verr == 16'd0) begin
+                    if (wl_probe) begin
+                        // _101: sondeo limpio -> ahora la copia COMPLETA
+                        wl_probe <= 1'b0;
+                        wl_verify <= 1'b0;
+                        wl_flash_addr <= WL_FLASH_BASE;
+                        wl_count <= WL_LEN;
+                        wl_primed <= 1'b0;
+                        wdbg_addr <= 22'd0;
+                        wl_tcnt <= 22'd0;
+                        wl_state <= 4'd4;
+                    end
+                    else begin                 // completa verificada: LIMPIO
+                        wl_done   <= 1'b1;
+                        wl_active <= 1'b0;
+                        wl_state  <= 4'd3;
+                    end
+                end
+                else if (wl_att >= WL_MAX_ATT) begin
+                    wl_err    <= 1'b1;         // billetes agotados: sonara
+                    wl_done   <= 1'b1;         // como pueda, y el acta lo dice
                     wl_active <= 1'b0;
                     wl_state  <= 4'd3;
                 end
                 else begin
-                    // _100: ojo malo — RECALIBRAR y recopiar de cero
+                    // _100/_101: ojo malo — recal PROFUNDA y otro billete
                     wl_recal_tgl <= ~wl_recal_tgl;
-                    wl_retries <= wl_retries + 3'd1;
+                    wl_att <= wl_att + 5'd1;
+                    if (wl_retries != 3'd7) wl_retries <= wl_retries + 3'd1;
                     wl_verify <= 1'b0;
+                    wl_probe <= 1'b1;          // el fallo full tambien resondea
                     wl_tcnt <= 22'd0;
                     wl_state <= 4'd14;
                 end
             end
-            4'd14: begin // esperar a que la calibracion CAIGA (IP en reset)
+            4'd14: begin // esperar a que la calibracion CAIGA (PLL+IP en reset)
                 wl_tcnt <= wl_tcnt + 22'd1;
                 if (!wdbg_ready) begin wl_tcnt <= 22'd0; wl_state <= 4'd15; end
                 else if (wl_tcnt[21]) begin    // el pulso no llego: reintenta
@@ -2375,13 +2408,20 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             end
             4'd15:  // esperar la calibracion NUEVA (el watchdog insiste solo)
                 if (wdbg_ready) begin
+                    wl_tcnt <= 22'd0;
+                    wl_state <= 4'd7;          // _101: retardo decorrelador
+                end
+            4'd7: begin // _101: retardo LFSR (0.3-4.8ms) antes del sondeo
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (wl_tcnt[21:14] >= wl_lfsr) begin
                     wl_flash_addr <= WL_FLASH_BASE;
-                    wl_count <= WL_LEN;
+                    wl_count <= WL_PROBE_LEN;
                     wl_primed <= 1'b0;
                     wdbg_addr <= 22'd0;
                     wl_tcnt <= 22'd0;
                     wl_state <= 4'd4;
                 end
+            end
             4'd6: begin // _95: REINTENTO — cerrar todo y copiar de cero
                 wl_flash_term <= 1'b0;
                 wl_flash_rd   <= 1'b0;
@@ -2397,7 +2437,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                     else begin
                         wl_retries <= wl_retries + 3'd1;
                         wl_flash_addr <= WL_FLASH_BASE;
-                        wl_count   <= WL_LEN;
+                        wl_count   <= wl_probe ? WL_PROBE_LEN : WL_LEN;
                         wl_primed  <= 1'b0;
                         wdbg_addr  <= 22'd0;
                         wl_tcnt    <= 22'd0;

@@ -365,13 +365,32 @@ generate
 endgenerate
 
 // All logic below relates to the production and output of the 10-bit TMDS code.
+// MSXimus _101: pipeline de 1 pixel ANTES de los codificadores TMDS — el
+// cono video_data->tmds_channel era el cuello de la loteria de timing de
+// todas las builds (fallos -0.03..-1.7ns rotando entre NTSC/PAL/vram).
+// Retrasar TODAS las entradas JUNTAS (video+control+islands+mode) desplaza
+// el stream TMDS completo 1 pixel de forma coherente — la sincronia y el
+// audio viajan DENTRO del stream, el monitor no puede distinguirlo — y el
+// camino critico queda partido en dos. syn_preserve: Gowin fusionaba los
+// registros equivalentes de las instancias NTSC/PAL (leccion _89).
+logic [23:0] video_data_q /* synthesis syn_preserve = 1 */ = 24'd0;
+logic [5:0]  control_data_q /* synthesis syn_preserve = 1 */ = 6'd0;
+logic [11:0] data_island_data_q /* synthesis syn_preserve = 1 */ = 12'd0;
+logic [2:0]  mode_q /* synthesis syn_preserve = 1 */ = 3'd1;
+always_ff @(posedge clk_pixel) begin
+    video_data_q <= video_data;
+    control_data_q <= control_data;
+    data_island_data_q <= data_island_data;
+    mode_q <= mode;
+end
+
 logic [9:0] tmds_internal [NUM_CHANNELS-1:0] /* verilator public_flat */ ;
 genvar i;
 generate
     // TMDS code production.
     for (i = 0; i < NUM_CHANNELS; i++)
     begin: tmds_gen
-        tmds_channel #(.CN(i)) tmds_channel (.clk_pixel(clk_pixel), .video_data(video_data[i*8+7:i*8]), .data_island_data(data_island_data[i*4+3:i*4]), .control_data(control_data[i*2+1:i*2]), .mode(mode), .tmds(tmds_internal[i]));
+        tmds_channel #(.CN(i)) tmds_channel (.clk_pixel(clk_pixel), .video_data(video_data_q[i*8+7:i*8]), .data_island_data(data_island_data_q[i*4+3:i*4]), .control_data(control_data_q[i*2+1:i*2]), .mode(mode_q), .tmds(tmds_internal[i]));
     end
 endgenerate
 
