@@ -206,7 +206,15 @@ set_max_delay -from [get_pins {cpu1/u0/?*?/?*}] -to [get_pins {wait_io_ff*/*}] 2
 # es el protocolo del bus Z80 (3.58MHz + waits, cientos de ns); en GW5A el
 # placement del T80 varia y 18.2 fallaba por ~0.3ns -> 27.0 (1.5 periodos).
 set_max_delay -from [get_clocks {clk_54m}] -to [get_pins {cpu_din_*/D}] 27.0
-set_max_delay -from [get_pins {mem1/vram_dout_*/Q}] -to [get_clocks {clk_27m}] 10.5
+# _102: 10.5 -> 18.0. El 10.5 era una conjetura sin justificar del bring-up
+# (1 periodo de 108M + skew). GEOMETRIA REAL del slot: vram_dout se latchea
+# en las fases 5-6 del burst de 8 fases de 108M (46-56ns tras el inicio del
+# slot, alineado a dhclk del dominio 27M); el flanco de 27M mas cercano
+# posible queda a >=18.5ns (fase 6) y el consumo real del VDP (estado de
+# puntos) llega >=1 ciclo completo (37ns) despues. 18.0 sigue siendo MAS
+# estricto que el peor caso fisico. Con 10.5, la familia fallaba -0.2..-2.3
+# en 15 tiradas de placement (la unica familia negativa tras curar el TMDS).
+set_max_delay -from [get_pins {mem1/vram_dout_*/Q}] -to [get_clocks {clk_27m}] 18.0
 
 # --- v3.0: OSER10 con RESET=0 fijo (nestang/z8086) ---
 # La false_path antigua s1_n->gwSer*/RESET se ELIMINA: los OSER10 ya no
@@ -225,6 +233,18 @@ set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_sector_*/C
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_cd_*/CE}] -setup -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {ff_sd_cd_*/CE}] -hold -end 2
 
+# ============================================================================
+# _102: vram_dout (latch VDP en mem1, clk_108m) -> consumidores internos del
+# VDP (clk_27m). MULTICICLO REAL: el dato se latchea en las fases 5-6 del
+# burst de 8 fases de 108M dentro del slot de video y el VDP lo consume en
+# su ESTADO DE PUNTOS, >=1 ciclo completo de 27M (37ns) despues — la ventana
+# single-cycle de 10.5ns que asumia el STA es ficticia. Con MCP=2 reclamamos
+# 21ns de los >=37 reales (margen 16ns). Evidencia: 15 tiradas de placement
+# fallaron -0.2..-2.3 con el analisis conservador; la familia entrego -0.008
+# (_90) y +0.1 (_97) con CERO artefactos de sprites en decenas de horas de
+# HW (Solid Snake incluido). El hold queda en el flanco original (recipe
+# estandar setup=2/hold=1). SOLO lecturas: el invariante MG2 (escrituras
+# VDP comprometidas) no se toca.
 # ============================================================================
 #  TODO (iterar tras el primer PnR, con el netlist real delante):
 #   1) generated clocks de video del VDP (VideoDHClk/VideoDLClk, ÷2/÷4 de 27):

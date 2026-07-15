@@ -2158,6 +2158,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     reg         wl_probe;      // 1=pasada de sondeo (64KB), 0=pasada completa
     reg  [4:0]  wl_att;        // billetes gastados (el acta lo publica)
     reg  [7:0]  wl_lfsr;       // retardo pseudoaleatorio entre billetes
+    // _102: LECTURAS FRIAS — la evidencia HW de la _101 (VERIF LIMPIO try=0
+    // + INTEG MAL-FIJO en el MISMO arranque, dos veces) demostro que el ojo
+    // malo solo corrompe lecturas tras un HUECO de inactividad: el verify
+    // leia a ritmo constante (~2us) y aprobaba ojos que el Z80 (pausas) y
+    // el motor (rafagas) sufren. Ahora 1 de cada 8 lecturas del verify
+    // espera 0-19us antes de disparar: solo aprueban ojos que aguantan
+    // lecturas frias — los de los arranques que SONABAN bien.
+    reg  [9:0]  wl_gap;        // hueco frio pendiente (ciclos)
     localparam  WL_FLASH_BASE = 24'h500000;
     localparam  WL_LEN        = 22'h200000;   // 2MB
     localparam  WL_PROBE_LEN  = 22'h010000;   // 64KB de sondeo
@@ -2176,7 +2184,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wl_retries <= 3'd0; wl_err <= 1'b0;
             wl_verify <= 1'b0; wl_verr <= 16'd0; wl_vfirst <= 22'h3FFFFF;
             wl_vres_i <= 3'd0; wl_fb <= 8'd0; wl_recal_tgl <= 1'b0;
-            wl_probe <= 1'b1; wl_att <= 5'd0; wl_lfsr <= 8'hA5;
+            wl_probe <= 1'b1; wl_att <= 5'd0; wl_lfsr <= 8'hA5;   // _102b: semilla nueva = re-tirada de la loteria de placement
+            wl_gap <= 10'd0;
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2324,11 +2333,28 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 else if (flash_busy) wl_flash_rd <= 1'b0;
                 else if (!wl_flash_rd) begin
                     wl_fb <= flash_dout;
+                    if (wl_lfsr[2:0] == 3'b000) begin
+                        // _102: lectura FRIA — hueco 0-19us antes de leer
+                        wl_gap <= {wl_lfsr[7:2], 4'd0};
+                        wl_tcnt <= 22'd0;
+                        wl_state <= 4'd8;
+                    end
+                    else begin
+                        wdbg_we <= 1'b0;
+                        wdbg_req <= ~wdbg_req;  // lectura DDR3 en wdbg_addr
+                        wl_tcnt <= 22'd0;
+                        wl_state <= 4'd10;
+                    end
+                end
+            end
+            4'd8: begin // _102: hueco frio y despues la lectura
+                if (wl_gap == 10'd0) begin
                     wdbg_we <= 1'b0;
-                    wdbg_req <= ~wdbg_req;      // lectura DDR3 en wdbg_addr
+                    wdbg_req <= ~wdbg_req;
                     wl_tcnt <= 22'd0;
                     wl_state <= 4'd10;
                 end
+                else wl_gap <= wl_gap - 10'd1;
             end
             4'd10: begin // esperar DDR3 y comparar
                 wl_tcnt <= wl_tcnt + 22'd1;
