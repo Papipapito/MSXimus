@@ -395,6 +395,8 @@ reg [3:0]  alive;                  // avanza con cada CE: latido visible
 assign diag = {ifw_hits, alive};
 
 reg mrd_d1, mwr_d1, done_d1;
+reg        fill_pend;              // _96: fill de la cache diferido 1 ciclo
+reg [17:0] fill_tag;
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
         mrd_d1 <= 1'b0; mwr_d1 <= 1'b0; done_d1 <= 1'b0;
@@ -404,6 +406,7 @@ always @(posedge clk_eng or negedge erst_n) begin
         lb_line <= 128'd0; lb_tag <= 18'd0; lb_v <= 1'b0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
         ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
+        fill_pend <= 1'b0; fill_tag <= 18'd0;
     end
     else begin
         mrd_d1 <= ~e_mrd_n;
@@ -419,13 +422,33 @@ always @(posedge clk_eng or negedge erst_n) begin
         // de stall no deberian coincidir, pero el HW de la _94 murio con esa
         // firma exacta. Orden: done primero (lee mem_we/mem_addr VIEJOS, aun
         // sin pisar), los flancos despues (su inflight<=1 gana, correcto).
+        //
+        // _96: el FILL va DIFERIDO 1 ciclo (fill_pend). En la _95 lb_line
+        // capturaba mem_rline en el PRIMER avistamiento del toggle: los 128
+        // bits (dominio x1) salen en el MISMO flanco x1 que eng_done_t, y en
+        // la alineacion x1==eng esa captura es una carrera de hold que el
+        // router cerro con +0.004ns — CUATRO PICOSEGUNDOS. En placa: lineas
+        // corruptas segun el patron de bits (headers con loops rotos =
+        // semitono alto + ruido de banda ancha = el "ya ni se oye un piano"
+        // de la _95; el test de 8 bytes pasaba porque ESA linea no disparaba
+        // la carrera). Un ciclo despues el payload lleva >=13.5ns quieto:
+        // captura limpia SIEMPRE. El STA seguira reportando el hold apretado
+        // estructural — esperado e inofensivo: con fill_pend=1 no puede haber
+        // lanzamiento simultaneo (la siguiente lectura tarda >=2 ciclos eng).
+        // El MDI directo (mem_rdata) ya tenia asentado inherente: la CYCLE1
+        // llega >=2 ciclos despues del done.
         if (mem_done_t != done_d1) begin
             mem_inflight <= 1'b0;
             if (!mem_we) begin
-                lb_line <= mem_rline;  // fill: la linea entera del ultimo miss
-                lb_tag  <= mem_addr[21:4];
-                lb_v    <= 1'b1;
+                fill_pend <= 1'b1;
+                fill_tag  <= mem_addr[21:4];
             end
+        end
+        if (fill_pend) begin
+            fill_pend <= 1'b0;
+            lb_line <= mem_rline;      // payload asentado: captura limpia
+            lb_tag  <= fill_tag;
+            lb_v    <= 1'b1;
         end
         if (lb_fast) begin
             // hit del ciclo anterior: lb_byte ya es valido -> soltar el CE.
@@ -459,6 +482,8 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_inflight <= 1'b1;      // tambien en escritura: serializa
             if (e_addr22[21:4] == lb_tag)
                 lb_v <= 1'b0;          // no servir datos rancios tras escribir
+            fill_pend <= 1'b0;         // _96: y cancelar un fill pendiente —
+                                       // cachearia la linea PRE-escritura
         end
 
         // _95: watchdog de inflight (despues de todo: su liberacion forzada
