@@ -643,13 +643,40 @@ void WavSetAddr(u8 a2, u8 a1, u8 a0)
 	WAV_WAIT();
 }
 
+//-----------------------------------------------------------------------------
+// _95: telemetria del blindaje anti-cuelgue (los cuelgues fantasma de la
+// _92-_94). Lecturas nuevas:
+//   IN 36h ST = {err, reintentos[2:0], done, activo, busy, ready} del loader
+//   IN 34h D3 = {calib_drop, wd_calib[2:0], ops_rescatadas[3:0]} de la DDR3
+//   IN 35h MT = {inflight_wd[3:0], alive[3:0]} del motor; alive avanza con
+//               cada CE -> dos lecturas con nibble bajo distinto = motor VIVO
+//-----------------------------------------------------------------------------
+void PrintDiagLine(u8 y)
+{
+	u8 m1, m2, alive = 0;
+	Print_SetPosition(1, y);
+	Print_DrawText("DIAG ST=");
+	PrintU8Hex2(g_WavA2);
+	Print_DrawText(" D3=");
+	PrintU8Hex2(g_WavA0);
+	Print_DrawText(" MT=");
+	m1 = g_WavA1;
+	PrintU8Hex2(m1);
+	for (u8 i = 0; i < 8; ++i)
+	{
+		m2 = g_WavA1;
+		if ((m2 ^ m1) & 0x0F) { alive = 1; break; }
+	}
+	Print_DrawText(alive ? " vivo" : " MUERTO");
+}
+
 void TestWaveDDR3()
 {
 	u8 st;
 	u16 errs = 0;
 
 	Screen0();
-	Print_DrawTextAt(1, 1, "DDR3 WAVE (OPL4 fase 2) _86");
+	Print_DrawTextAt(1, 1, "DDR3 WAVE (OPL4 fase 2) _95");
 
 	st = g_WavA2;
 	Print_DrawTextAt(1, 3, "Calibracion DDR3: ");
@@ -732,6 +759,7 @@ void TestWaveDDR3()
 	}
 
 ddr_end:
+	PrintDiagLine(17);                    // _95: telemetria siempre visible
 	Print_DrawTextAt(1, 22, "ESPACIO para seguir");
 	WaitSpace();
 }
@@ -864,7 +892,7 @@ void TestOPL4Wave()
 	bool det;
 
 	Screen0();
-	Print_DrawTextAt(1, 1, "MOONSOUND WAVE (YMF278B) _89");
+	Print_DrawTextAt(1, 1, "MOONSOUND WAVE (YMF278B) _95");
 
 	// NEW/NEW2 (imprescindible para tocar los regs wave)
 	Opl4Wr1(0x05, 0x03);
@@ -881,6 +909,7 @@ void TestOPL4Wave()
 	Print_DrawText(det ? "SI" : "NO (stub/core viejo)");
 	Print_DrawText(" ");
 	PrintU8Hex2(id0); PrintU8Hex2(id1);
+	PrintDiagLine(20);                   // _95: aqui se ve SI el motor late
 	if (!det) goto wave_end;
 
 	// si el loader aun copia la YRW801, esperar (bit2 del puerto 36)

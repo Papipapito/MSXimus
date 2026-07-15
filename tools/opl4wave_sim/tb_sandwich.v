@@ -313,12 +313,24 @@ module DDR3_Memory_Interface_Top (
     reg [15:0]  q_mask;
     integer     q_lat = 0;
     integer     bidx;
+    // _95: inyeccion de fallo — +drop_read=N hace que la N-esima lectura NO
+    // devuelva rd_data_valid JAMAS (la IP "se la come"): valida el watchdog
+    // de operacion de wave_ddr3 (done falso FF a ~0.9ms, motor sigue vivo)
+    integer     drop_read = 0, rd_seq = 0;
+    initial if (!$value$plusargs("drop_read=%d", drop_read)) drop_read = 0;
     always @(posedge clk_out) begin
         rd_data_valid <= 0;
         if (cmd_en && cmd_ready) begin
             if (cmd == 3'b001) begin
-                q_addr <= addr; q_rd_pend <= 1;
-                q_lat <= 18 + ({$random} % 6);
+                rd_seq <= rd_seq + 1;
+                if (drop_read != 0 && (rd_seq + 1) == drop_read) begin
+                    q_rd_pend <= 0;    // tragada: ni valid ni datos
+                    $display("[stub] lectura %0d TRAGADA (inyeccion de fallo)", rd_seq + 1);
+                end
+                else begin
+                    q_addr <= addr; q_rd_pend <= 1;
+                    q_lat <= 18 + ({$random} % 6);
+                end
             end
             else begin
                 // escritura: data llega por wr_data_en este mismo ciclo o proximo

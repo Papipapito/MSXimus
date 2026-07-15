@@ -737,7 +737,9 @@ assign keyboard_addr = ppi_port_c[3:0];
                      `endif
                     `endif
                     `ifdef ENABLE_WAVE_DDR3
-                     ( wdbg_rd36_w == 1 ) ? wdbg_status :     // 36h: {busy, ready}
+                     ( wdbg_rd34_w == 1 ) ? wdbg_diag_ddr3 :  // 34h: diag DDR3 (_95)
+                     ( wdbg_rd35_w == 1 ) ? wdbg_diag_eng :   // 35h: diag motor (_95)
+                     ( wdbg_rd36_w == 1 ) ? wdbg_status :     // 36h: {err,ret,done,act,busy,rdy}
                      ( wdbg_rd37_w == 1 ) ? wdbg_rdata :      // 37h: byte DDR3 prefetchado
                     `endif
                 `endif
@@ -1435,21 +1437,38 @@ assign keyboard_addr = ppi_port_c[3:0];
     // RX del BL616), robado al companion (sacrificado en F1). Baud del core:
     // 27M/31 = 870968; el firmware BL616 va a 869565 (-0.16%).
     wire bl616_uart_tx_w;
+    // _95: BUS REGISTRADO (patron _91) — uwifi vive en clk_27m y decodificaba
+    // el bus del T80 (lanzado en bajada de 54M) directo: camino de medio
+    // ciclo que perdio la loteria de placement en la _95 (p1r1: -0.905 en
+    // cpu1/RD->my_rx_state). Flop directo en 27M = cono trivial; el modulo
+    // ve el bus 1 ciclo de 27M tarde (37ns, nada frente a los ~560ns del
+    // ciclo I/O en turbo). wait_o llega <100ns tras IORQ: el T80 muestrea
+    // /WAIT a >=186ns — margen sobrado. Sin tocar wifi_lite.vhd.
+    reg        w27_iorq_n, w27_wr_n, w27_rd_n;
+    reg [15:0] w27_addr;
+    reg [7:0]  w27_din;
+    always @(posedge clk_27m) begin
+        w27_iorq_n <= bus_iorq_n;
+        w27_wr_n   <= bus_wr_n;
+        w27_rd_n   <= bus_rd_n;
+        w27_addr   <= bus_addr;
+        w27_din    <= cpu_dout;
+    end
     wifi uwifi (
         .clk_i      (clk_27m),
         .wait_o     (wait_uart),
         .reset_i    (bus_reset_n),
-        .iorq_i     (bus_iorq_n),
-        .wrt_i      (bus_wr_n),
-        .rd_i       (bus_rd_n),
+        .iorq_i     (w27_iorq_n),
+        .wrt_i      (w27_wr_n),
+        .rd_i       (w27_rd_n),
 `ifdef WIFI_PMOD_TEST
         .rx_i       (uart_pmod_rx),          // TEST: RX por PMOD1 D22 (CH340 TX / PC-de-ESP)
 `else
         .rx_i       (bl616_jtagsel),         // onboard: V14 <- BL616 IO28 TX
 `endif
         .tx_o       (bl616_uart_tx_w),
-        .adr_i      (bus_addr),
-        .db_i       (cpu_dout),
+        .adr_i      (w27_addr),
+        .db_i       (w27_din),
         .db_o       (uart_dout)
     );
 
@@ -1961,7 +1980,25 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0]  y8950_dout;
     wire [15:0] y8950_wav;
     wire        y8950_int_n;   // _81: hacia el /INT del Z80 (wired-AND)
-    assign y8950_req_n = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_wr_n == 1'b0 ) ? 1'b0 : 1'b1;   // I/O:C0-C1h escritura
+    // _95: BUS REGISTRADO (patron _91) para el jtopl2 — el T80 lanza en el
+    // flanco de BAJADA de clk_54m y el decode al de subida deja 9.26ns menos
+    // el cono: este camino (IORQ->u_mmr/value_*) rotaba como perdedor de la
+    // loteria de placement (p0r1: -0.384). Flop directo del bus = cono
+    // trivial que SI cierra; el decode pasa a tener ciclo completo. El
+    // strobe de escritura del Z80 dura cientos de ns: +18.5ns es nada.
+    // (Las strobes del glue ADPCM de abajo ya iban doble-registradas.)
+    reg        y54_iorq_n, y54_wr_n;
+    reg [1:0]  y54_addr;               // A[1:0] basta: decode C0-C1 + addr[0]
+    reg        y54_adr_c0c1;           // A[7:1]==1100000 registrado
+    reg [7:0]  y54_din;
+    always @(posedge clk_54m) begin
+        y54_iorq_n  <= bus_iorq_n;
+        y54_wr_n    <= bus_wr_n;
+        y54_addr    <= bus_addr[1:0];
+        y54_adr_c0c1<= (bus_addr[7:1] == 7'b1100000);
+        y54_din     <= cpu_dout;
+    end
+    assign y8950_req_n = ( y54_iorq_n == 1'b0 && y54_adr_c0c1 && y54_wr_n == 1'b0 ) ? 1'b0 : 1'b1;   // I/O:C0-C1h escritura
     assign y8950_rd_r  = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b1100000 && bus_rd_n == 1'b0 ) ? 1'b1 : 1'b0;   // I/O:C0-C1h lectura (status/dato)
 
 `ifdef ENABLE_Y8950
@@ -1970,8 +2007,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .rst  (~bus_reset_n),        // rst >= 6 ciclos clk&cen
         .clk  (clk_54m),             // mismo dominio que el OPLL
         .cen  (clk_enable_3m6_54),   // FM 3.58 MHz (identico al OPLL)
-        .din  (cpu_dout),
-        .addr (bus_addr[0]),         // 0=registro (C0), 1=dato (C1)
+        .din  (y54_din),             // _95: bus registrado (coherente con cs_n)
+        .addr (y54_addr[0]),         // 0=registro (C0), 1=dato (C1)
         .cs_n (y8950_req_n),         // strobe de escritura (patron OPLL)
         .wr_n (1'b0),
         .dout (jtopl2_dout),
@@ -2044,14 +2081,30 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // 37h: OUT=escribir byte (autoinc al completar) / IN=byte prefetchado
     //      (y dispara prefetch de addr+1 — patron readData del ADPCM)
     // IN 36h = status {6'b0, busy, ready}
+    wire        wdbg_rd34_w;             // _95: IN 34h = diag DDR3
+    wire        wdbg_rd35_w;             // _95: IN 35h = diag motor
     wire        wdbg_rd36_w;
     wire        wdbg_rd37_w;
     wire [7:0]  wdbg_status;
     wire [7:0]  wdbg_rdata;
+    wire [7:0]  wdbg_diag_ddr3;          // {calib_drop, wd_fires[2:0], wd_ops[3:0]}
+    wire [7:0]  wdbg_diag_eng;           // {ifw_hits[3:0], alive[3:0]}
+    // _95: los weng_* van declarados AQUI, ANTES de la instancia uwave que
+    // los usa: Gowin los declaraba IMPLICITOS (1 bit, EX3638) al verlos
+    // primero en el port map — llevaba pasando desde la _89 con weng_addr
+    // (el ancho explicito acababa ganando, la _91 lo probo en HW), pero con
+    // el bus de 128 bits de la cache no se deja NADA a la interpretacion.
+    wire        weng_x1;                 // clk_x1 de la DDR3 (74.25MHz)
+    wire        weng_req, weng_we, weng_done;
+    wire [21:0] weng_addr;
+    wire [7:0]  weng_wdata, weng_rdata;
+    wire [127:0] weng_rline;             // linea entera del ultimo fetch (_94)
 `ifdef ENABLE_WAVE_DDR3
     wire wdbg_sel    = (bus_iorq_n == 1'b0) && (bus_m1_n == 1'b1) && (bus_addr[7:2] == 6'b001101);
     wire wdbg_wr_any = wdbg_sel && (bus_wr_n == 1'b0);
     wire wdbg_rd_any = wdbg_sel && (bus_rd_n == 1'b0);
+    assign wdbg_rd34_w = wdbg_rd_any && (bus_addr[1:0] == 2'b00);
+    assign wdbg_rd35_w = wdbg_rd_any && (bus_addr[1:0] == 2'b01);
     assign wdbg_rd36_w = wdbg_rd_any && (bus_addr[1:0] == 2'b10);
     assign wdbg_rd37_w = wdbg_rd_any && (bus_addr[1:0] == 2'b11);
 
@@ -2079,10 +2132,15 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     reg  [23:0] wl_flash_addr;
     reg  [21:0] wl_count;
     reg         wl_flash_rd, wl_flash_term;
-    reg  [6:0]  wl_tcnt;       // _90: timeout del cierre del stream rancio
+    reg  [21:0] wl_tcnt;       // _90: timeout del cierre; _95: 22 bits — el
+                               // bit6 sigue siendo el timeout corto (64c) y
+                               // el bit21 es el duro (~39ms) de los estados
+    reg  [2:0]  wl_retries;    // _95: reintentos de la copia completa
+    reg         wl_err;        // _95: pegajoso — 7 reintentos agotados
     localparam  WL_FLASH_BASE = 24'h500000;
     localparam  WL_LEN        = 22'h200000;   // 2MB
-    assign wdbg_status = {5'd0, wl_active, wdbg_busy, wdbg_ready};
+    // _95: status ampliado — el ROM lo imprime tal cual en el test 3
+    assign wdbg_status = {wl_err, wl_retries, wl_done, wl_active, wdbg_busy, wdbg_ready};
 
     always @(posedge clk_54m or negedge bus_reset_n) begin
         if (!bus_reset_n) begin
@@ -2090,7 +2148,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wdbg_wdata <= 8'd0; wdbg_inc_pend <= 1'b0; wdbg_busy_d <= 1'b0;
             wl_active <= 1'b0; wl_done <= 1'b0; wl_primed <= 1'b0;
             wl_state <= 3'd0; wl_flash_addr <= 24'd0; wl_count <= 22'd0;
-            wl_flash_rd <= 1'b0; wl_flash_term <= 1'b0; wl_tcnt <= 7'd0;
+            wl_flash_rd <= 1'b0; wl_flash_term <= 1'b0; wl_tcnt <= 22'd0;
+            wl_retries <= 3'd0; wl_err <= 1'b0;
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2111,7 +2170,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                     wl_flash_addr <= WL_FLASH_BASE;
                     wl_count <= WL_LEN;
                     wl_primed <= 1'b0;
-                    wl_tcnt <= 7'd0;
+                    wl_tcnt <= 22'd0;
                     wdbg_addr <= 22'd0;
                     wl_state <= 3'd4;
                 end
@@ -2122,21 +2181,42 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 // 0x480006 (zona borrada = FF) en vez de abrir en 0x500000.
                 // La YRW801 acababa copiada desplazada +0x7FFFA. Bug desde la
                 // _87, enmascarado porque la zona siempre habia estado vacia.
+                //
+                // _95: cierre INCONDICIONAL — term alto 256 ciclos seguidos
+                // (mas que cualquier byte SPI en vuelo, ~35c) y SIN interpretar
+                // busy. La version _90-_94 tomaba "busy=1" como "se esta
+                // cerrando", pero busy tambien es 1 en mitad de un byte: en
+                // esa carrera soltaba el term, el stream quedaba ABIERTO y la
+                // copia salia de la direccion equivocada (= FF si era la cola
+                // del pack). El flash atiende terminate solo en WAIT_NEXT
+                // (entre bytes) y lo ignora cerrado: sujetarlo 256c cubre
+                // abierto-parado, en-mitad-de-byte y ya-cerrado por igual.
                 wl_flash_term <= 1'b1;
-                wl_tcnt <= wl_tcnt + 7'd1;
-                if (flash_busy) begin          // DONE alcanzado: se esta cerrando
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (wl_tcnt[8]) begin
                     wl_flash_term <= 1'b0;
+                    wl_tcnt <= 22'd0;
                     wl_state <= 3'd5;
                 end
-                else if (wl_tcnt[6]) begin     // 64 ciclos sin reaccion: ya estaba
-                    wl_flash_term <= 1'b0;     // cerrado (la carrera fue al reves)
+            end
+            3'd5: begin // esperar el reposo del flash (LOAD_CMD: busy=0, CS alto)
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (!flash_busy) begin
+                    wl_tcnt <= 22'd0;
                     wl_state <= 3'd1;
                 end
+                else if (wl_tcnt[21]) begin    // _95: cierre que no acaba (~39ms)
+                    wl_tcnt <= 22'd0;
+                    wl_state <= 3'd6;
+                end
             end
-            3'd5:   // esperar el cierre completo (LOAD_CMD: busy=0, CS alto)
-                if (!flash_busy) wl_state <= 3'd1;
             3'd1: begin // bucle: capturar byte y escribirlo en DDR3
-                if (flash_busy == 1'b0) begin
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (wl_tcnt[21]) begin         // _95: ~39ms sin aceptar un byte
+                    wl_tcnt <= 22'd0;          // — sea lo que sea, reintentar
+                    wl_state <= 3'd6;          // la copia entera desde cero
+                end
+                else if (flash_busy == 1'b0) begin
                     if (~wl_flash_rd) begin
                         if (!flash_write_busy && !wdbg_busy) begin
                             if (wl_primed) begin
@@ -2146,6 +2226,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                                 wdbg_inc_pend <= 1'b1;      // autoinc al completar
                             end
                             if (wl_count == 22'd0) begin
+                                wl_tcnt <= 22'd0;
                                 wl_state <= 3'd2;
                             end
                             else begin
@@ -2156,6 +2237,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                                 wl_count <= wl_count - 22'd1;
                                 wl_flash_rd <= 1'b1;
                                 wl_primed <= 1'b1;
+                                wl_tcnt <= 22'd0;           // _95: hay progreso
                             end
                         end
                     end
@@ -2164,11 +2246,37 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             end
             3'd2: begin // terminar el stream del flash y retirarse
                 wl_flash_term <= 1'b1;
-                if (!wdbg_busy) begin
+                wl_tcnt <= wl_tcnt + 22'd1;
+                // _95: el timeout garantiza que wl_done SIEMPRE llega — el
+                // reset del motor (opl4pcm_rst_n) depende de el; en la _94
+                // un cuelgue aqui dejaba el motor en reset PARA SIEMPRE
+                if (!wdbg_busy || wl_tcnt[21]) begin
                     wl_flash_term <= 1'b0;
                     wl_active <= 1'b0;
                     wl_done <= 1'b1;
                     wl_state <= 3'd3;
+                end
+            end
+            3'd6: begin // _95: REINTENTO — cerrar todo y copiar de cero
+                wl_flash_term <= 1'b0;
+                wl_flash_rd   <= 1'b0;
+                if (!wdbg_busy) begin          // (acotado: el watchdog de op
+                    wdbg_inc_pend <= 1'b0;     //  de wave_ddr3 lo garantiza)
+                    if (wl_retries == 3'd7) begin
+                        wl_err    <= 1'b1;     // agotado: rendirse PERO soltar
+                        wl_done   <= 1'b1;     // el motor igualmente
+                        wl_active <= 1'b0;
+                        wl_state  <= 3'd3;
+                    end
+                    else begin
+                        wl_retries <= wl_retries + 3'd1;
+                        wl_flash_addr <= WL_FLASH_BASE;
+                        wl_count   <= WL_LEN;
+                        wl_primed  <= 1'b0;
+                        wdbg_addr  <= 22'd0;
+                        wl_tcnt    <= 22'd0;
+                        wl_state   <= 3'd4;
+                    end
                 end
             end
             default: ;
@@ -2219,7 +2327,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .eng_addr   (weng_addr),
         .eng_wdata  (weng_wdata),
         .eng_rdata  (weng_rdata),
+        .eng_rline  (weng_rline),    // _95: ¡en la _94 quedo SIN CONECTAR!
+                                     // (la cache de opl4_pcm se llenaba de
+                                     // ceros en HW; ningun TB cubre top.v)
         .eng_done_t (weng_done),
+        .diag       (wdbg_diag_ddr3),
         .clk_27     (clk27_video),   // misma topologia que el ref de nand2mario
         .clk_g50    (ex_clk_27m),    // pad de 50MHz (mal llamado)
         .pll27_lock (pll27_lock),    // _87: calibracion estable entre boots
@@ -2240,10 +2352,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .ddr_dqs_n  (ddr_dqs_n)
     );
 `else
+    assign wdbg_rd34_w = 1'b0;
+    assign wdbg_rd35_w = 1'b0;
     assign wdbg_rd36_w = 1'b0;
     assign wdbg_rd37_w = 1'b0;
     assign wdbg_status = 8'hFF;
     assign wdbg_rdata  = 8'hFF;
+    assign wdbg_diag_ddr3 = 8'hFF;
     // DDR3 en reposo seguro
     assign ddr_addr = 15'd0;  assign ddr_bank = 3'd0;
     assign ddr_cs = 1'b1;     assign ddr_ras = 1'b1;
@@ -2295,15 +2410,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0]  opl4pcm_dout;
     wire [1:0]  opl4wave_status;
     wire signed [15:0] opl4pcm_l, opl4pcm_r;
-    wire        weng_x1;                 // clk_x1 de la DDR3 (74.25MHz)
+    // (los weng_* estan declarados arriba, junto al bloque wdbg, ANTES de
+    // la instancia uwave — ver nota _95 alli)
     // reloj del motor = clk_x1/2. El divisor vive AQUI para que el net sea
     // top-level y el create_generated_clock del .sdc lo encuentre (mismo
     // patron que VideoDHClk). Nombre del net: opl4_clk37.
     reg         opl4_clk37 = 1'b0;
     always @(posedge weng_x1) opl4_clk37 <= ~opl4_clk37;
-    wire        weng_req, weng_we, weng_done;
-    wire [21:0] weng_addr;
-    wire [7:0]  weng_wdata, weng_rdata;
 `ifdef ENABLE_OPL4_WAVE
     wire opl4pcm_rst_n = bus_reset_n & wdbg_ready & wl_done;
 
@@ -2329,7 +2442,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .mem_addr    (weng_addr),
         .mem_wdata   (weng_wdata),
         .mem_rdata   (weng_rdata),
-        .mem_done_t  (weng_done)
+        .mem_rline   (weng_rline),    // _95: en la _94 quedo SIN CONECTAR
+        .mem_done_t  (weng_done),
+        .diag        (wdbg_diag_eng)
     );
 `else
     assign opl4pcm_rd_w   = 1'b0;
@@ -2340,6 +2455,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign opl4pcm_r = 16'sd0;
     assign weng_req = 1'b0;  assign weng_we = 1'b0;
     assign weng_addr = 22'd0; assign weng_wdata = 8'd0;
+    assign wdbg_diag_eng = 8'hFF;
 `endif
 
     //scc & ghost scc

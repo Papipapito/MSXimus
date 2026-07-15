@@ -64,7 +64,13 @@ module opl4_pcm (
     output reg  [7:0]  mem_wdata,
     input  wire [7:0]  mem_rdata,      // registrado en wave_ddr3, estable
     input  wire [127:0] mem_rline,     // _94: linea entera de la ultima lectura
-    input  wire        mem_done_t      // TOGGLE = completada
+    input  wire        mem_done_t,     // TOGGLE = completada
+
+    // ---- telemetria (_95): {ifw_hits[3:0], alive[3:0]} ----
+    // alive avanza con cada CE del motor: dos lecturas seguidas con el
+    // nibble bajo distinto = el dominio del motor esta VIVO. Muestreado en
+    // crudo desde clk_host (diagnostico humano, el tearing da igual).
+    output wire [7:0]  diag
 );
 
 // ===========================================================================
@@ -379,6 +385,15 @@ reg [7:0]   lb_byte;
 // MDI del motor: byte de la cache en hit, si no el del puerto
 wire [7:0] mdi_eff = lb_hit ? lb_byte : mem_rdata;
 
+// _95: watchdog de mem_inflight — ultima red por debajo de todo: si aun con
+// el rescate de wave_ddr3 (0.9ms) el done no llega (toggle perdido en una
+// colision, doble flip, lo que sea), a ~3.5ms se libera la CE a la fuerza.
+// El motor muestrea UN dato rancio y sigue vivo; ifw_hits lo delata.
+reg [17:0] ifw;
+reg [3:0]  ifw_hits;
+reg [3:0]  alive;                  // avanza con cada CE: latido visible
+assign diag = {ifw_hits, alive};
+
 reg mrd_d1, mwr_d1, done_d1;
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
@@ -388,12 +403,30 @@ always @(posedge clk_eng or negedge erst_n) begin
         mem_inflight <= 1'b0;
         lb_line <= 128'd0; lb_tag <= 18'd0; lb_v <= 1'b0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
+        ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
     end
     else begin
         mrd_d1 <= ~e_mrd_n;
         mwr_d1 <= ~e_mwr_n;
         done_d1 <= mem_done_t;
         mem_req <= 1'b0;
+        if (ce) alive <= alive + 4'd1;
+        // _95: el done se consume ANTES y en un if INDEPENDIENTE — la version
+        // _91.._94 lo tenia como else-if detras de los flancos MRD/MWR, pero
+        // done_d1 se actualiza SIEMPRE arriba: si el done coincidia en ciclo
+        // con un flanco nuevo, el evento se consumia sin procesar y
+        // mem_inflight quedaba clavado a 1 (motor congelado). Por disciplina
+        // de stall no deberian coincidir, pero el HW de la _94 murio con esa
+        // firma exacta. Orden: done primero (lee mem_we/mem_addr VIEJOS, aun
+        // sin pisar), los flancos despues (su inflight<=1 gana, correcto).
+        if (mem_done_t != done_d1) begin
+            mem_inflight <= 1'b0;
+            if (!mem_we) begin
+                lb_line <= mem_rline;  // fill: la linea entera del ultimo miss
+                lb_tag  <= mem_addr[21:4];
+                lb_v    <= 1'b1;
+            end
+        end
         if (lb_fast) begin
             // hit del ciclo anterior: lb_byte ya es valido -> soltar el CE.
             // ¡OJO: el hit DEBE sujetar la CYCLE1 de muestreo como cualquier
@@ -427,14 +460,19 @@ always @(posedge clk_eng or negedge erst_n) begin
             if (e_addr22[21:4] == lb_tag)
                 lb_v <= 1'b0;          // no servir datos rancios tras escribir
         end
-        else if (mem_done_t != done_d1) begin
-            mem_inflight <= 1'b0;
-            if (!mem_we) begin
-                lb_line <= mem_rline;  // fill: la linea entera del ultimo miss
-                lb_tag  <= mem_addr[21:4];
-                lb_v    <= 1'b1;
+
+        // _95: watchdog de inflight (despues de todo: su liberacion forzada
+        // solo gana si NADIE mas decidio sobre mem_inflight este ciclo)
+        if (mem_inflight) begin
+            ifw <= ifw + 18'd1;
+            if (ifw[17]) begin
+                mem_inflight <= 1'b0;
+                lb_hit <= 1'b0;        // que muestree mem_rdata, no la cache
+                ifw <= 18'd0;
+                if (ifw_hits != 4'd15) ifw_hits <= ifw_hits + 4'd1;
             end
         end
+        else ifw <= 18'd0;
     end
 end
 

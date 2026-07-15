@@ -55,6 +55,12 @@ module wave_ddr3 (
                                       // cache vive en opl4_pcm, en clk_eng)
     output reg         eng_done_t,    // TOGGLE = operacion completada
 
+    // ---- telemetria de diagnostico (_95) ----
+    // {calib_drop, wd_fires[2:0], wd_ops[3:0]} — contadores cuasi-estaticos
+    // (dominios g50/x1); el lado MSX los muestrea en crudo: son para leerlos
+    // UN humano en pantalla, un tearing puntual es irrelevante.
+    output wire [7:0]  diag,
+
     // ---- relojes ----
     input  wire        clk_27,        // 27MHz (cascada de video, como el ref)
     input  wire        clk_g50,       // pad 50MHz (ex_clk_27m)
@@ -109,6 +115,15 @@ always @(posedge clk_g50) begin
         wd_cnt <= wd_cnt + 22'd1;
         wd_rst <= (wd_cnt[21] && (wd_cnt[20:8] == 13'd0));  // pulso 256 ciclos/42ms
     end
+end
+
+// _95: contar los disparos del watchdog de calibracion de ESTE arranque
+// (saturante a 7) — telemetria: cuantos reintentos costo calibrar
+reg        wd_rst_d  = 1'b0;
+reg [2:0]  wd_fires  = 3'd0;
+always @(posedge clk_g50) begin
+    wd_rst_d <= wd_rst;
+    if (wd_rst && !wd_rst_d && wd_fires != 3'd7) wd_fires <= wd_fires + 3'd1;
 end
 
 // ---------------------------------------------------------------------------
@@ -250,6 +265,28 @@ reg [7:0]  op_wdata;
 reg [1:0] st;
 localparam ST_IDLE = 2'd0, ST_ISSUE = 2'd1, ST_WAITRD = 2'd2;
 
+// _95: WATCHDOG DE OPERACION — la _94 murio en HW con sintomas de "una
+// transaccion que nunca vuelve" (motor congelado leyendo 0000, con STA y
+// sims limpios). Si la IP se come un app_rdy o un rd_data_valid, este FSM
+// se quedaba clavado PARA SIEMPRE y arrastraba: mem_inflight del motor ->
+// CE congelada -> /WAIT timeout -> todo lee 00. Ahora: a ~0.9ms se completa
+// la operacion EN FALSO (FF) por el camino normal del toggle (las fases del
+// handshake se conservan) y se cuenta en wd_ops. Un byte corrupto y un
+// contador visible > un motor muerto. OJO: tras un rescate en ST_WAITRD un
+// rd_data_valid tardio puede completar la SIGUIENTE lectura con dato viejo
+// — asumido: wd_ops delata que paso.
+reg [16:0] op_wd;
+reg [3:0]  wd_ops;
+
+// _95: deteccion de caida de calibracion post-exito (pegajosa; fuera del
+// reset del FSM para sobrevivir a recalibraciones)
+reg calib_seen = 1'b0, calib_drop = 1'b0;
+always @(posedge clk_x1) begin
+    if (init_calib_complete) calib_seen <= 1'b1;
+    if (calib_seen && !init_calib_complete) calib_drop <= 1'b1;
+end
+assign diag = {calib_drop, wd_fires, wd_ops};
+
 always @(posedge clk_x1 or posedge ddr_rst) begin
     if (ddr_rst) begin
         req_s1 <= 1'b0; req_s2 <= 1'b0; req_s3 <= 1'b0; req_ack <= 1'b0;
@@ -262,11 +299,14 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         eng_rline <= 128'd0;
         op_eng <= 1'b0; op_we <= 1'b0; op_addr <= 22'd0; op_wdata <= 8'd0;
         eng_rdata <= 8'd0; eng_done_t <= 1'b0;
+        op_wd <= 17'd0; wd_ops <= 4'd0;
     end
     else begin
         req_s1 <= req_toggle;
         req_s2 <= req_s1;
         req_s3 <= req_s2;
+        if (st == ST_IDLE) op_wd <= 17'd0;
+        else               op_wd <= op_wd + 17'd1;
         app_en <= 1'b0;
         app_wdf_wren <= 1'b0;
 
@@ -299,7 +339,18 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                 end
             end
         ST_ISSUE:
-            if (app_rdy && app_wdf_rdy) begin
+            if (op_wd[16]) begin           // _95: rdy atascado — rescate
+                if (op_eng) begin
+                    eng_rdata <= 8'hFF; eng_rline <= {128{1'b1}};
+                    eng_done_t <= ~eng_done_t;
+                end
+                else begin
+                    rdata_x1 <= 8'hFF; done_x1 <= ~done_x1;
+                end
+                if (wd_ops != 4'd15) wd_ops <= wd_ops + 4'd1;
+                st <= ST_IDLE;
+            end
+            else if (app_rdy && app_wdf_rdy) begin
                 app_addr <= {7'd0, op_addr[21:4], 3'b000};  // rafaga alineada (palabras de 16b)
                 if (op_we) begin
                     app_cmd <= 3'b000;
@@ -328,6 +379,17 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     rdata_x1 <= app_rd_data[op_addr[3:0]*8 +: 8];
                     done_x1 <= ~done_x1;
                 end
+                st <= ST_IDLE;
+            end
+            else if (op_wd[16]) begin      // _95: lectura que nunca vuelve
+                if (op_eng) begin
+                    eng_rdata <= 8'hFF; eng_rline <= {128{1'b1}};
+                    eng_done_t <= ~eng_done_t;
+                end
+                else begin
+                    rdata_x1 <= 8'hFF; done_x1 <= ~done_x1;
+                end
+                if (wd_ops != 4'd15) wd_ops <= wd_ops + 4'd1;
                 st <= ST_IDLE;
             end
         default: st <= ST_IDLE;

@@ -191,7 +191,7 @@ add_file constraints/msx_console60k.sdc
 # Pines dedicados liberados como GPIO (60K): JTAG=SPI del BL616 onboard;
 # MSPI+CPU=flash compartida; DONE/READY=los 2 LEDs onboard (como C64Nano).
 set_option -use_sspi_as_gpio 1 -use_mspi_as_gpio 1 -use_jtag_as_gpio 1 -use_cpu_as_gpio 1 -use_done_as_gpio 1 -use_ready_as_gpio 1 -top_module top -verilog_std sysv2017 -include_path src
-set_option -place_option 1
+set_option -place_option 0
 set_option -route_option 1
 
 run syn
