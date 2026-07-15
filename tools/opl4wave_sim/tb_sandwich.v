@@ -1,23 +1,25 @@
 // ============================================================================
-// tb_sandwich.v — EL SANDWICH COMPLETO: wave_ddr3 REAL + opl4_pcm + motor,
-// con un modelo conductual de la IP DDR3 de Gowin (stubs abajo).
-//
-// Cierra el punto ciego de todas las sims anteriores: wave_ddr3 nunca habia
-// entrado en simulacion (se sustituia por una memoria falsa). Reproduce la
-// secuencia del fallo HW de la _93: loader -> lecturas host (test 3) ->
-// lecturas del motor (test 4) -> re-lectura host -> test de RAM del motor,
-// TODO con la "tormenta" de fetches de los slots barridos de fondo.
+// tb_sandwich.v — EL SANDWICH COMPLETO _104: memory_ctrl REAL + modelo W9825
+// + wave_sdram (shim) + opl4_pcm + motor. La secuencia historica del fallo
+// HW de la _93: loader -> lecturas host -> lecturas del motor -> RAM test.
+// (La version DDR3 queda en tb_sandwich_ddr3.v.bak como referencia.)
 // ============================================================================
 `timescale 1ns/1ps
 
 module tb_sandwich;
 
-reg clk_x1_src = 0;
-always #6.734 clk_x1_src = ~clk_x1_src;    // 74.25 MHz (la "IP" lo devuelve)
+reg clk_108 = 0;
+always #4.63 clk_108 = ~clk_108;           // 108 MHz
 reg clk_host = 0;
-always #9.26 clk_host = ~clk_host;         // 54 MHz
-reg clk_g50 = 0;
-always #10 clk_g50 = ~clk_g50;             // 50 MHz (POR/watchdog)
+initial begin #4.63; forever begin clk_host = ~clk_host; #9.26; end end
+reg clk_eng = 0;
+always #13.333 clk_eng = ~clk_eng;         // 37.5 MHz (CLKOUT4)
+
+// fases de video (cadencia del TB de memory: dh=13.5MHz, dl=6.75MHz)
+reg [3:0] phc = 0;
+always @(posedge clk_108) phc <= phc + 1;
+wire video_dhclk = ~phc[2];
+wire video_dlclk = ~phc[3];
 
 reg rst_n = 0;
 
@@ -30,15 +32,11 @@ wire        h_done;
 wire        h_ready;
 
 // ---- motor ----
-wire        eng_clk_x1;
-reg         opl4_clk37 = 0;
-always @(posedge eng_clk_x1) opl4_clk37 <= ~opl4_clk37;   // divisor como top.v
-
 reg  eng_rst_n = 0;
 wire mem_req, mem_we, mem_done_t;
 wire [21:0] mem_addr;
 wire [7:0]  mem_wdata, mem_rdata;
-wire [127:0] mem_rline;
+wire [15:0] mem_rword;
 
 // bus MSX del motor
 reg iorq_n = 1, rd_n = 1, wr_n = 1, m1_n = 1;
@@ -48,37 +46,62 @@ wire [7:0] wave_dout;
 wire [1:0] wave_status;
 wire signed [15:0] pcm_l, pcm_r;
 
-wire [14:0] ddr_addr; wire [2:0] ddr_bank;
-wire ddr_cs, ddr_ras, ddr_cas, ddr_we_w, ddr_ck, ddr_ck_n, ddr_cke, ddr_odt, ddr_reset_n;
-wire [1:0] ddr_dm; wire [15:0] ddr_dq; wire [1:0] ddr_dqs, ddr_dqs_n;
+// ---- pila SDRAM real: shim + memory_ctrl + modelo W9825 ----
+wire        wv_req, wv_we, wv_done;
+wire [21:0] wv_addr;
+wire [7:0]  wv_wdata;
+wire [15:0] wv_dout;
+wire        sd_clk, sd_cke, sd_cs_n, sd_cas_n, sd_ras_n, sd_wen_n;
+wire [15:0] sd_dq;
+wire [12:0] sd_addr;
+wire [1:0]  sd_ba, sd_dqm;
+wire [7:0]  nc_ram_dout; wire [15:0] nc_vram_dout; wire nc_ram_busy;
 
-wave_ddr3 uwave (
-    .clk_host   (clk_host),
-    .rst_n      (rst_n),
-    .req_toggle (h_req),
-    .we         (h_we),
-    .addr       (h_addr),
-    .wdata      (h_wdata),
-    .rdata      (h_rdata),
-    .done_toggle(h_done),
-    .ready      (h_ready),
-    .clk_x1_out (eng_clk_x1),
-    .eng_req    (mem_req),
-    .eng_we     (mem_we),
-    .eng_addr   (mem_addr),
-    .eng_wdata  (mem_wdata),
-    .eng_rdata  (mem_rdata),
-    .eng_rline  (mem_rline),
-    .eng_done_t (mem_done_t),
-    .recal_req  (1'b0),          // _100: sin recal forzada en el TB
-    .clk_27     (1'b0),
-    .clk_g50    (clk_g50),
-    .pll27_lock (1'b1),
-    .ddr_addr(ddr_addr), .ddr_bank(ddr_bank), .ddr_cs(ddr_cs), .ddr_ras(ddr_ras),
-    .ddr_cas(ddr_cas), .ddr_we(ddr_we_w), .ddr_ck(ddr_ck), .ddr_ck_n(ddr_ck_n),
-    .ddr_cke(ddr_cke), .ddr_odt(ddr_odt), .ddr_reset_n(ddr_reset_n),
-    .ddr_dm(ddr_dm), .ddr_dq(ddr_dq), .ddr_dqs(ddr_dqs), .ddr_dqs_n(ddr_dqs_n)
+wave_sdram uwsdram (
+    .clk_host(clk_host), .rst_n(rst_n),
+    .req_toggle(h_req), .we(h_we), .addr(h_addr), .wdata(h_wdata),
+    .rdata(h_rdata), .done_toggle(h_done), .ready(h_ready),
+    .clk_eng(clk_eng),
+    .eng_req(mem_req), .eng_we(mem_we), .eng_addr(mem_addr),
+    .eng_wdata(mem_wdata), .eng_rdata(mem_rdata), .eng_rword(mem_rword),
+    .eng_done_t(mem_done_t),
+    .diag(),
+    .clk_108m(clk_108),
+    .wv_req(wv_req), .wv_we(wv_we), .wv_addr(wv_addr), .wv_wdata(wv_wdata),
+    .wv_dout(wv_dout), .wv_done(wv_done)
 );
+
+memory_ctrl umem (
+    .clk_27m(clk_host), .clk_108m(clk_108), .bus_reset_n(rst_n),
+    .video_dhclk(video_dhclk), .video_dlclk(video_dlclk),
+    .ram_din(8'h00), .ram_req(1'b0), .ram_write(1'b0), .ram_addr(23'd0),
+    .vram_din(8'h00), .vram_write(1'b0), .vram_addr(17'd0), .bus_rfsh_n(1'b1),
+    .ram_dout(nc_ram_dout), .vram_dout(nc_vram_dout), .ram_busy(nc_ram_busy),
+    .wv_req(wv_req), .wv_we(wv_we), .wv_addr(wv_addr), .wv_wdata(wv_wdata),
+    .wv_dout(wv_dout), .wv_done(wv_done),
+    .O_sdram_clk(sd_clk), .O_sdram_cke(sd_cke), .O_sdram_cs_n(sd_cs_n),
+    .O_sdram_cas_n(sd_cas_n), .O_sdram_ras_n(sd_ras_n), .O_sdram_wen_n(sd_wen_n),
+    .IO_sdram_dq(sd_dq), .O_sdram_addr(sd_addr), .O_sdram_ba(sd_ba),
+    .O_sdram_dqm(sd_dqm)
+);
+
+w9825_model sdram (
+    .clk(sd_clk), .cke(sd_cke), .cs_n(sd_cs_n), .ras_n(sd_ras_n),
+    .cas_n(sd_cas_n), .we_n(sd_wen_n), .addr(sd_addr), .ba(sd_ba),
+    .dqm(sd_dqm), .dq(sd_dq)
+);
+
+// init acelerada de la SDRAM (force sobre FreeCounter, como memory_tb)
+initial begin
+    wait (rst_n === 1'b1);
+    while (umem.RstSeq !== 5'b11111) begin
+        @(negedge clk_108);
+        force umem.FreeCounter = 16'hFFF0;
+        @(negedge clk_108);
+        release umem.FreeCounter;
+        repeat (90) @(posedge clk_108);
+    end
+end
 
 opl4_pcm dut (
     .rst_n(rst_n), .clk_host(clk_host),
@@ -87,9 +110,9 @@ opl4_pcm dut (
     .wave_rd(wave_rd), .wave_dout(wave_dout), .wave_wait_n(wave_wait_n),
     .wave_status(wave_status),
     .pcm_l(pcm_l), .pcm_r(pcm_r),
-    .clk_eng(opl4_clk37), .eng_rst_n(eng_rst_n),
+    .clk_eng(clk_eng), .eng_rst_n(eng_rst_n),
     .mem_req(mem_req), .mem_we(mem_we), .mem_addr(mem_addr),
-    .mem_wdata(mem_wdata), .mem_rdata(mem_rdata), .mem_rline(mem_rline), .mem_done_t(mem_done_t)
+    .mem_wdata(mem_wdata), .mem_rdata(mem_rdata), .mem_rword(mem_rword), .mem_done_t(mem_done_t)
 );
 
 // ---- tareas host (protocolo EXACTO del loader/wdbg: payload y toggle en el
@@ -222,143 +245,4 @@ initial begin
     $finish;
 end
 
-endmodule
-
-// ============================================================================
-// STUBS de la IP de Gowin (conductuales)
-// ============================================================================
-module pll_ddr3 (
-    output lock, output clkout0, output clkout2,
-    input clkin, input reset, input mdclk,
-    input [1:0] mdopc, input mdainc, input [7:0] mdwdi, output [7:0] mdrdo
-);
-    assign lock = 1'b1;
-    assign clkout0 = 1'b0;
-    assign clkout2 = 1'b0;    // memory_clk (no usado por el modelo)
-    assign mdrdo = 8'h00;
-endmodule
-
-module pll_mDRP_intf (
-    input clk, input rst_n, input pll_lock, input wr,
-    output mdrp_inc, output [1:0] mdrp_op, output [7:0] mdrp_wdata, input [7:0] mdrp_rdata
-);
-    assign mdrp_inc = 1'b0;
-    assign mdrp_op = 2'b00;
-    assign mdrp_wdata = 8'h00;
-endmodule
-
-// modelo conductual de la IP DDR3: comandos EN ORDEN, latencia de lectura
-// ~20 ciclos, escritura enmascarada por DM (1=no escribir), rafagas de 16B.
-// app_rdy cae ~200ns cada ~7.8us (refresh) para realismo.
-module DDR3_Memory_Interface_Top (
-    input memory_clk, output pll_stop, input clk, input rst_n,
-    output cmd_ready, input [2:0] cmd, input cmd_en, input [27:0] addr,
-    output wr_data_rdy, input [127:0] wr_data, input wr_data_en, input wr_data_end,
-    input [15:0] wr_data_mask,
-    output reg [127:0] rd_data, output reg rd_data_valid, output rd_data_end,
-    input sr_req, input ref_req, output sr_ack, output ref_ack,
-    output reg init_calib_complete, output clk_out, input pll_lock, input burst,
-    output ddr_rst,
-    output [14:0] O_ddr_addr, output [2:0] O_ddr_ba, output O_ddr_cs_n,
-    output O_ddr_ras_n, output O_ddr_cas_n, output O_ddr_we_n,
-    output O_ddr_clk, output O_ddr_clk_n, output O_ddr_cke, output O_ddr_odt,
-    output O_ddr_reset_n, output [1:0] O_ddr_dqm,
-    inout [15:0] IO_ddr_dq, inout [1:0] IO_ddr_dqs, inout [1:0] IO_ddr_dqs_n
-);
-    assign pll_stop = 1'b0;
-    assign rd_data_end = 1'b1;
-    assign sr_ack = 1'b0; assign ref_ack = 1'b0;
-    assign ddr_rst = ~rst_n_sync;
-    assign O_ddr_addr = 0; assign O_ddr_ba = 0; assign O_ddr_cs_n = 1;
-    assign O_ddr_ras_n = 1; assign O_ddr_cas_n = 1; assign O_ddr_we_n = 1;
-    assign O_ddr_clk = 0; assign O_ddr_clk_n = 1; assign O_ddr_cke = 0;
-    assign O_ddr_odt = 0; assign O_ddr_reset_n = 1; assign O_ddr_dqm = 0;
-
-    // clk_out = el reloj x1 lo pone el testbench (jerarquico)
-    assign clk_out = tb_sandwich.clk_x1_src;
-
-    reg rst_n_sync = 0;
-    always @(posedge clk_out) rst_n_sync <= 1'b1;
-
-    // memoria de 4MB en lineas de 16B
-    reg [7:0] mem [0:4194303];
-    integer k;
-    initial begin
-        for (k = 0; k < 4194304; k = k + 1) mem[k] = 8'hFF;   // flash virgen
-        init_calib_complete = 0;
-        rd_data_valid = 0;
-    end
-
-    // calibracion a los ~300 ciclos
-    integer calcnt = 0;
-    always @(posedge clk_out) begin
-        if (calcnt < 300) calcnt <= calcnt + 1;
-        else init_calib_complete <= 1;
-    end
-
-    // refresh: app_rdy cae 15 ciclos cada ~580 (7.8us)
-    integer refcnt = 0;
-    reg in_ref = 0;
-    always @(posedge clk_out) begin
-        refcnt <= refcnt + 1;
-        if (refcnt % 580 == 0) in_ref <= 1;
-        else if (refcnt % 580 == 15) in_ref <= 0;
-    end
-    assign cmd_ready = init_calib_complete && !in_ref;
-    assign wr_data_rdy = init_calib_complete && !in_ref;
-
-    // cola de UN comando en vuelo (la FSM del cliente es de a-uno) + latencia
-    reg [27:0] q_addr;
-    reg        q_rd_pend = 0;
-    reg [127:0] q_wdata;
-    reg [15:0]  q_mask;
-    integer     q_lat = 0;
-    integer     bidx;
-    // _95: inyeccion de fallo — +drop_read=N hace que la N-esima lectura NO
-    // devuelva rd_data_valid JAMAS (la IP "se la come"): valida el watchdog
-    // de operacion de wave_ddr3 (done falso FF a ~0.9ms, motor sigue vivo)
-    integer     drop_read = 0, rd_seq = 0;
-    initial if (!$value$plusargs("drop_read=%d", drop_read)) drop_read = 0;
-    always @(posedge clk_out) begin
-        rd_data_valid <= 0;
-        if (cmd_en && cmd_ready) begin
-            if (cmd == 3'b001) begin
-                rd_seq <= rd_seq + 1;
-                if (drop_read != 0 && (rd_seq + 1) == drop_read) begin
-                    q_rd_pend <= 0;    // tragada: ni valid ni datos
-                    $display("[stub] lectura %0d TRAGADA (inyeccion de fallo)", rd_seq + 1);
-                end
-                else begin
-                    q_addr <= addr; q_rd_pend <= 1;
-                    q_lat <= 18 + ({$random} % 6);
-                end
-            end
-            else begin
-                // escritura: data llega por wr_data_en este mismo ciclo o proximo
-                q_addr <= addr;
-            end
-        end
-        if (wr_data_en) begin
-            // aplicar de inmediato (en orden): addr en PALABRAS de 16 bits
-            for (bidx = 0; bidx < 16; bidx = bidx + 1)
-                if (!wr_data_mask[bidx])
-                    mem[{q_addr_active(), 4'b0000} + bidx] <= wr_data[bidx*8 +: 8];
-        end
-        if (q_rd_pend) begin
-            q_lat <= q_lat - 1;
-            if (q_lat <= 0) begin
-                for (bidx = 0; bidx < 16; bidx = bidx + 1)
-                    rd_data[bidx*8 +: 8] <= mem[{q_addr[20:3], 4'b0000} + bidx];
-                rd_data_valid <= 1;
-                q_rd_pend <= 0;
-            end
-        end
-    end
-    // direccion activa para la escritura: cmd y wr_data_en llegan juntos
-    // (el cliente los pone el mismo ciclo) -> usar addr directo si cmd_en
-    function [17:0] q_addr_active;
-        begin
-            q_addr_active = (cmd_en && cmd == 3'b000) ? addr[20:3] : q_addr[20:3];
-        end
-    endfunction
 endmodule

@@ -5,6 +5,7 @@ module Gowin_PLL(
     clkout1,
     clkout2,
     clkout3,
+    clkout4,
     lock,
     mdclk
 );
@@ -15,6 +16,7 @@ output clkout0;
 output clkout1;
 output clkout2;
 output clkout3;
+output clkout4;   // _104: 37.5 MHz motor OPL4
 output lock;
 input mdclk;
 wire [7:0] mdrdo;
@@ -30,6 +32,7 @@ wire pll_rst;
         .clkout1(clkout1),
         .clkout2(clkout2),
         .clkout3(clkout3),
+        .clkout4(clkout4),
         .clkout0(clkout0),
         .lock(pll_lock),
         .mdrdo(wMdQOut),

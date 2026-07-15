@@ -44,11 +44,9 @@ add_file opl3/tremolo.sv
 add_file opl3/trick_sw_detection.sv
 add_file opl3/vibrato.sv
 add_file src/opl4fm.v
-# F2 (_86): DDR3 wave memory (IP + PLL del ddr3_framebuffer_gowin, Apache-2.0)
-add_file ddr3/ddr3_memory_interface.v
-add_file ddr3/pll_ddr3.v
-add_file ddr3/pll_mDRP_intf.v
-add_file src/wave_ddr3.v
+# _104: la wave vive en la SDRAM del dock (DDR3 del SOM fuera del build —
+# analogicamente marginal en esta placa, saga _94-_103)
+add_file src/wave_sdram.v
 # F2 (_89): motor PCM 24 slots del OPL4 (srg320, BSD-3/MAME, con permiso).
 # ymf278b_gowin.v es GENERADO por sv2v desde opl4wave/*.sv (ver convert.sh)
 add_file opl4wave/ymf278b_gowin.v

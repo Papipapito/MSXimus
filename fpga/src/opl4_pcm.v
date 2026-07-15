@@ -62,8 +62,8 @@ module opl4_pcm (
     output reg         mem_we,
     output reg  [21:0] mem_addr,
     output reg  [7:0]  mem_wdata,
-    input  wire [7:0]  mem_rdata,      // registrado en wave_ddr3, estable
-    input  wire [127:0] mem_rline,     // _94: linea entera de la ultima lectura
+    input  wire [7:0]  mem_rdata,      // registrado en el shim, estable
+    input  wire [15:0] mem_rword,      // _104: PALABRA entera (cache de palabra)
     input  wire        mem_done_t,     // TOGGLE = completada
 
     // ---- telemetria (_95): {ifw_hits[3:0], alive[3:0]} ----
@@ -231,12 +231,12 @@ always @(posedge clk_eng or negedge erst_n) begin
     end
 end
 
-// --- CE fraccionario 33.8688/37.125 = 6272/6875 exacto ---
+// --- CE fraccionario 33.8688/37.5 = 14112/15625 exacto (_104: CLKOUT4) ---
 // Durante un stall el acumulador SIGUE sumando (credito) y al soltar
 // dispara CEs seguidos hasta recuperar: la fs media queda clavada.
 // 24 bits = ~36us de credito acumulable (un fetch DDR3 son ~0.3us).
-localparam [23:0] CE_INC = 24'd6272;
-localparam [23:0] CE_MOD = 24'd6875;
+localparam [23:0] CE_INC = 24'd14112;
+localparam [23:0] CE_MOD = 24'd15625;
 reg [23:0] ce_acc;
 reg        ce;
 reg        mem_inflight;
@@ -375,8 +375,8 @@ wire [9:0]  e_mcs_n;
 // los chip-selects: MCS_N[1]=0 <=> MEM_A[21]=1
 wire [21:0] e_addr22 = {~e_mcs_n[1], e_ma};
 
-reg [127:0] lb_line;               // cache de linea (16B)
-reg [17:0]  lb_tag;                // addr[21:4]
+reg [15:0]  lb_word;               // _104: cache de PALABRA (el par de bytes)
+reg [20:0]  lb_tag;                // addr[21:1]
 reg         lb_v;
 reg         lb_hit;                // el ultimo fetch se sirvio de la cache
 reg         lb_fast;               // hit en curso: completa al ciclo siguiente
@@ -396,17 +396,17 @@ assign diag = {ifw_hits, alive};
 
 reg mrd_d1, mwr_d1, done_d1;
 reg        fill_pend;              // _96: fill de la cache diferido 1 ciclo
-reg [17:0] fill_tag;
+reg [20:0] fill_tag;
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
         mrd_d1 <= 1'b0; mwr_d1 <= 1'b0; done_d1 <= 1'b0;
         mem_req <= 1'b0; mem_we <= 1'b0;
         mem_addr <= 22'd0; mem_wdata <= 8'd0;
         mem_inflight <= 1'b0;
-        lb_line <= 128'd0; lb_tag <= 18'd0; lb_v <= 1'b0;
+        lb_word <= 16'd0; lb_tag <= 21'd0; lb_v <= 1'b0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
         ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
-        fill_pend <= 1'b0; fill_tag <= 18'd0;
+        fill_pend <= 1'b0; fill_tag <= 21'd0;
     end
     else begin
         mrd_d1 <= ~e_mrd_n;
@@ -441,12 +441,12 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_inflight <= 1'b0;
             if (!mem_we) begin
                 fill_pend <= 1'b1;
-                fill_tag  <= mem_addr[21:4];
+                fill_tag  <= mem_addr[21:1];
             end
         end
         if (fill_pend) begin
             fill_pend <= 1'b0;
-            lb_line <= mem_rline;      // payload asentado: captura limpia
+            lb_word <= mem_rword;      // payload asentado: captura limpia
             lb_tag  <= fill_tag;
             lb_v    <= 1'b1;
         end
@@ -459,9 +459,9 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_inflight <= 1'b0;
         end
         if (~e_mrd_n && !mrd_d1) begin
-            if (lb_v && (e_addr22[21:4] == lb_tag)) begin
+            if (lb_v && (e_addr22[21:1] == lb_tag)) begin
                 lb_hit  <= 1'b1;                       // HIT: sin transaccion
-                lb_byte <= lb_line[e_addr22[3:0]*8 +: 8];
+                lb_byte <= e_addr22[0] ? lb_word[15:8] : lb_word[7:0];
                 lb_fast <= 1'b1;                       // completa en 1 ciclo
                 mem_inflight <= 1'b1;                  // sujeta la CYCLE1
             end
@@ -480,7 +480,7 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_addr  <= e_addr22;
             mem_wdata <= e_mdo;
             mem_inflight <= 1'b1;      // tambien en escritura: serializa
-            if (e_addr22[21:4] == lb_tag)
+            if (e_addr22[21:1] == lb_tag)
                 lb_v <= 1'b0;          // no servir datos rancios tras escribir
             fill_pend <= 1'b0;         // _96: y cancelar un fill pendiente —
                                        // cachearia la linea PRE-escritura

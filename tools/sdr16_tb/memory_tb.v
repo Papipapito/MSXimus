@@ -53,6 +53,13 @@ module memory_tb;
     wire [15:0] vram_dout;
     wire        ram_busy;
 
+    // _104: puerto WAVE
+    reg         wv_req = 0, wv_we = 0;
+    reg  [21:0] wv_addr = 0;
+    reg  [7:0]  wv_wdata = 0;
+    wire [15:0] wv_dout;
+    wire        wv_done;
+
     wire        sd_clk, sd_cke, sd_cs_n, sd_cas_n, sd_ras_n, sd_wen_n;
     wire [15:0] sd_dq;
     wire [12:0] sd_addr;
@@ -76,6 +83,12 @@ module memory_tb;
         .ram_dout    (ram_dout),
         .vram_dout   (vram_dout),
         .ram_busy    (ram_busy),
+        .wv_req      (wv_req),
+        .wv_we       (wv_we),
+        .wv_addr     (wv_addr),
+        .wv_wdata    (wv_wdata),
+        .wv_dout     (wv_dout),
+        .wv_done     (wv_done),
         .O_sdram_clk   (sd_clk),
         .O_sdram_cke   (sd_cke),
         .O_sdram_cs_n  (sd_cs_n),
@@ -181,6 +194,26 @@ module memory_tb;
     // -------- T9: medida de latencia del barrido de fase --------
     integer ph, rep, tries, hit, nlat;
     real t0, t1, lat, max_lat, min_lat, sum_lat;
+
+    // -------- _104: tareas del puerto WAVE (handshake nivel/pulso 108M) ----
+    task wv_op(input wr, input [21:0] a, input [7:0] wd, output [15:0] rd);
+        begin
+            @(posedge clk108);
+            wv_we = wr; wv_addr = a; wv_wdata = wd; wv_req = 1;
+            @(posedge wv_done);
+            @(posedge clk108);
+            rd = wv_dout;
+            wv_req = 0;
+            @(posedge clk108); @(posedge clk108);
+        end
+    endtask
+    reg [15:0] wv_rd;
+    task wv_write(input [21:0] a, input [7:0] d);
+        begin wv_op(1, a, d, wv_rd); end
+    endtask
+    task wv_read_check16(input [21:0] a, input [15:0] exp, input [255:0] msg);
+        begin wv_op(0, a, 8'h00, wv_rd); check16(wv_rd, exp, msg); end
+    endtask
 
     // -------- scoreboard del test aleatorio --------
     localparam NRAND = 300;
@@ -455,6 +488,61 @@ module memory_tb;
         $display("---------------------------------------------");
         $display("stats modelo: writes=%0d reads=%0d refresh=%0d",
                  sdram.write_count, sdram.read_count, sdram.refresh_count);
+
+        // ---- _104 W1: puerto WAVE basico (filas 4096+, palabra devuelta) ----
+        wv_write(22'h000000, 8'h40);
+        wv_write(22'h000001, 8'h18);
+        wv_write(22'h000002, 8'hA5);
+        wv_write(22'h3FFFFE, 8'h5A);               // extremo alto de los 4MB
+        wv_write(22'h3FFFFF, 8'hC3);
+        wv_read_check16(22'h000000, 16'h1840, "W1 palabra base");
+        wv_read_check16(22'h3FFFFE, 16'hC35A, "W1 palabra tope");
+        $display("W1 wave basico OK");
+
+        // ---- _104 W2: AISLAMIENTO — wave no pisa CPU/VDP ni viceversa ----
+        cpu_write(23'h000000, 8'hEE);              // mismo "offset" en espacio CPU
+        wv_write(22'h000000, 8'h77);
+        cpu_read_check(23'h000000, 8'hEE, "W2 CPU intacto tras wave");
+        wv_read_check16(22'h000000, 16'h1877, "W2 wave intacto tras CPU");
+        $display("W2 aislamiento OK");
+
+        // ---- _104 W3: CONVIVENCIA — wave + CPU aleatorio simultaneos ----
+        // el scoreboard T4 se repite CON trafico wave de fondo: el injerto
+        // solo roba turnos vacios; ni un byte CPU puede cambiar.
+        fork
+            begin : wave_bg
+                integer wi;
+                for (wi = 0; wi < 200; wi = wi + 1) begin
+                    wv_write(22'h100000 + wi[21:0], wi[7:0] ^ 8'h5C);
+                    wv_op(0, 22'h100000 + {wi[21:1], 1'b0}, 8'h00, wv_rd);
+                end
+            end
+            begin : cpu_fg
+                for (ri = 0; ri < NRAND; ri = ri + 1) begin
+                    ra = rnd_addr[ri];
+                    cpu_write(ra, ra[7:0] ^ 8'hA7);
+                    exp_mem[ra] = ra[7:0] ^ 8'hA7;
+                end
+                for (ri = 0; ri < NRAND; ri = ri + 1) begin
+                    ra = rnd_addr[ri];
+                    cpu_op(0, ra, 8'h00, rd_);
+                    check8(rd_, exp_mem[ra], "W3 CPU bajo trafico wave");
+                end
+            end
+        join
+        begin : wave_verify
+            integer wj;
+            for (wj = 0; wj < 200; wj = wj + 1)
+                wv_op(0, 22'h100000 + wj[21:0], 8'h00, wv_rd);
+                // (verificacion por byte del lane correcto)
+            for (wj = 0; wj < 200; wj = wj + 1) begin
+                wv_op(0, 22'h100000 + wj[21:0], 8'h00, wv_rd);
+                check8(wj[0] ? wv_rd[15:8] : wv_rd[7:0], wj[7:0] ^ 8'h5C,
+                       "W3 wave bajo trafico CPU");
+            end
+        end
+        $display("W3 convivencia OK (200 ops wave + %0d CPU)", 2*NRAND);
+
         if (errors == 0)
             $display("*** ALL TESTS PASS ***");
         else

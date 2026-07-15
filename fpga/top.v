@@ -192,6 +192,8 @@ end
     // rPLL viejo) no tenia consumidores y se ha eliminado.
     wire clk_108m;
     wire clk_135;               // TMDS x5 del HDMI (mismo VCO: 135 = 5 x 27 exacto)
+    wire clk_wave375; // _104: 37.5 MHz del PLLA (motor OPL4) — declarado ANTES
+                      // de su primer uso (leccion Gowin de los implicitos)
     Gowin_PLL pll_main (
         .clkin  (ex_clk_27m),   // ⚠ en la Console 60K este pin lleva 50 MHz (V22)
         .clkout0(clk_108m),     // 108.000000 MHz (fraccional, exacto)
@@ -201,6 +203,7 @@ end
                                 //  TMDS vive a 74.25/371.25 en pll_74) -> la restriccion
                                 //  que motivo el CLKDIV desaparece con el video 720p.
         .clkout3(clk_135),      // 135.000000 MHz (TMDS; sustituye al CLK_135 del tn_vdp)
+        .clkout4(clk_wave375),  // _104: 37.500 MHz (motor OPL4 wave; VCO/36, fase t=0)
         .lock   (clock_locked),
         .mdclk  (ex_clk_27m)    // reloj de init del PLLA (secuencia mDRP)
     );
@@ -1732,6 +1735,13 @@ assign keyboard_addr = ppi_port_c[3:0];
 
 // SDCLK_INVERT=1 CONFIRMADO EN HW (2026-07-08): con fase normal el auto-test
 // da ROJO (errores CPU) y con 180 grados VERDE; el core arranca (serial _18inv).
+// _104: puerto WAVE de la SDRAM (declarado ANTES de su primer uso — Gowin
+// declara implicitos de 1 bit si no; leccion _95 de los weng_*)
+wire        wv_req, wv_we, wv_done;
+wire [21:0] wv_addr;
+wire [7:0]  wv_wdata;
+wire [15:0] wv_dout;
+
 memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .clk_27m(clk_54m),
     .clk_108m(clk_108m),
@@ -1751,6 +1761,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .ram_dout(ram_dout),
     .vram_dout(VrmDbi2),
     .ram_busy(ram_busy),
+
+    // _104: puerto wave (roba turnos de CPU vacios; filas 4096+)
+    .wv_req(wv_req),
+    .wv_we(wv_we),
+    .wv_addr(wv_addr),
+    .wv_wdata(wv_wdata),
+    .wv_dout(wv_dout),
+    .wv_done(wv_done),
 
     .O_sdram_clk(O_sdram_clk),
     .O_sdram_cke(O_sdram_cke),
@@ -2089,16 +2107,16 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0]  wdbg_rdata;
     wire [7:0]  wdbg_diag_ddr3;          // {calib_drop, wd_fires[2:0], wd_ops[3:0]}
     wire [7:0]  wdbg_diag_eng;           // {ifw_hits[3:0], alive[3:0]}
-    // _95: los weng_* van declarados AQUI, ANTES de la instancia uwave que
-    // los usa: Gowin los declaraba IMPLICITOS (1 bit, EX3638) al verlos
-    // primero en el port map — llevaba pasando desde la _89 con weng_addr
-    // (el ancho explicito acababa ganando, la _91 lo probo en HW), pero con
-    // el bus de 128 bits de la cache no se deja NADA a la interpretacion.
-    wire        weng_x1;                 // clk_x1 de la DDR3 (74.25MHz)
+    // _95: los weng_* van declarados AQUI, ANTES de la instancia que los usa
+    // (Gowin declara implicitos de 1 bit si no — leccion EX3638).
     wire        weng_req, weng_we, weng_done;
     wire [21:0] weng_addr;
     wire [7:0]  weng_wdata, weng_rdata;
-    wire [127:0] weng_rline;             // linea entera del ultimo fetch (_94)
+    wire [15:0] weng_rword;              // _104: palabra (cache de palabra)
+    // _104: reloj del motor = clk_wave375 (37.5MHz, CLKOUT4 del PLLA — misma
+    // familia/VCO que 54/108: paths sincronos cronometrados, cero CDC).
+    // Margen del CE: 37.5/33.8688 = 10.7% (a 36MHz el credito crecia sin
+    // freno en la sim de 7 slots: los stalls superaban el 6.3% de margen).
 `ifdef ENABLE_WAVE_DDR3
     // _103: BUS REGISTRADO (regla de oro _91) — este decoder era de la _86,
     // ANTERIOR a la regla, y decodificaba el bus CRUDO del T80 (flanco de
@@ -2209,7 +2227,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wl_verify <= 1'b0; wl_verr <= 16'd0; wl_vfirst <= 22'h3FFFFF;
             wl_vres_i <= 3'd0; wl_fb <= 8'd0; wl_recal_tgl <= 1'b0;
             wl_probe <= 1'b1; wl_att <= 5'd0; wl_lfsr <= 8'hA5;   // _102b: semilla nueva = re-tirada de la loteria de placement
-            wl_gap <= 10'd0; wl_warm_cnt <= 32'd0; wl_warm_done <= 1'b0;
+            wl_gap <= 10'd0; wl_warm_cnt <= 32'd0;
+            wl_warm_done <= 1'b1;   // _104: SDRAM sin calibracion — recal caliente OFF
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2558,7 +2577,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         end
     end
 
-    wave_ddr3 uwave (
+    // _104: la wave vive en la SDRAM del dock (la DDR3 del SOM resulto
+    // analogicamente marginal en esta placa — saga _94-_103). El shim
+    // conserva la interfaz del wave_ddr3: el loader wl, el verify y el
+    // puerto debug 34-37h funcionan SIN CAMBIOS.
+    wave_sdram uwsdram (
         .clk_host   (clk_54m),
         .rst_n      (bus_reset_n),
         .req_toggle (wdbg_req),
@@ -2568,37 +2591,32 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .rdata      (wdbg_rdata),
         .done_toggle(wdbg_done),
         .ready      (wdbg_ready),
-        .clk_x1_out (weng_x1),       // _89: puerto del motor PCM
+        .clk_eng    (clk_wave375),
         .eng_req    (weng_req),
         .eng_we     (weng_we),
         .eng_addr   (weng_addr),
         .eng_wdata  (weng_wdata),
         .eng_rdata  (weng_rdata),
-        .eng_rline  (weng_rline),    // _95: ¡en la _94 quedo SIN CONECTAR!
-                                     // (la cache de opl4_pcm se llenaba de
-                                     // ceros en HW; ningun TB cubre top.v)
+        .eng_rword  (weng_rword),
         .eng_done_t (weng_done),
         .diag       (wdbg_diag_ddr3),
-        .recal_req  (wl_recal_tgl),  // _100: verify falla -> recalibrar
-        .clk_27     (clk27_video),   // misma topologia que el ref de nand2mario
-        .clk_g50    (ex_clk_27m),    // pad de 50MHz (mal llamado)
-        .pll27_lock (pll27_lock),    // _87: calibracion estable entre boots
-        .ddr_addr   (ddr_addr),
-        .ddr_bank   (ddr_bank),
-        .ddr_cs     (ddr_cs),
-        .ddr_ras    (ddr_ras),
-        .ddr_cas    (ddr_cas),
-        .ddr_we     (ddr_we),
-        .ddr_ck     (ddr_ck),
-        .ddr_ck_n   (ddr_ck_n),
-        .ddr_cke    (ddr_cke),
-        .ddr_odt    (ddr_odt),
-        .ddr_reset_n(ddr_reset_n),
-        .ddr_dm     (ddr_dm),
-        .ddr_dq     (ddr_dq),
-        .ddr_dqs    (ddr_dqs),
-        .ddr_dqs_n  (ddr_dqs_n)
+        .clk_108m   (clk_108m),
+        .wv_req     (wv_req),
+        .wv_we      (wv_we),
+        .wv_addr    (wv_addr),
+        .wv_wdata   (wv_wdata),
+        .wv_dout    (wv_dout),
+        .wv_done    (wv_done)
     );
+
+    // pines DDR3 del SOM en reposo seguro (la IP y su PLL fuera del build)
+    assign ddr_addr = 15'd0;  assign ddr_bank = 3'd0;
+    assign ddr_cs = 1'b1;     assign ddr_ras = 1'b1;
+    assign ddr_cas = 1'b1;    assign ddr_we = 1'b1;
+    assign ddr_ck = 1'b0;     assign ddr_ck_n = 1'b1;
+    assign ddr_cke = 1'b0;    assign ddr_odt = 1'b0;
+    assign ddr_reset_n = 1'b0; assign ddr_dm = 2'b11;
+    assign ddr_dq = 16'hzzzz; assign ddr_dqs = 2'bzz; assign ddr_dqs_n = 2'bzz;
 `else
     assign wdbg_rd34_w = 1'b0;
     assign wdbg_rd35_w = 1'b0;
@@ -2658,13 +2676,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0]  opl4pcm_dout;
     wire [1:0]  opl4wave_status;
     wire signed [15:0] opl4pcm_l, opl4pcm_r;
-    // (los weng_* estan declarados arriba, junto al bloque wdbg, ANTES de
-    // la instancia uwave — ver nota _95 alli)
-    // reloj del motor = clk_x1/2. El divisor vive AQUI para que el net sea
-    // top-level y el create_generated_clock del .sdc lo encuentre (mismo
-    // patron que VideoDHClk). Nombre del net: opl4_clk37.
-    reg         opl4_clk37 = 1'b0;
-    always @(posedge weng_x1) opl4_clk37 <= ~opl4_clk37;
+    // (_104: los weng_* estan declarados arriba, junto al bloque wdbg;
+    //  el reloj del motor es clk_wave375 = CLKOUT4 del PLLA)
 `ifdef ENABLE_OPL4_WAVE
     wire opl4pcm_rst_n = bus_reset_n & wdbg_ready & wl_done;
 
@@ -2683,14 +2696,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wave_status (opl4wave_status),
         .pcm_l       (opl4pcm_l),
         .pcm_r       (opl4pcm_r),
-        .clk_eng     (opl4_clk37),    // clk_x1/2 = 37.125MHz (divisor de arriba)
+        .clk_eng     (clk_wave375),   // _104: 37.5MHz del PLLA (CLKOUT4)
         .eng_rst_n   (opl4pcm_rst_n),
         .mem_req     (weng_req),
         .mem_we      (weng_we),
         .mem_addr    (weng_addr),
         .mem_wdata   (weng_wdata),
         .mem_rdata   (weng_rdata),
-        .mem_rline   (weng_rline),    // _95: en la _94 quedo SIN CONECTAR
+        .mem_rword   (weng_rword),    // _104: palabra (cache de palabra)
         .mem_done_t  (weng_done),
         .diag        (wdbg_diag_eng)
     );
