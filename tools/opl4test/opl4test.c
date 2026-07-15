@@ -783,6 +783,28 @@ void TestWaveDDR3()
 		else                   Print_DrawText("OK");
 	}
 
+	// _100: resultados del VERIFY HARDWARE del loader (flash vs DDR3,
+	// byte a byte, con recalibracion forzada hasta 3 intentos). El loader
+	// los deja en la DDR3 @0x3FFFF8: 'V',intento,verr16,addr1er24,A5
+	{
+		u8 b[8];
+		WavSetAddr(0x3F, 0xFF, 0xF8);
+		for (u8 i = 0; i < 8; ++i) { b[i] = g_WavDat; WAV_WAIT(); }
+		Print_SetPosition(1, 20);
+		if (b[0] != 0x56 || b[7] != 0xA5)
+			Print_DrawText("VERIF HW: (core <_100)");
+		else
+		{
+			Print_DrawText("VERIF HW: e=");
+			PrintU8Hex2(b[3]); PrintU8Hex2(b[2]);
+			Print_DrawText(" 1a=");
+			PrintU8Hex2(b[6]); PrintU8Hex2(b[5]); PrintU8Hex2(b[4]);
+			Print_DrawText(" try=");
+			Print_DrawChar('0' + b[1]);
+			if (b[2] == 0 && b[3] == 0) Print_DrawText(" LIMPIO");
+		}
+	}
+
 ddr_end:
 	PrintDiagLine(17);                    // _95: telemetria siempre visible
 	Print_DrawTextAt(1, 22, "ESPACIO para seguir");

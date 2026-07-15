@@ -2128,17 +2128,31 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 
     // ---- _87: loader YRW801 flash(0x500000, 2MB) -> DDR3 en background ----
     reg         wl_active, wl_done, wl_primed;
-    reg  [2:0]  wl_state;
+    reg  [3:0]  wl_state;      // _100: 4 bits (estados de verificacion)
     reg  [23:0] wl_flash_addr;
     reg  [21:0] wl_count;
     reg         wl_flash_rd, wl_flash_term;
     reg  [21:0] wl_tcnt;       // _90: timeout del cierre; _95: 22 bits — el
                                // bit6 sigue siendo el timeout corto (64c) y
                                // el bit21 es el duro (~39ms) de los estados
-    reg  [2:0]  wl_retries;    // _95: reintentos de la copia completa
-    reg         wl_err;        // _95: pegajoso — 7 reintentos agotados
+    reg  [2:0]  wl_retries;    // _95/_100: intentos copia+verify
+    reg         wl_err;        // _95: pegajoso — reintentos agotados
+    // _100: VERIFICACION flash-vs-DDR3 — el MAL-FIJO por arranque (sumas
+    // 065B/01B9/D187 estables dentro del boot, distintas entre boots) es el
+    // OJO de la calibracion DDR3: cada calibracion aterriza distinto y a
+    // veces corrompe fijo. Tras copiar, se re-streamea la flash (verdad
+    // absoluta) comparando byte a byte contra la DDR3; si hay errores ->
+    // recalibracion FORZADA + recopia (hasta 3 intentos). Resultados en la
+    // PROPIA DDR3 @0x3FFFF8 (el ROM los imprime): V,intento,verr16,addr24,A5
+    reg         wl_verify;     // 0=copiando, 1=verificando
+    reg  [15:0] wl_verr;       // errores del verify (saturante)
+    reg  [21:0] wl_vfirst;     // direccion del PRIMER error (sentinel=3FFFFF)
+    reg  [2:0]  wl_vres_i;     // indice de escritura del bloque de resultados
+    reg  [7:0]  wl_fb;         // byte de flash en comparacion
+    reg         wl_recal_tgl;  // toggle -> wave_ddr3.recal_req
     localparam  WL_FLASH_BASE = 24'h500000;
     localparam  WL_LEN        = 22'h200000;   // 2MB
+    localparam  WL_RES_ADDR   = 22'h3FFFF8;   // bloque de resultados en RAM
     // _95: status ampliado — el ROM lo imprime tal cual en el test 3
     assign wdbg_status = {wl_err, wl_retries, wl_done, wl_active, wdbg_busy, wdbg_ready};
 
@@ -2147,9 +2161,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wdbg_addr <= 22'd0; wdbg_req <= 1'b0; wdbg_we <= 1'b0;
             wdbg_wdata <= 8'd0; wdbg_inc_pend <= 1'b0; wdbg_busy_d <= 1'b0;
             wl_active <= 1'b0; wl_done <= 1'b0; wl_primed <= 1'b0;
-            wl_state <= 3'd0; wl_flash_addr <= 24'd0; wl_count <= 22'd0;
+            wl_state <= 4'd0; wl_flash_addr <= 24'd0; wl_count <= 22'd0;
             wl_flash_rd <= 1'b0; wl_flash_term <= 1'b0; wl_tcnt <= 22'd0;
             wl_retries <= 3'd0; wl_err <= 1'b0;
+            wl_verify <= 1'b0; wl_verr <= 16'd0; wl_vfirst <= 22'h3FFFFF;
+            wl_vres_i <= 3'd0; wl_fb <= 8'd0; wl_recal_tgl <= 1'b0;
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2164,7 +2180,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             // ---- loader en background: protocolo byte a byte del flash
             //      (calcado del stream del pack) + puerto wave reutilizado ----
             case (wl_state)
-            3'd0:   // esperar: pack streameado + DDR3 calibrada
+            4'd0:   // esperar: pack streameado + DDR3 calibrada
                 if (flash_idle && wdbg_ready && !wl_done) begin
                     wl_active <= 1'b1;
                     wl_flash_addr <= WL_FLASH_BASE;
@@ -2172,7 +2188,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                     wl_primed <= 1'b0;
                     wl_tcnt <= 22'd0;
                     wdbg_addr <= 22'd0;
-                    wl_state <= 3'd4;
+                    wl_state <= 4'd4;
                 end
             3'd4: begin // _90: CERRAR el stream rancio del pack ANTES de leer.
                 // El FSM del pack pone su terminate en el MISMO ciclo en que
@@ -2196,25 +2212,25 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 if (wl_tcnt[8]) begin
                     wl_flash_term <= 1'b0;
                     wl_tcnt <= 22'd0;
-                    wl_state <= 3'd5;
+                    wl_state <= 4'd5;
                 end
             end
-            3'd5: begin // esperar el reposo del flash (LOAD_CMD: busy=0, CS alto)
+            4'd5: begin // esperar el reposo del flash (LOAD_CMD: busy=0, CS alto)
                 wl_tcnt <= wl_tcnt + 22'd1;
                 if (!flash_busy) begin
                     wl_tcnt <= 22'd0;
-                    wl_state <= 3'd1;
+                    wl_state <= wl_verify ? 4'd9 : 4'd1;  // _100: 2a pasada = verify
                 end
                 else if (wl_tcnt[21]) begin    // _95: cierre que no acaba (~39ms)
                     wl_tcnt <= 22'd0;
-                    wl_state <= 3'd6;
+                    wl_state <= 4'd6;
                 end
             end
-            3'd1: begin // bucle: capturar byte y escribirlo en DDR3
+            4'd1: begin // bucle: capturar byte y escribirlo en DDR3
                 wl_tcnt <= wl_tcnt + 22'd1;
                 if (wl_tcnt[21]) begin         // _95: ~39ms sin aceptar un byte
                     wl_tcnt <= 22'd0;          // — sea lo que sea, reintentar
-                    wl_state <= 3'd6;          // la copia entera desde cero
+                    wl_state <= 4'd6;          // la copia entera desde cero
                 end
                 else if (flash_busy == 1'b0) begin
                     if (~wl_flash_rd) begin
@@ -2227,7 +2243,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                             end
                             if (wl_count == 22'd0) begin
                                 wl_tcnt <= 22'd0;
-                                wl_state <= 3'd2;
+                                wl_state <= 4'd2;
                             end
                             else begin
                                 // _90: NO incrementar antes de la 1a lectura — la
@@ -2244,29 +2260,139 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 end
                 else wl_flash_rd <= 1'b0;
             end
-            3'd2: begin // terminar el stream del flash y retirarse
+            4'd2: begin // cerrar el stream del flash
                 wl_flash_term <= 1'b1;
                 wl_tcnt <= wl_tcnt + 22'd1;
-                // _95: el timeout garantiza que wl_done SIEMPRE llega — el
-                // reset del motor (opl4pcm_rst_n) depende de el; en la _94
-                // un cuelgue aqui dejaba el motor en reset PARA SIEMPRE
+                // _95: el timeout garantiza avanzar SIEMPRE — el reset del
+                // motor (opl4pcm_rst_n) depende de wl_done
                 if (!wdbg_busy || wl_tcnt[21]) begin
                     wl_flash_term <= 1'b0;
-                    wl_active <= 1'b0;
-                    wl_done <= 1'b1;
-                    wl_state <= 3'd3;
+                    wl_tcnt <= 22'd0;
+                    if (!wl_verify) begin
+                        // _100: copia hecha -> pasada de VERIFICACION
+                        wl_verify <= 1'b1;
+                        wl_flash_addr <= WL_FLASH_BASE;
+                        wl_count <= WL_LEN;
+                        wl_primed <= 1'b0;
+                        wdbg_addr <= 22'd0;
+                        wl_verr <= 16'd0;
+                        wl_vfirst <= 22'h3FFFFF;
+                        wl_state <= 4'd4;      // cerrar + reabrir en BASE
+                    end
+                    else wl_state <= 4'd12;    // verify cerrado -> decidir
                 end
             end
-            3'd6: begin // _95: REINTENTO — cerrar todo y copiar de cero
+            // ---- _100: VERIFY — flash (verdad) vs DDR3 (copia), byte a byte
+            4'd9: begin // pedir el siguiente byte de flash (o terminar)
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (wl_tcnt[21]) begin wl_tcnt <= 22'd0; wl_state <= 4'd6; end
+                else if (!flash_busy && !wl_flash_rd && !flash_write_busy) begin
+                    if (wl_count == 22'd0) begin
+                        wdbg_addr <= WL_RES_ADDR;   // resultados a la RAM alta
+                        wl_vres_i <= 3'd0;
+                        wl_tcnt <= 22'd0;
+                        wl_state <= 4'd11;
+                    end
+                    else begin
+                        if (wl_primed) wl_flash_addr <= wl_flash_addr + 24'd1;
+                        wl_count <= wl_count - 22'd1;
+                        wl_flash_rd <= 1'b1;
+                        wl_primed <= 1'b1;
+                        wl_tcnt <= 22'd0;
+                        wl_state <= 4'd13;
+                    end
+                end
+            end
+            4'd13: begin // esperar el byte de flash -> lanzar lectura DDR3
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (wl_tcnt[21]) begin wl_tcnt <= 22'd0; wl_state <= 4'd6; end
+                else if (flash_busy) wl_flash_rd <= 1'b0;
+                else if (!wl_flash_rd) begin
+                    wl_fb <= flash_dout;
+                    wdbg_we <= 1'b0;
+                    wdbg_req <= ~wdbg_req;      // lectura DDR3 en wdbg_addr
+                    wl_tcnt <= 22'd0;
+                    wl_state <= 4'd10;
+                end
+            end
+            4'd10: begin // esperar DDR3 y comparar
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (wl_tcnt[21]) begin wl_tcnt <= 22'd0; wl_state <= 4'd6; end
+                else if (!wdbg_busy) begin
+                    if (wdbg_rdata != wl_fb) begin
+                        if (wl_verr != 16'hFFFF) wl_verr <= wl_verr + 16'd1;
+                        if (wl_vfirst == 22'h3FFFFF) wl_vfirst <= wdbg_addr;
+                    end
+                    wdbg_addr <= wdbg_addr + 22'd1;
+                    wl_tcnt <= 22'd0;
+                    wl_state <= 4'd9;
+                end
+            end
+            4'd11: begin // volcar el bloque de resultados a DDR3 @3FFFF8
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (wl_tcnt[21]) begin wl_tcnt <= 22'd0; wl_state <= 4'd12; end
+                else if (!wdbg_busy) begin
+                    wdbg_we <= 1'b1;
+                    wdbg_wdata <= (wl_vres_i == 3'd0) ? 8'h56 :             // 'V'
+                                  (wl_vres_i == 3'd1) ? {5'd0, wl_retries} :
+                                  (wl_vres_i == 3'd2) ? wl_verr[7:0] :
+                                  (wl_vres_i == 3'd3) ? wl_verr[15:8] :
+                                  (wl_vres_i == 3'd4) ? wl_vfirst[7:0] :
+                                  (wl_vres_i == 3'd5) ? wl_vfirst[15:8] :
+                                  (wl_vres_i == 3'd6) ? {2'd0, wl_vfirst[21:16]} :
+                                                        8'hA5;              // fin
+                    wdbg_req <= ~wdbg_req;
+                    wdbg_inc_pend <= 1'b1;
+                    wl_tcnt <= 22'd0;
+                    if (wl_vres_i == 3'd7) wl_state <= 4'd2;  // cerrar stream
+                    else wl_vres_i <= wl_vres_i + 3'd1;
+                end
+            end
+            4'd12: begin // decidir: limpio, reintentar con recal, o rendirse
+                // (cap a 3 intentos de verify: cada uno cuesta ~5s de boot;
+                //  los reintentos por atasco de copia siguen llegando a 7)
+                if (wl_verr == 16'd0 || wl_retries >= 3'd3) begin
+                    if (wl_verr != 16'd0) wl_err <= 1'b1;
+                    wl_done   <= 1'b1;
+                    wl_active <= 1'b0;
+                    wl_state  <= 4'd3;
+                end
+                else begin
+                    // _100: ojo malo — RECALIBRAR y recopiar de cero
+                    wl_recal_tgl <= ~wl_recal_tgl;
+                    wl_retries <= wl_retries + 3'd1;
+                    wl_verify <= 1'b0;
+                    wl_tcnt <= 22'd0;
+                    wl_state <= 4'd14;
+                end
+            end
+            4'd14: begin // esperar a que la calibracion CAIGA (IP en reset)
+                wl_tcnt <= wl_tcnt + 22'd1;
+                if (!wdbg_ready) begin wl_tcnt <= 22'd0; wl_state <= 4'd15; end
+                else if (wl_tcnt[21]) begin    // el pulso no llego: reintenta
+                    wl_tcnt <= 22'd0; wl_state <= 4'd15;
+                end
+            end
+            4'd15:  // esperar la calibracion NUEVA (el watchdog insiste solo)
+                if (wdbg_ready) begin
+                    wl_flash_addr <= WL_FLASH_BASE;
+                    wl_count <= WL_LEN;
+                    wl_primed <= 1'b0;
+                    wdbg_addr <= 22'd0;
+                    wl_tcnt <= 22'd0;
+                    wl_state <= 4'd4;
+                end
+            4'd6: begin // _95: REINTENTO — cerrar todo y copiar de cero
                 wl_flash_term <= 1'b0;
                 wl_flash_rd   <= 1'b0;
+                wl_verify     <= 1'b0;         // _100: si venia del verify
                 if (!wdbg_busy) begin          // (acotado: el watchdog de op
                     wdbg_inc_pend <= 1'b0;     //  de wave_ddr3 lo garantiza)
                     if (wl_retries == 3'd7) begin
                         wl_err    <= 1'b1;     // agotado: rendirse PERO soltar
                         wl_done   <= 1'b1;     // el motor igualmente
                         wl_active <= 1'b0;
-                        wl_state  <= 3'd3;
+                        wl_state  <= 4'd3;
                     end
                     else begin
                         wl_retries <= wl_retries + 3'd1;
@@ -2275,7 +2401,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                         wl_primed  <= 1'b0;
                         wdbg_addr  <= 22'd0;
                         wl_tcnt    <= 22'd0;
-                        wl_state   <= 3'd4;
+                        wl_state   <= 4'd4;
                     end
                 end
             end
@@ -2332,6 +2458,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                                      // ceros en HW; ningun TB cubre top.v)
         .eng_done_t (weng_done),
         .diag       (wdbg_diag_ddr3),
+        .recal_req  (wl_recal_tgl),  // _100: verify falla -> recalibrar
         .clk_27     (clk27_video),   // misma topologia que el ref de nand2mario
         .clk_g50    (ex_clk_27m),    // pad de 50MHz (mal llamado)
         .pll27_lock (pll27_lock),    // _87: calibracion estable entre boots

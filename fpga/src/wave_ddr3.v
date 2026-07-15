@@ -61,6 +61,14 @@ module wave_ddr3 (
     // UN humano en pantalla, un tearing puntual es irrelevante.
     output wire [7:0]  diag,
 
+    // ---- _100: recalibracion FORZADA (toggle, dominio clk_host) ----
+    // El verify del loader la dispara cuando la copia no coincide con la
+    // flash: el ojo de lectura/escritura de ESTA calibracion salio malo
+    // (MAL-FIJO por arranque: 065B/01B9/D187 en 3 boots del usuario).
+    // Pulso de reset a la IP -> calibracion nueva -> otro billete de la
+    // loteria del ojo.
+    input  wire        recal_req,
+
     // ---- relojes ----
     input  wire        clk_27,        // 27MHz (cascada de video, como el ref)
     input  wire        clk_g50,       // pad 50MHz (ex_clk_27m)
@@ -101,11 +109,23 @@ always @(posedge clk_g50) begin
     end
 end
 
+// _100: recalibracion FORZADA — toggle de clk_host sincronizado a g50;
+// cada flanco = pulso de 256 ciclos a la IP (como el watchdog). Declarado
+// ANTES de su uso en ip_rst_n (leccion _95: Gowin declara implicitos).
+reg  rc_s1 = 1'b0, rc_s2 = 1'b0, rc_s3 = 1'b0;
+reg  [8:0] rc_cnt = 9'd0;
+wire rc_pulse = (rc_cnt != 9'd0);
+always @(posedge clk_g50) begin
+    rc_s1 <= recal_req; rc_s2 <= rc_s1; rc_s3 <= rc_s2;
+    if (rc_s3 != rc_s2)          rc_cnt <= 9'd256;
+    else if (rc_cnt != 9'd0)     rc_cnt <= rc_cnt - 9'd1;
+end
+
 // _87: WATCHDOG de calibracion — si el PHY no calibra en ~42ms, pulso de
 // reset a la IP y reintento (cada ~42ms hasta conseguirlo)
 reg [21:0] wd_cnt = 22'd0;
 reg        wd_rst = 1'b0;
-wire       ip_rst_n = ~wd_rst;
+wire       ip_rst_n = ~(wd_rst | rc_pulse);   // _100: tambien recal forzada
 always @(posedge clk_g50) begin
     if (init_calib_complete || !por_done) begin
         wd_cnt <= 22'd0;

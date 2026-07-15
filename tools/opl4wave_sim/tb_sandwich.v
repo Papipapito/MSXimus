@@ -70,6 +70,7 @@ wave_ddr3 uwave (
     .eng_rdata  (mem_rdata),
     .eng_rline  (mem_rline),
     .eng_done_t (mem_done_t),
+    .recal_req  (1'b0),          // _100: sin recal forzada en el TB
     .clk_27     (1'b0),
     .clk_g50    (clk_g50),
     .pll27_lock (1'b1),
