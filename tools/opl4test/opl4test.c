@@ -758,6 +758,31 @@ void TestWaveDDR3()
 			: "  (datos presentes: ROM cargada)         ");
 	}
 
+	// _99: INTEGRIDAD de lectura DDR3 — DOBLE pasada de 32KB + suma16
+	// contra la esperada del yrw801.bin real (0x24E9). OJO: el test
+	// "motor==debug" es CIEGO al modo comun (ambos leen la MISMA DDR3:
+	// si ella devuelve basura, coinciden igual). Este no lo es:
+	//   - sumas DISTINTAS entre pasadas = lecturas INESTABLES (ojo de
+	//     calibracion marginal, varia por arranque)
+	//   - iguales pero != 24E9 = corrupcion FIJA (loader/sistematica)
+	//   - iguales y 24E9 = datos PERFECTOS -> el sospechoso es el motor
+	{
+		u16 s1 = 0, s2 = 0;
+		Print_DrawTextAt(1, 19, "INTEG 32Kx2: leyendo...");
+		WavSetAddr(0x00, 0x00, 0x00);
+		for (u16 i = 0; i < 32768; ++i) { s1 += g_WavDat; WAV_WAIT(); }
+		WavSetAddr(0x00, 0x00, 0x00);
+		for (u16 i = 0; i < 32768; ++i) { s2 += g_WavDat; WAV_WAIT(); }
+		Print_DrawTextAt(1, 19, "INTEG 32Kx2: ");
+		PrintU8Hex2(s1 >> 8); PrintU8Hex2(s1 & 0xFF);
+		Print_DrawText("/");
+		PrintU8Hex2(s2 >> 8); PrintU8Hex2(s2 & 0xFF);
+		Print_DrawText(" e24E9 ");
+		if (s1 != s2)          Print_DrawText("INESTABLE");
+		else if (s1 != 0x24E9) Print_DrawText("MAL-FIJO");
+		else                   Print_DrawText("OK");
+	}
+
 ddr_end:
 	PrintDiagLine(17);                    // _95: telemetria siempre visible
 	Print_DrawTextAt(1, 22, "ESPACIO para seguir");
