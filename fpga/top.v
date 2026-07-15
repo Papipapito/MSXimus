@@ -2100,13 +2100,29 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0]  weng_wdata, weng_rdata;
     wire [127:0] weng_rline;             // linea entera del ultimo fetch (_94)
 `ifdef ENABLE_WAVE_DDR3
-    wire wdbg_sel    = (bus_iorq_n == 1'b0) && (bus_m1_n == 1'b1) && (bus_addr[7:2] == 6'b001101);
-    wire wdbg_wr_any = wdbg_sel && (bus_wr_n == 1'b0);
-    wire wdbg_rd_any = wdbg_sel && (bus_rd_n == 1'b0);
-    assign wdbg_rd34_w = wdbg_rd_any && (bus_addr[1:0] == 2'b00);
-    assign wdbg_rd35_w = wdbg_rd_any && (bus_addr[1:0] == 2'b01);
-    assign wdbg_rd36_w = wdbg_rd_any && (bus_addr[1:0] == 2'b10);
-    assign wdbg_rd37_w = wdbg_rd_any && (bus_addr[1:0] == 2'b11);
+    // _103: BUS REGISTRADO (regla de oro _91) — este decoder era de la _86,
+    // ANTERIOR a la regla, y decodificaba el bus CRUDO del T80 (flanco de
+    // bajada): la cadena de prefetch del IN 37h podia ver stbs DOBLES en
+    // flancos sucios -> DESLIZAMIENTO de direccion -> el INTEG jamas paso
+    // en HW (F2DF estable con TODO lo demas leyendo perfecto) y las sumas
+    // 065B/01B9/D187/... eran en parte ESTE artefacto, no (solo) la DDR3.
+    reg        wdbgb_iorq_n, wdbgb_rd_n, wdbgb_wr_n, wdbgb_m1_n;
+    reg [7:0]  wdbgb_addr, wdbgb_din;
+    always @(posedge clk_54m) begin
+        wdbgb_iorq_n <= bus_iorq_n;
+        wdbgb_rd_n   <= bus_rd_n;
+        wdbgb_wr_n   <= bus_wr_n;
+        wdbgb_m1_n   <= bus_m1_n;
+        wdbgb_addr   <= bus_addr[7:0];
+        wdbgb_din    <= cpu_dout;
+    end
+    wire wdbg_sel    = (wdbgb_iorq_n == 1'b0) && (wdbgb_m1_n == 1'b1) && (wdbgb_addr[7:2] == 6'b001101);
+    wire wdbg_wr_any = wdbg_sel && (wdbgb_wr_n == 1'b0);
+    wire wdbg_rd_any = wdbg_sel && (wdbgb_rd_n == 1'b0);
+    assign wdbg_rd34_w = wdbg_rd_any && (wdbgb_addr[1:0] == 2'b00);
+    assign wdbg_rd35_w = wdbg_rd_any && (wdbgb_addr[1:0] == 2'b01);
+    assign wdbg_rd36_w = wdbg_rd_any && (wdbgb_addr[1:0] == 2'b10);
+    assign wdbg_rd37_w = wdbg_rd_any && (wdbgb_addr[1:0] == 2'b11);
 
     reg wdbg_wr_d1, wdbg_wr_d2, wdbg_rd37_d1, wdbg_rd37_d2;
     always @(posedge clk_54m) begin
@@ -2157,6 +2173,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // (PLL incluido) + retardo LFSR entre billetes para decorrelar.
     reg         wl_probe;      // 1=pasada de sondeo (64KB), 0=pasada completa
     reg  [4:0]  wl_att;        // billetes gastados (el acta lo publica)
+    // _103: RECAL EN CALIENTE — la calibracion ocurre en t=0, el momento MAS
+    // frio que existira jamas; el die sube 20-30C en los primeros 30-60s y
+    // el ojo calibrado-en-frio queda desfasado (evidencia HW: fallo identico
+    // desde la 1a vuelta y estable tras calentar = ojo rancio estable, no
+    // deriva continua). A los 60s de terminar la carga, UNA recalibracion
+    // completa con el die ya a temperatura de regimen + recopia + verify.
+    reg  [31:0] wl_warm_cnt;
+    reg         wl_warm_done;
     reg  [7:0]  wl_lfsr;       // retardo pseudoaleatorio entre billetes
     // _102: LECTURAS FRIAS — la evidencia HW de la _101 (VERIF LIMPIO try=0
     // + INTEG MAL-FIJO en el MISMO arranque, dos veces) demostro que el ojo
@@ -2185,7 +2209,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wl_verify <= 1'b0; wl_verr <= 16'd0; wl_vfirst <= 22'h3FFFFF;
             wl_vres_i <= 3'd0; wl_fb <= 8'd0; wl_recal_tgl <= 1'b0;
             wl_probe <= 1'b1; wl_att <= 5'd0; wl_lfsr <= 8'hA5;   // _102b: semilla nueva = re-tirada de la loteria de placement
-            wl_gap <= 10'd0;
+            wl_gap <= 10'd0; wl_warm_cnt <= 32'd0; wl_warm_done <= 1'b0;
         end
         else begin
             wdbg_busy_d <= wdbg_busy;
@@ -2448,6 +2472,21 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                     wl_state <= 4'd4;
                 end
             end
+            4'd3:   // aparcado — _103: timer de RECAL EN CALIENTE (una vez)
+                if (!wl_warm_done) begin
+                    wl_warm_cnt <= wl_warm_cnt + 32'd1;
+                    if (wl_warm_cnt == 32'd3239760000) begin   // 60s a 54MHz
+                        wl_warm_done <= 1'b1;
+                        wl_recal_tgl <= ~wl_recal_tgl;
+                        wl_err    <= 1'b0;
+                        wl_done   <= 1'b0;   // motor mudo durante el redo
+                        wl_active <= 1'b1;
+                        wl_probe  <= 1'b1;
+                        wl_verify <= 1'b0;
+                        wl_tcnt   <= 22'd0;
+                        wl_state  <= 4'd14;
+                    end
+                end
             4'd6: begin // _95: REINTENTO — cerrar todo y copiar de cero
                 wl_flash_term <= 1'b0;
                 wl_flash_rd   <= 1'b0;
@@ -2476,11 +2515,27 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `endif
 
             if (wdbg_wr_stb && !wl_active) begin
-                case (bus_addr[1:0])
-                2'b00: wdbg_addr[7:0]   <= cpu_dout;
-                2'b01: wdbg_addr[15:8]  <= cpu_dout;
+                case (wdbgb_addr[1:0])               // _103: bus registrado
+                2'b00: wdbg_addr[7:0]   <= wdbgb_din;
+                2'b01: wdbg_addr[15:8]  <= wdbgb_din;
                 2'b10: begin
-                    wdbg_addr[21:16] <= cpu_dout[5:0];
+                    wdbg_addr[21:16] <= wdbgb_din[5:0];
+`ifdef ENABLE_WAVE_LOADER
+                    // _103: OUT 36h con bit7 = RECALIBRAR EN CALIENTE a
+                    // demanda (recal profunda + recopia + verify; el motor
+                    // queda mudo durante el redo). Para el experimento del
+                    // ojo-frio-vs-caliente sin esperar el timer.
+                    if (wdbgb_din[7] && wl_done) begin
+                        wl_recal_tgl <= ~wl_recal_tgl;
+                        wl_err    <= 1'b0;
+                        wl_done   <= 1'b0;
+                        wl_active <= 1'b1;
+                        wl_probe  <= 1'b1;
+                        wl_verify <= 1'b0;
+                        wl_tcnt   <= 22'd0;
+                        wl_state  <= 4'd14;
+                    end
+`endif
                     if (!wdbg_busy) begin            // prefetch de la nueva dir
                         wdbg_we <= 1'b0;
                         wdbg_req <= ~wdbg_req;
@@ -2488,7 +2543,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 end
                 2'b11: if (!wdbg_busy) begin         // escribir byte
                     wdbg_we <= 1'b1;
-                    wdbg_wdata <= cpu_dout;
+                    wdbg_wdata <= wdbgb_din;
                     wdbg_req <= ~wdbg_req;
                     wdbg_inc_pend <= 1'b1;
                 end

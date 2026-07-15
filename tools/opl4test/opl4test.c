@@ -807,8 +807,23 @@ void TestWaveDDR3()
 
 ddr_end:
 	PrintDiagLine(17);                    // _95: telemetria siempre visible
-	Print_DrawTextAt(1, 22, "ESPACIO para seguir");
-	WaitSpace();
+	// _103: R = recalibracion EN CALIENTE a demanda (OUT 36h bit7): recal
+	// profunda + recopia + verify con el die ya a temperatura. El core ya lo
+	// hace solo a los 60s del arranque; la tecla es para experimentar.
+	Print_DrawTextAt(1, 22, "ESPACIO=seguir  R=recal caliente");
+	while (KeyDown(KEY_SPACE)) Halt();
+	for (;;)
+	{
+		Halt();
+		if (KeyDown(KEY_SPACE)) break;
+		if (KeyDown(KEY_R))
+		{
+			g_WavA2 = 0x80;               // dispara el redo en caliente
+			Print_DrawTextAt(1, 22, "RECALIBRANDO... (espera y ESPACIO)");
+			while (KeyDown(KEY_R)) Halt();
+		}
+	}
+	while (KeyDown(KEY_SPACE)) Halt();
 }
 
 //-----------------------------------------------------------------------------
