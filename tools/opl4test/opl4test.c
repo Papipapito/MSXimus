@@ -849,7 +849,7 @@ void MoonWaitLD()
 void MoonKeyOn(u8 slot, u16 wave, u16 fnum, u8 oct)
 {
 	MoonWr(0x20 + slot, (u8)((fnum << 1) | (wave >> 8)));   // FNUM[6:0] | WTN8
-	MoonWr(0x38 + slot, (u8)((oct << 4) | ((fnum >> 7) << 1))); // OCT | FNUM[9:7]
+	MoonWr(0x38 + slot, (u8)((oct << 4) | (fnum >> 7)));    // OCT | FNUM[9:7] en bits 2:0
 	MoonWr(0x50 + slot, 0x01);                              // TL=0 (max), LD=1
 	MoonWr(0x08 + slot, (u8)wave);                          // dispara carga header
 	MoonWaitLD();
@@ -861,19 +861,15 @@ void MoonKeyOn(u8 slot, u16 wave, u16 fnum, u8 oct)
 const u16 g_MoonWave[5] = { 300, 301, 302, 303, 304 };
 const u8  g_MoonRoot[5] = {  38,  55,  62,  67,  75 };   // D2 G3 D4 G4 D#5
 // fnum = 1024*(2^(s/12)-1), s=0..11
-// _104b: FNUM POR SPLIT — las ondas del YRW801 no estan afinadas igual
-// entre si (medido por peine espectral del loop: 300=-16c 301=-30c 302=-6c
-// 303=-32c 304=-28c; 26 cents de escalon entre los splits vecinos de la
-// melodia = el "desafinado" que el ruido de la DDR3 enmascaraba). Cada
-// tabla anula el desvio natural de su onda: todo queda en temperamento
-// igual exacto.
-const u16 g_MoonFNsplit[5][12] = {
-	{   10,   71,  136,  205,  278,  356,  438,  525,  617,  714,  818,  927 },  // 300 (-16.0c)
-	{   18,   80,  146,  215,  289,  367,  450,  537,  630,  728,  833,  943 },  // 301 (-30.2c)
-	{    4,   65,  129,  198,  271,  348,  429,  516,  607,  704,  807,  916 },  // 302 (-6.1c)
-	{   19,   81,  147,  216,  290,  368,  451,  539,  632,  730,  834,  945 },  // 303 (-31.9c)
-	{   17,   78,  144,  213,  287,  365,  448,  535,  628,  726,  830,  940 },  // 304 (-27.8c)
-};
+// _104c: EL BUG REAL era el empaquetado del reg 0x38: FNUM[9:7] va en los
+// bits 2:0 (el bit 3 es el pseudo-reverb), y este player lo escribia en los
+// bits 3:1 desde la primera version — toda nota con fnum>=128 salia entre
+// +173 y -654 cents (y con fnum>=512 ademas activaba el reverb). Las notas
+// con s=0..2 (fnum<128) eran las unicas afinadas. Verificado contra el RTL:
+// {OCT,PREVERB,FNUM} <= {reg38,reg20}[15:1]. Tabla UNIFORME de temperamento
+// igual, como el software MoonSound real ("desafinado por split" _104b: no
+// medible con fiabilidad, descartado).
+const u16 g_MoonFN[12] = { 0, 61, 125, 194, 266, 343, 424, 510, 602, 699, 801, 910 };
 
 u8 g_MoonLastSlot[3];      // ultimo slot sonando por track (0xFF = ninguno)
 
@@ -904,10 +900,10 @@ void MoonNoteOn(u8 track, u8 note)
 	oct = 1;
 	while (s < 0)   { s += 12; --oct; }
 	while (s >= 12) { s -= 12; ++oct; }
-	fn = g_MoonFNsplit[split][(u8)s];   // _104b: afinacion por split
+	fn = g_MoonFN[(u8)s];
 	MoonNoteOff(track);
 	MoonWr(0x20 + slot, (u8)((fn << 1) | (g_MoonWave[split] >> 8)));
-	MoonWr(0x38 + slot, (u8)(((u8)oct << 4) | (u8)((fn >> 7) << 1)));
+	MoonWr(0x38 + slot, (u8)(((u8)oct << 4) | (u8)(fn >> 7)));
 	MoonWr(0x68 + slot, 0x80);                        // KEY on, pan centro
 	g_MoonLastSlot[track] = slot;
 }

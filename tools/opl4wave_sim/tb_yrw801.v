@@ -133,7 +133,7 @@ initial begin
     outp(8'hC6, 8'h05);
     outp(8'hC7, 8'h03);                       // NEW/NEW2
     wreg(8'h20, (FNUM[6:0]<<1) | WAVEN[8]);   // FNUM low / WTN8
-    wreg(8'h38, (OCT[3:0]<<4) | (FNUM[9:7]<<1));
+    wreg(8'h38, (OCT[3:0]<<4) | FNUM[9:7]);   // _104c: FNUM[9:7] en bits 2:0 (canon)
     wreg(8'h50, 8'h01);                       // TL=0, LD
     wreg(8'h08, WAVEN[7:0]);                  // dispara header load
     i = 0;
