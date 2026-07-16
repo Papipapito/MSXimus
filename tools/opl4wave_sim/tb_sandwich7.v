@@ -202,6 +202,23 @@ always @(posedge clk_eng) begin
     end
 end
 
+// ---- _107 debug: contadores de cache y traza de accesos ----
+integer c_rd=0, c_hit=0, c_pf=0, tr_n=0;
+integer ftr;
+initial ftr=$fopen("trace_addr.txt","w");
+always @(posedge clk_eng) begin
+    if (dut.rd_edge) begin
+        c_rd = c_rd + 1;
+        if (tr_n < 600) begin
+            $fdisplay(ftr, "%0t R %h %b", $time, dut.e_addr22,
+                      dut.lb_v[dut.e_addr22[6:1]] && (dut.lb_tagA[dut.e_addr22[6:1]] == dut.e_addr22[21:7]));
+            tr_n = tr_n + 1;
+        end
+    end
+    if (dut.lb_fast) c_hit = c_hit + 1;
+    if (dut.mem_req && dut.op_is_pf) c_pf = c_pf + 1;
+end
+
 // ---- pushes del productor (la medida REAL del pitch) ----
 integer pushes = 0, pushes0 = 0;
 reg [3:0] rf_wp_d = 0;
@@ -237,6 +254,8 @@ always @(posedge clk_host) begin
                      (lat_sum-lat_sum0)/((lat_n-lat_n0)>0?(lat_n-lat_n0):1), lat_max);
             $display("carga de stall aprox: %.1f%% (margen CE 10.7%%)",
                      (lat_sum-lat_sum0)/(t_end-t_start)*100.0);
+            $display("CACHE: reads=%0d hits=%0d (%.1f%%) pf_emitidos=%0d",
+                     c_rd, c_hit, c_hit*100.0/(c_rd>0?c_rd:1), c_pf);
             $display("PRODUCTOR: %0d pushes / %0d ticks -> ratio %.5f = %.1f cents",
                      pushes-pushes0, NSAMP,
                      (pushes-pushes0)*1.0/NSAMP,
@@ -245,6 +264,41 @@ always @(posedge clk_host) begin
         end
     end
 end
+
+// ---- test de SUBIDA a escala (+upload=N): streaming estilo VGMPlay/OTIR ----
+integer UPLOAD = 0, uperr, ui;
+reg [23:0] uidx;
+task do_upload;
+begin
+    outp(8'h7E, 8'h02); outp(8'h7F, 8'h11);      // memmode=1, wavetblhdr=4
+    outp(8'h7E, 8'h03); outp(8'h7F, 8'h20);      // MEMADDR = 0x200000
+    outp(8'h7E, 8'h04); outp(8'h7F, 8'h00);
+    outp(8'h7E, 8'h05); outp(8'h7F, 8'h00);
+    outp(8'h7E, 8'h06);                          // selecciona reg 6 UNA vez
+    for (ui = 0; ui < UPLOAD; ui = ui + 1)
+        outp(8'h7F, (ui*7) & 8'hFF);             // stream tipo OTIR (~6us/byte)
+    outp(8'h7E, 8'h02); outp(8'h7F, 8'h10);      // memmode off
+    #20000;
+    uperr = 0;
+    for (ui = 0; ui < UPLOAD; ui = ui + 1) begin
+        // mapeo wave de memory.v: index={A[11:10],100,A[21:12],A[9:1]}, lane=A[0]
+        uidx = {ui[11:10]+2'b10, 3'b100, 10'h200 + ui[21:12], ui[9:1]};
+        uidx = {(22'h200000+ui) >> 10 & 24'h3, 3'b100, (22'h200000+ui) >> 12 & 24'h3FF, (22'h200000+ui) >> 1 & 24'h1FF};
+        if ((ui[0] ? sdram.mem[{ui[11:10], 3'b100, (10'h200 + ui[21:12]), ui[9:1]}][15:8]
+                   : sdram.mem[{ui[11:10], 3'b100, (10'h200 + ui[21:12]), ui[9:1]}][7:0])
+            !== ((ui*7) & 8'hFF)) begin
+            if (uperr < 10)
+                $display("  MAL byte %0d: mem=%02x esperado=%02x", ui,
+                    ui[0] ? sdram.mem[{ui[11:10],3'b100,(10'h200+ui[21:12]),ui[9:1]}][15:8]
+                          : sdram.mem[{ui[11:10],3'b100,(10'h200+ui[21:12]),ui[9:1]}][7:0],
+                    (ui*7)&8'hFF);
+            uperr = uperr + 1;
+        end
+    end
+    $display("UPLOAD %0d bytes: %0d errores %s", UPLOAD, uperr, uperr==0 ? "*** LIMPIO ***" : "*** CORRUPTO ***");
+    $finish;
+end
+endtask
 
 integer i;
 initial begin
@@ -258,11 +312,14 @@ initial begin
     #60000;                                   // barrido de reset del motor
     outp(8'hC6, 8'h05);
     outp(8'hC7, 8'h03);                       // NEW/NEW2
+    if ($value$plusargs("upload=%d", UPLOAD)) do_upload;
     for (i = 0; i < NSLOTS; i = i + 1) begin
-        wreg(8'h20 + i[7:0], 8'h01);          // fnum=0 / WTN8=1 (onda 303)
-        wreg(8'h38 + i[7:0], 8'h10);          // oct=1, fnum alto=0 (canon)
+        // ondas DISTINTAS por slot (300+i) y fnum disperso: streams
+        // independientes = el caso real de un tracker a polifonia alta
+        wreg(8'h20 + i[7:0], (((i*89) % 128) << 1) | 8'h01);  // fnum bajo + WTN8
+        wreg(8'h38 + i[7:0], 8'h10 | ((i%3)==0 ? 8'h00 : 8'h01)); // oct1, fn alto var
         wreg(8'h50 + i[7:0], 8'h01);          // TL=0, LD
-        wreg(8'h08 + i[7:0], 8'h2F);          // dispara header (0x12F=303)
+        wreg(8'h08 + i[7:0], (8'd44 + i[7:0]));  // header: onda 300+i (0x12C+i)
         inp(8'hC4); inp(8'h7E);
         while (rdv[1]) begin #10000; inp(8'hC4); inp(8'h7E); end
     end

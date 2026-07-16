@@ -375,18 +375,32 @@ wire [9:0]  e_mcs_n;
 // los chip-selects: MCS_N[1]=0 <=> MEM_A[21]=1
 wire [21:0] e_addr22 = {~e_mcs_n[1], e_ma};
 
-// _105: cache de 16 PALABRAS direct-mapped (indice addr[4:1], tag addr[21:5]).
-// La cache de 1 palabra de la _104 se moria de hambre: el motor lee DOS
-// muestras por tick (interpolacion) => ~2 fetches/slot/muestra, y con 7
-// slots la carga de stalls (18-20% con fetches de ~300ns por turno vacio
-// de SDRAM) superaba el margen del CE (10.7%) => la FIFO del reclock
-// repetia muestras => pitch PLANO y variable con la polifonia = el
-// "desafinado" de la _104 en placa (reproducido en tb_sandwich7 con la
-// pila SDRAM real: 1432/1500 pushes = -78c en vacio, -106c con CPU).
-// Con 16 entradas cada palabra del stream de un slot se trae UNA vez.
-reg [15:0]  lb_word [0:15];
-reg [16:0]  lb_tagA [0:15];        // addr[21:5]
-reg [15:0]  lb_v;
+// _107: cache de 64 PALABRAS + PREFETCH ENCADENADO (OBL etiquetado).
+// La cache de 16 de la _105 se valido con 7 slots, pero el software real
+// la desborda (Bombaman 22 slots, MoonDriver 16-24): 22 streams > 16
+// entradas = thrash => 34 fetches/muestra, 48% de stalls => productor a
+// 850/1200 = -505 cents = las "demos leeeentas" (tb_sandwich7 +nslots=22).
+// El tamano solo NO basta: un stream toca cada palabra UNA vez (miss frio
+// inevitable). La solucion es ESCONDER la latencia: cada miss trae su
+// palabra Y ENCARGA la siguiente (bit pf de la entrada); cada hit sobre
+// una entrada prefeteada encarga la proxima => los streams secuenciales
+// van siempre servidos y la CE solo se congela en arranques de nota/loop.
+// El prefetch usa el puerto en los huecos (op_is_pf, sin congelar la CE);
+// un miss que llegue con prefetch en vuelo espera su turno (eng_pend,
+// acotado por UNA op). pf_want es de 1 plaza (mejor esfuerzo): si dos
+// hits lo pisan, el stream perdedor hara miss y su OBL lo recupera.
+// _107c: PARTICIONADA POR SLOT — 32 slots x 4 palabras (indice
+// {MEM_SLOT, addr[2:1]}). Los intentos compartidos (16/64/256 entradas
+// direct-mapped) se ahogaban por DESALOJO CRUZADO: 22 streams x 3
+// palabras calientes se pisan entre si (64 entradas: 62% hits; 256: 81%
+// — nunca llega). Particionando, cada slot tiene sus 4 palabras
+// (actual, vecina de interpolacion, +2 del prefetch) SIN colisiones
+// por construccion: el hit rate ya no depende de la polifonia.
+reg [15:0]  lb_word [0:127];
+reg [18:0]  lb_tagA [0:127];       // addr[21:3]
+reg [127:0] lb_v;
+reg [127:0] lb_pfb;                // entrada traida por prefetch (OBL tag)
+wire [4:0]  e_slot;                // slot dueno del fetch (del motor)
 reg         lb_hit;                // el ultimo fetch se sirvio de la cache
 reg         lb_fast;               // hit en curso: completa al ciclo siguiente
 reg [7:0]   lb_byte;
@@ -406,16 +420,42 @@ assign diag = {ifw_hits, alive};
 reg mrd_d1, mwr_d1, done_d1;
 reg        fill_pend;              // _96: fill de la cache diferido 1 ciclo
 reg [20:0] fill_tag;
+reg        fill_is_pf;             // _107: el fill viene de un prefetch
+reg [4:0]  fill_slot;              // _107c: particion destino del fill
+reg [4:0]  cur_op_slot;            // _107c: slot del op en el puerto
+reg [4:0]  eng_pend_slot;
+reg        port_busy;              // _107: UNA op (motor o pf) en el puerto
+reg        op_is_pf;               // _107: la op en vuelo es un prefetch
+reg        eng_pend;               // _107: op del motor esperando el puerto
+reg        eng_pend_we;
+reg [21:0] eng_pend_addr;
+reg [7:0]  eng_pend_data;
+// _107b: COLA de prefetch (8 plazas). Con 1 plaza el arranque no
+// converge: 22 streams en regimen de miss pisotean el want y el pf
+// nunca despega (medido: 799/1200, peor que sin pf). Con cola, cada
+// hueco del puerto emite un pf pendiente -> avalancha al regimen bueno.
+reg [25:0] pfq [0:7];              // {slot[4:0], palabra[20:0]}
+reg [2:0]  pfq_wp, pfq_rp;
+wire       pfq_empty = (pfq_wp == pfq_rp);
+wire       pfq_full  = (pfq_wp + 3'd1 == pfq_rp);
+reg        pf_kill;                // _107: el pf en vuelo quedo rancio
+wire       rd_edge = ~e_mrd_n && !mrd_d1;
+wire       wr_edge = ~e_mwr_n && !mwr_d1;
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
         mrd_d1 <= 1'b0; mwr_d1 <= 1'b0; done_d1 <= 1'b0;
         mem_req <= 1'b0; mem_we <= 1'b0;
         mem_addr <= 22'd0; mem_wdata <= 8'd0;
         mem_inflight <= 1'b0;
-        lb_v <= 16'd0;
+        lb_v <= 128'd0; lb_pfb <= 128'd0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
         ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
-        fill_pend <= 1'b0; fill_tag <= 21'd0;
+        fill_pend <= 1'b0; fill_tag <= 21'd0; fill_is_pf <= 1'b0;
+        fill_slot <= 5'd0; cur_op_slot <= 5'd0; eng_pend_slot <= 5'd0;
+        port_busy <= 1'b0; op_is_pf <= 1'b0;
+        eng_pend <= 1'b0; eng_pend_we <= 1'b0;
+        eng_pend_addr <= 22'd0; eng_pend_data <= 8'd0;
+        pfq_wp <= 3'd0; pfq_rp <= 3'd0; pf_kill <= 1'b0;
     end
     else begin
         mrd_d1 <= ~e_mrd_n;
@@ -423,87 +463,139 @@ always @(posedge clk_eng or negedge erst_n) begin
         done_d1 <= mem_done_t;
         mem_req <= 1'b0;
         if (ce) alive <= alive + 4'd1;
-        // _95: el done se consume ANTES y en un if INDEPENDIENTE — la version
-        // _91.._94 lo tenia como else-if detras de los flancos MRD/MWR, pero
-        // done_d1 se actualiza SIEMPRE arriba: si el done coincidia en ciclo
-        // con un flanco nuevo, el evento se consumia sin procesar y
-        // mem_inflight quedaba clavado a 1 (motor congelado). Por disciplina
-        // de stall no deberian coincidir, pero el HW de la _94 murio con esa
-        // firma exacta. Orden: done primero (lee mem_we/mem_addr VIEJOS, aun
-        // sin pisar), los flancos despues (su inflight<=1 gana, correcto).
-        //
-        // _96: el FILL va DIFERIDO 1 ciclo (fill_pend). En la _95 lb_line
-        // capturaba mem_rline en el PRIMER avistamiento del toggle: los 128
-        // bits (dominio x1) salen en el MISMO flanco x1 que eng_done_t, y en
-        // la alineacion x1==eng esa captura es una carrera de hold que el
-        // router cerro con +0.004ns — CUATRO PICOSEGUNDOS. En placa: lineas
-        // corruptas segun el patron de bits (headers con loops rotos =
-        // semitono alto + ruido de banda ancha = el "ya ni se oye un piano"
-        // de la _95; el test de 8 bytes pasaba porque ESA linea no disparaba
-        // la carrera). Un ciclo despues el payload lleva >=13.5ns quieto:
-        // captura limpia SIEMPRE. El STA seguira reportando el hold apretado
-        // estructural — esperado e inofensivo: con fill_pend=1 no puede haber
-        // lanzamiento simultaneo (la siguiente lectura tarda >=2 ciclos eng).
-        // El MDI directo (mem_rdata) ya tenia asentado inherente: la CYCLE1
-        // llega >=2 ciclos despues del done.
+        // _95: el done se consume ANTES y en un if INDEPENDIENTE (historia:
+        // un done coincidiendo con flanco nuevo se perdia y mem_inflight
+        // quedaba clavado). _96: el fill va DIFERIDO 1 ciclo (fill_pend):
+        // capturar mem_rword en el primer avistamiento del toggle es una
+        // carrera de hold de picosegundos que en placa corrompia lineas.
         if (mem_done_t != done_d1) begin
-            mem_inflight <= 1'b0;
-            if (!mem_we) begin
-                fill_pend <= 1'b1;
-                fill_tag  <= mem_addr[21:1];
+            port_busy <= 1'b0;
+            if (op_is_pf) begin
+                op_is_pf <= 1'b0;
+                if (!pf_kill) begin
+                    fill_pend  <= 1'b1;
+                    fill_tag   <= mem_addr[21:1];
+                    fill_slot  <= cur_op_slot;
+                    fill_is_pf <= 1'b1;
+                end
+                pf_kill <= 1'b0;
+            end
+            else begin
+                mem_inflight <= 1'b0;
+                if (!mem_we) begin
+                    fill_pend  <= 1'b1;
+                    fill_tag   <= mem_addr[21:1];
+                    fill_slot  <= cur_op_slot;
+                    fill_is_pf <= 1'b0;
+                end
             end
         end
         if (fill_pend) begin
             fill_pend <= 1'b0;
-            lb_word[fill_tag[3:0]] <= mem_rword;   // payload asentado
-            lb_tagA[fill_tag[3:0]] <= fill_tag[20:4];
-            lb_v[fill_tag[3:0]]    <= 1'b1;
+            lb_word[{fill_slot,fill_tag[1:0]}] <= mem_rword;  // asentado (_96)
+            lb_tagA[{fill_slot,fill_tag[1:0]}] <= fill_tag[20:2];
+            lb_v[{fill_slot,fill_tag[1:0]}]    <= 1'b1;
+            lb_pfb[{fill_slot,fill_tag[1:0]}]  <= fill_is_pf;
         end
         if (lb_fast) begin
             // hit del ciclo anterior: lb_byte ya es valido -> soltar el CE.
             // ¡OJO: el hit DEBE sujetar la CYCLE1 de muestreo como cualquier
-            // fetch! Sin esto el motor muestreaba MDI rancio cuando el CE va
-            // a tope (cazado por el golden compare: err 8643 vs 11.7).
+            // fetch! (_94: sin esto el motor muestreaba MDI rancio.)
             lb_fast <= 1'b0;
             mem_inflight <= 1'b0;
         end
-        if (~e_mrd_n && !mrd_d1) begin
-            if (lb_v[e_addr22[4:1]] && (lb_tagA[e_addr22[4:1]] == e_addr22[21:5])) begin
-                lb_hit  <= 1'b1;                       // HIT: sin transaccion
-                lb_byte <= e_addr22[0] ? lb_word[e_addr22[4:1]][15:8]
-                                       : lb_word[e_addr22[4:1]][7:0];
-                lb_fast <= 1'b1;                       // completa en 1 ciclo
-                mem_inflight <= 1'b1;                  // sujeta la CYCLE1
+        if (rd_edge) begin
+            if (lb_v[{e_slot,e_addr22[2:1]}] &&
+                (lb_tagA[{e_slot,e_addr22[2:1]}] == e_addr22[21:3])) begin
+                lb_hit  <= 1'b1;                   // HIT: sin transaccion
+                lb_byte <= e_addr22[0] ? lb_word[{e_slot,e_addr22[2:1]}][15:8]
+                                       : lb_word[{e_slot,e_addr22[2:1]}][7:0];
+                lb_fast <= 1'b1;                   // completa en 1 ciclo
+                mem_inflight <= 1'b1;              // sujeta la CYCLE1 (_94)
+                if (lb_pfb[{e_slot,e_addr22[2:1]}]) begin  // OBL etiquetado
+                    lb_pfb[{e_slot,e_addr22[2:1]}] <= 1'b0;
+                    if (!pfq_full) begin
+                        // distancia +2: el motor toca W y W+1 en el MISMO
+                        // tick (interpolacion, 213ns entre lecturas) — un
+                        // pf a +1 llega tarde y duplica el fetch; +2 es la
+                        // palabra del tick SIGUIENTE (22us de margen)
+                        pfq[pfq_wp] <= {e_slot, e_addr22[21:1] + 21'd2};
+                        pfq_wp <= pfq_wp + 3'd1;
+                    end
+                end
             end
             else begin
-                lb_hit   <= 1'b0;
-                mem_req  <= 1'b1;
-                mem_we   <= 1'b0;
-                mem_addr <= e_addr22;
-                mem_inflight <= 1'b1;  // congela la CYCLE1_CE hasta el done
+                lb_hit        <= 1'b0;
+                eng_pend      <= 1'b1;             // _107: via arbitro
+                eng_pend_we   <= 1'b0;
+                eng_pend_addr <= e_addr22;
+                eng_pend_slot <= e_slot;
+                mem_inflight  <= 1'b1;  // congela la CYCLE1_CE hasta el done
+                if (!pfq_full) begin    // _107b: OBL encolado en el miss (+2)
+                    pfq[pfq_wp] <= {e_slot, e_addr22[21:1] + 21'd2};
+                    pfq_wp <= pfq_wp + 3'd1;
+                end
             end
         end
-        else if (~e_mwr_n && !mwr_d1) begin
-            lb_hit    <= 1'b0;
-            mem_req   <= 1'b1;
-            mem_we    <= 1'b1;
-            mem_addr  <= e_addr22;
-            mem_wdata <= e_mdo;
-            mem_inflight <= 1'b1;      // tambien en escritura: serializa
-            if (lb_tagA[e_addr22[4:1]] == e_addr22[21:5])
-                lb_v[e_addr22[4:1]] <= 1'b0;   // no servir datos rancios
-            fill_pend <= 1'b0;         // _96: y cancelar un fill pendiente —
-                                       // cachearia la linea PRE-escritura
+        else if (wr_edge) begin
+            lb_hit <= 1'b0;
+            if (e_addr22[21]) begin                // solo la RAM es escribible
+                eng_pend      <= 1'b1;
+                eng_pend_we   <= 1'b1;
+                eng_pend_addr <= e_addr22;
+                eng_pend_slot <= e_slot;
+                eng_pend_data <= e_mdo;
+                mem_inflight  <= 1'b1;             // tambien en escritura (_91)
+                lb_v   <= 128'd0;                  // _107c: FLUSH total (una
+                lb_pfb <= 128'd0;                  //  escritura CPU no tiene
+                                                   //  slot; rancio = fuera)
+                fill_pend <= 1'b0;                 // _96: cancelar fill pendiente
+                pfq_rp <= pfq_wp;                  // _107b: vaciar wants rancios
+                if (port_busy && op_is_pf && mem_addr[21:1] == e_addr22[21:1])
+                    pf_kill <= 1'b1;               // pf en vuelo quedaria rancio
+            end
+            // _107: escritura con addr[21]==0 (region ROM) = NO-OP, como el
+            // chip real. Sin esto la deteccion de RAM de MoonBlaster
+            // "encontraba 4MB" y machacaba la YRW801 en SDRAM.
+        end
+
+        // _107: arbitro del puerto (una op en vuelo; motor > prefetch).
+        // No emitir pf en el ciclo de un wr_edge (cerraria la ventana de
+        // pf_kill: el flanco aun ve op_is_pf viejo).
+        if (!port_busy && !fill_pend) begin
+            if (eng_pend) begin
+                eng_pend  <= 1'b0;
+                mem_req   <= 1'b1;
+                mem_we    <= eng_pend_we;
+                mem_addr  <= eng_pend_addr;
+                mem_wdata <= eng_pend_data;
+                cur_op_slot <= eng_pend_slot;
+                op_is_pf  <= 1'b0;
+                port_busy <= 1'b1;
+            end
+            else if (!pfq_empty && !wr_edge && !rd_edge) begin
+                pfq_rp    <= pfq_rp + 3'd1;
+                mem_req   <= 1'b1;
+                mem_we    <= 1'b0;
+                mem_addr  <= {pfq[pfq_rp][20:0], 1'b0};
+                cur_op_slot <= pfq[pfq_rp][25:21];
+                op_is_pf  <= 1'b1;
+                port_busy <= 1'b1;
+            end
         end
 
         // _95: watchdog de inflight (despues de todo: su liberacion forzada
-        // solo gana si NADIE mas decidio sobre mem_inflight este ciclo)
+        // solo gana si NADIE mas decidio sobre mem_inflight este ciclo).
+        // _107: suelta tambien el arbitro para no dejarlo clavado.
         if (mem_inflight) begin
             ifw <= ifw + 18'd1;
             if (ifw[17]) begin
                 mem_inflight <= 1'b0;
                 lb_hit <= 1'b0;        // que muestree mem_rdata, no la cache
                 ifw <= 18'd0;
+                eng_pend <= 1'b0;
+                port_busy <= 1'b0;
+                op_is_pf <= 1'b0;
                 if (ifw_hits != 4'd15) ifw_hits <= ifw_hits + 4'd1;
             end
         end
@@ -605,6 +697,7 @@ YMF278B u_engine (
     .MRD_N  (e_mrd_n),
     .MWR_N  (e_mwr_n),
     .MCS_N  (e_mcs_n),
+    .MEM_SLOT (e_slot),
 
     .OUT0_L (), .OUT0_R (),     // FM del stub (siempre 0)
     .OUT1_L (o1_l), .OUT1_R (o1_r),   // PCM puro <- nuestra salida
