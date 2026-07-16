@@ -368,7 +368,7 @@ module YMF278B (
 		end
 		else begin
 			if (CYCLE0_CE) begin
-				{OP2_DATA_BIT, OP2_SA} <= (OP2[36] ? {2'b00, {10'b0000000000, OP2[12-:9], 3'b000} + {11'b00000000000, OP2[12-:9], 2'b00}} + OP2[3-:4] : REG_SA_Q);
+				{OP2_DATA_BIT, OP2_SA} <= (OP2[36] ? {2'b00, ((OP2[12:11] == 2'b11) && (MEMMODE[4:2] != 3'd0) ? ({MEMMODE[4:2], 19'd0} + {12'b000000000000, OP2[10:4], 3'b000}) + {13'b0000000000000, OP2[10:4], 2'b00} : {10'b0000000000, OP2[12-:9], 3'b000} + {11'b00000000000, OP2[12-:9], 2'b00})} + OP2[3-:4] : REG_SA_Q);
 				OP2_LA <= REG_LA_Q;
 				OP2_EA <= ~REG_EA_Q + 16'd1;
 				case (CYCLE_NUM[2:1])

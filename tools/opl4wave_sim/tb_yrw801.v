@@ -36,6 +36,7 @@ reg [15:0] WAVEN = 303;
 reg [15:0] FNUM = 0;
 reg [7:0]  OCT = 1;
 integer NSAMP = 600;
+integer HDRREL = 0;
 
 opl4_pcm dut (
     .rst_n(rst_n), .clk_host(clk_host),
@@ -122,8 +123,15 @@ initial begin
     if (!$value$plusargs("fnum=%d", FNUM)) FNUM = 0;
     if (!$value$plusargs("oct=%d", OCT)) OCT = 1;
     if (!$value$plusargs("nsamp=%d", NSAMP)) NSAMP = 600;
+    if (!$value$plusargs("hdrrel=%d", HDRREL)) HDRREL = 0;
     fd = $fopen("pcm_dump.txt", "w");
     $readmemh("yrw801_2m.hex", wavemem);
+    if (HDRREL) begin
+        // _106: cabecera de la onda 303 COPIADA a la tabla relocada de RAM
+        // (wavetblhdr=4 -> base 4*0x80000 = 0x200000; onda 384 = indice 0)
+        for (li = 0; li < 12; li = li + 1)
+            wavemem[22'h200000 + li] = wavemem[303*12 + li];
+    end
     #500  rst_n = 1;
     #1000 eng_rst_n = 1;
     #60000;   // dejar acabar el BARRIDO de reset del motor (768 CE ~ 23us):
@@ -132,6 +140,7 @@ initial begin
               // se suelta ~7s antes de que el software escriba nada)
     outp(8'hC6, 8'h05);
     outp(8'hC7, 8'h03);                       // NEW/NEW2
+    if (HDRREL) wreg(8'h02, 8'h10);           // wavetblhdr=4 (bits 4:2)
     wreg(8'h20, (FNUM[6:0]<<1) | WAVEN[8]);   // FNUM low / WTN8
     wreg(8'h38, (OCT[3:0]<<4) | FNUM[9:7]);   // _104c: FNUM[9:7] en bits 2:0 (canon)
     wreg(8'h50, 8'h01);                       // TL=0, LD

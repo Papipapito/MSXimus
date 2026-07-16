@@ -339,7 +339,16 @@ module YMF278B
 			WD_READ <= 0;
 		end else begin
 			if (CYCLE0_CE) begin
-				{OP2_DATA_BIT,OP2_SA} <= OP2.LOAD ? {2'b00 ,{10'b0000000000,OP2.WTN,3'b000} + {11'b00000000000,OP2.WTN,2'b00}} + OP2.LOAD_POS : REG_SA_Q;
+				// _106: relocacion wavetblhdr (canon openMSX/MAME): las ondas
+				// >=384 (RAM) llevan su tabla de cabeceras en wavetblhdr*0x80000
+				// (reg 02 bits 4:2 = MEMMODE[4:2]); sin esto MBWave/Bombaman y
+				// cualquier musica con instrumentos propios leian cabeceras de
+				// la YRW801 (wave*12 siempre). WTN>=384 <=> WTN[8:7]==11 y
+				// (WTN-384) == WTN[6:0].
+				{OP2_DATA_BIT,OP2_SA} <= OP2.LOAD ? {2'b00 ,
+					((OP2.WTN[8:7] == 2'b11 && MEMMODE[4:2] != 3'd0)
+					 ? {MEMMODE[4:2],19'd0} + {12'b000000000000,OP2.WTN[6:0],3'b000} + {13'b0000000000000,OP2.WTN[6:0],2'b00}
+					 : {10'b0000000000,OP2.WTN,3'b000} + {11'b00000000000,OP2.WTN,2'b00})} + OP2.LOAD_POS : REG_SA_Q;
 				OP2_LA <= REG_LA_Q;
 				OP2_EA <= ~(REG_EA_Q) + 16'd1;
 				case (CYCLE_NUM[2:1])
