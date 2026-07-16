@@ -42,7 +42,10 @@ module opl4fm (
     output wire        wave_rd,      // lectura 7Fh en curso (stub wave)
     output wire [7:0]  dout,         // dato C4-C7 (status/shadow)
     output wire [7:0]  wave_dout,    // dato 7Fh (stub 0x20)
-    output reg signed [15:0] pcm_out // al mixer (registrado, dominio host)
+    output reg signed [15:0] pcm_out, // al mixer (registrado, dominio host)
+    output wire        int_n         // _108: IRQ del timer OPL4 (dominio host,
+                                     // 2FF; VGMPlay/MBWave la NECESITAN: su
+                                     // play va del Timer1 a 1130Hz por IRQ)
 );
 
 // ---------------------------------------------------------------------------
@@ -130,9 +133,19 @@ opl3 u_opl3 (
     .sample_l          (sample_l),
     .sample_r          (sample_r),
     .led               ( ),
-    .irq_n             ( ),           // sin cablear en _82 (polling de status)
+    .irq_n             (opl3_irq_n),  // _108: cableada (antes solo polling)
     .force_clear_flags (1'b0)
 );
+
+// _108: IRQ al bus — 2FF al dominio host (27M y 54M son hermanos del PLLA,
+// cruce cronometrado; la disciplina 3FF es para payloads, esto es 1 bit).
+wire opl3_irq_n;
+reg  irq_s0 = 1'b1, irq_s1 = 1'b1;
+always @(posedge clk_host) begin
+    irq_s0 <= opl3_irq_n;
+    irq_s1 <= irq_s0;
+end
+assign int_n = irq_s1;
 
 // ---------------------------------------------------------------------------
 // audio: mono (L+R)/2 en clk_opl3, a NIVEL NATIVO del chip (_83).

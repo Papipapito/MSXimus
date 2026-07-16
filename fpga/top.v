@@ -1224,9 +1224,9 @@ assign keyboard_addr = ppi_port_c[3:0];
       `endif
     `endif
     `ifdef ENABLE_V9958
-        .INT_n     (bus_int_n & vdp_int & y8950_int_n),  // _81: wired-AND con el Y8950
+        .INT_n     (bus_int_n & vdp_int & y8950_int_n & opl4_int_n),  // _81 Y8950 + _108 OPL4
     `else
-        .INT_n     (bus_int_n & y8950_int_n),
+        .INT_n     (bus_int_n & y8950_int_n & opl4_int_n),
     `endif
         .NMI_n     (1),
         .BUSRQ_n   (1),
@@ -1966,16 +1966,31 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     reg [11:0] opll_mix;
     wire [15:0] jt2413_wav;
 
-    assign opll_req_n = ( bus_iorq_n == 1'b0 && bus_addr[7:1] == 7'b0111110  &&  bus_wr_n == 1'b0 )  ? 1'b0 : 1'b1;    // I/O:7C-7Dh   / OPLL (YM2413)
-  
+    // _108: BUS REGISTRADO (medicina _95, patron y54_*): el jt2413 decodificaba
+    // el bus CRUDO del T80 (flanco de bajada) y rotaba como perdedor de la
+    // loteria de placement (p0r0: -0.269 en cpu1/WR_n -> opll/u_mmr). Flop del
+    // bus = cono trivial; el strobe de escritura del Z80 dura cientos de ns.
+    reg        o54_iorq_n, o54_wr_n;
+    reg        o54_a0;
+    reg [6:0]  o54_adr71;
+    reg [7:0]  o54_din;
+    always @(posedge clk_54m) begin
+        o54_iorq_n <= bus_iorq_n;
+        o54_wr_n   <= bus_wr_n;
+        o54_a0     <= bus_addr[0];
+        o54_adr71  <= bus_addr[7:1];
+        o54_din    <= cpu_dout;
+    end
+    assign opll_req_n = ( o54_iorq_n == 1'b0 && o54_adr71 == 7'b0111110  &&  o54_wr_n == 1'b0 )  ? 1'b0 : 1'b1;    // I/O:7C-7Dh   / OPLL (YM2413)
+
 `ifdef ENABLE_OPLL
     jt2413 opll(
         .rst (~bus_reset_n),        // rst should be at least 6 clk&cen cycles long
         .clk (clk_54m),        // F3/_38: OPLL a 54M+cen (patron smstang con el MISMO chip:
         .cen (clk_enable_3m6_54),   //  bus mismo-dominio y fuera del arbol 27M — su carga
                                     //  re-sorteaba el hold de la paleta del VDP)
-        .din (cpu_dout),
-        .addr (bus_addr[0]),
+        .din (o54_din),
+        .addr (o54_a0),
         .cs_n (opll_req_n),
         .wr_n (1'b0),
         // combined output
@@ -1998,6 +2013,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0]  y8950_dout;
     wire [15:0] y8950_wav;
     wire        y8950_int_n;   // _81: hacia el /INT del Z80 (wired-AND)
+    wire        opl4_int_n;    // _108: timer OPL4 -> /INT (VGMPlay/MBWave)
     // _95: BUS REGISTRADO (patron _91) para el jtopl2 — el T80 lanza en el
     // flanco de BAJADA de clk_54m y el decode al de subida deja 9.26ns menos
     // el cono: este camino (IORQ->u_mmr/value_*) rotaba como perdedor de la
@@ -2226,7 +2242,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             wl_retries <= 3'd0; wl_err <= 1'b0;
             wl_verify <= 1'b0; wl_verr <= 16'd0; wl_vfirst <= 22'h3FFFFF;
             wl_vres_i <= 3'd0; wl_fb <= 8'd0; wl_recal_tgl <= 1'b0;
-            wl_probe <= 1'b1; wl_att <= 5'd0; wl_lfsr <= 8'hA5;   // _102b: semilla nueva = re-tirada de la loteria de placement
+            wl_probe <= 1'b1; wl_att <= 5'd0; wl_lfsr <= 8'hC3;   // _108: semilla nueva = re-tirada de la loteria de placement
             wl_gap <= 10'd0; wl_warm_cnt <= 32'd0;
             wl_warm_done <= 1'b1;   // _104: SDRAM sin calibracion — recal caliente OFF
         end
@@ -2657,11 +2673,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wave_rd   (opl4wave_rd_w),
         .dout      (opl4fm_dout),
         .wave_dout (opl4wave_dout),
-        .pcm_out   (opl4fm_wav)
+        .pcm_out   (opl4fm_wav),
+        .int_n     (opl4_int_n)
     );
 `else
     assign opl4fm_rd_w   = 1'b0;
     assign opl4wave_rd_w = 1'b0;
+    assign opl4_int_n    = 1'b1;   // _108: sin OPL4, sin IRQ
     assign opl4fm_dout   = 8'hFF;
     assign opl4wave_dout = 8'hFF;
     assign opl4fm_wav    = 16'sd0;

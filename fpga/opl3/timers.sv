@@ -85,11 +85,18 @@ module timers
                 timer2 <= opl3_reg_wr.data;
 
             if (opl3_reg_wr.bank_num == 0 && opl3_reg_wr.address == 4) begin
-                irq_rst <= opl3_reg_wr.data[7];
-                mt1 <= opl3_reg_wr.data[6];
-                mt2 <= opl3_reg_wr.data[5];
-                st2 <= opl3_reg_wr.data[1];
-                st1 <= opl3_reg_wr.data[0];
+                // _108 (canon YMF262): con RST (bit7) a 1 el chip real IGNORA
+                // el resto de bits — solo limpia flags. Sin esto, el ack del
+                // ISR de VGMPlay/MBWave (reg4=0x80) tambien escribia st1=0 y
+                // PARABA el timer: un solo tick y la musica a ~6%/colgada.
+                if (opl3_reg_wr.data[7])
+                    irq_rst <= 1'b1;
+                else begin
+                    mt1 <= opl3_reg_wr.data[6];
+                    mt2 <= opl3_reg_wr.data[5];
+                    st2 <= opl3_reg_wr.data[1];
+                    st1 <= opl3_reg_wr.data[0];
+                end
             end
         end
 
