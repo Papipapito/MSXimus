@@ -41,6 +41,30 @@ static uint64_t wait_irq(uint64_t maxc) {
     return 0;
 }
 
+// === test 3: nota FM sostenida +/- acks del ISR a 1130Hz (VGMPlay toca FM
+// mientras ackea su timer: si cada ack perturba la sintesis, la nota vibra)
+static void run_note_isr(bool isr, int16_t *buf, int nsamp) {
+    wr(0x105, 0x01);            // NEW
+    wr(0x20, 0x01); wr(0x40, 0x1C); wr(0x60, 0xF4); wr(0x80, 0x01);
+    wr(0x23, 0x01); wr(0x43, 0x00); wr(0x63, 0xF2); wr(0x83, 0x01);
+    wr(0xC0, 0x3C);
+    wr(0xA0, 0x41); wr(0xB0, 0x32);  // keyon blk4
+    if (isr) { wr(0x02, 0xF5); wr(0x04, 0x80); wr(0x04, 0x39); }
+    int n = 0;
+    uint64_t last_ack = cycle;
+    int sv_d = dut->sample_valid;
+    while (n < nsamp) {
+        tick();
+        if (dut->sample_valid && !sv_d) buf[n++] = (int16_t)dut->sample_l;
+        sv_d = dut->sample_valid;
+        if (isr && !dut->irq_n && cycle - last_ack > 2000) {
+            wr(0x04, 0x80); last_ack = cycle;
+        }
+    }
+    wr(0xB0, 0x12);
+    wr(0x04, 0x78); wr(0x04, 0x80);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     dut = new Vopl3;
@@ -76,5 +100,38 @@ int main(int argc, char **argv) {
     printf("periodos: %lld %lld %lld ciclos (nominal ~23760 mas el coste del ack)\n", p1, p2, p3);
     bool ok = p1 > 20000 && p1 < 28000 && (p2-p1) < 200 && (p2-p1) > -200 && (p3-p2) < 200 && (p3-p2) > -200;
     printf(ok ? "*** TIMER CANON: PASA ***\n" : "*** PERIODOS MAL ***\n");
-    return ok ? 0 : 1;
+    if (!ok) return 1;
+
+    // === test 3: nota sostenida — control (A vs A2, ambas sin ISR) y
+    //     experimento (A vs B, con acks a 1130Hz) ===
+    static int16_t bufA[24000], bufA2[24000], bufB[24000];
+    run_note_isr(false, bufA, 24000);
+    ticks(200000);
+    run_note_isr(false, bufA2, 24000);
+    ticks(200000);
+    run_note_isr(true,  bufB, 24000);
+    // rugosidad AUTOCONTENIDA: variacion bloque-a-bloque de la envolvente
+    // dentro de CADA pasada (detrend local: cociente entre bloques vecinos).
+    // Inmune a la fase/desalineacion entre pasadas.
+    auto rough = [](int16_t *buf) {
+        double prev = -1, worst = 0;
+        for (int b = 8; b < 24000/256; ++b) {
+            double r = 0;
+            for (int k = 0; k < 256; ++k) r += (double)buf[b*256+k]*buf[b*256+k];
+            r /= 256;
+            if (prev > 1000 && r > 100) {
+                double q = r/prev; if (q>1) q=1/q;
+                if (1-q > worst) worst = 1-q;
+            }
+            prev = r;
+        }
+        return worst;
+    };
+    double rA = rough(bufA), rA2 = rough(bufA2), rB = rough(bufB);
+    printf("rugosidad envolvente: A=%.2f%% A2=%.2f%% B(con ISR)=%.2f%%\n", rA*100, rA2*100, rB*100);
+    double base = (rA > rA2 ? rA : rA2);
+    printf(rB > base*2 && rB > 0.05 ? "*** FM + ISR: MODULADO (senal real) ***\n"
+                                    : "*** FM + ISR: LIMPIO (rugosidad comparable al control) ***\n");
+    return 0;
+
 }

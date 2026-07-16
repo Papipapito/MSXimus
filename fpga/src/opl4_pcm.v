@@ -71,7 +71,8 @@ module opl4_pcm (
     // alive avanza con cada CE del motor: dos lecturas seguidas con el
     // nibble bajo distinto = el dominio del motor esta VIVO. Muestreado en
     // crudo desde clk_host (diagnostico humano, el tearing da igual).
-    output wire [7:0]  diag
+    output wire [7:0]  diag,
+    output reg         dbg_tx          // _111: telemetria UART TX (E22)
 );
 
 // ===========================================================================
@@ -720,5 +721,109 @@ YMF278B u_engine (
 
     .CYCLE1_NEXT (e_cycle1_next)
 );
+
+// ===========================================================================
+// _111: TELEMETRIA UART (TX-only, 115200 8N1, dominio clk_eng = SIN CDC).
+// El sim exonera todo lo que modelamos y la placa "vibra" con VGMPlay:
+// esto emite cada ~250ms una trama binaria con los contadores que las sims
+// no pueden ver en vivo. Pin: dbg_pmod1[4] = E22 (el del CH340 de la saga
+// WiFi). Lector: tools/dbg_reader.py.
+// Trama (16 bytes): A5 seq rep[2] drop[2] push[2] tick[2] miss[2] pf[2]
+//                   {lvl_min,lvl} {ifw_hits,alive} sum
+// (contadores libres de 16 bits: el lector calcula deltas por ventana;
+//  lvl_min es ventana-local, se rearma en cada trama)
+// ===========================================================================
+parameter DBG_FRAME_CYC = 32'd9375000;   // ~250ms a 37.5MHz (el TB lo acorta)
+parameter DBG_BAUD_DIV  = 9'd326;        // 37.5e6/115200 = 325.5
+
+reg [15:0] c_rep, c_drop, c_push, c_tick, c_miss, c_pf;
+reg [3:0]  lvl_min_w;
+reg        t_x_d1;
+reg [3:0]  rp_d1, wp_d1;
+reg [9:0]  pdiv_d1;
+wire [3:0] rf_lvl = rf_wp - rf_rp;
+
+always @(posedge clk_eng or negedge erst_n) begin
+    if (!erst_n) begin
+        c_rep <= 0; c_drop <= 0; c_push <= 0; c_tick <= 0; c_miss <= 0; c_pf <= 0;
+        t_x_d1 <= 0; rp_d1 <= 0; wp_d1 <= 0; pdiv_d1 <= 0; lvl_min_w <= 4'hF;
+    end
+    else begin
+        t_x_d1 <= pcm_t_x;
+        rp_d1  <= rf_rp;
+        wp_d1  <= rf_wp;
+        pdiv_d1<= pdiv;
+        if (pcm_t_x != t_x_d1) begin
+            c_tick <= c_tick + 16'd1;
+            if (rf_rp == rp_d1) c_rep <= c_rep + 16'd1;   // tick sin pull
+        end
+        if (rf_wp != wp_d1) c_push <= c_push + 16'd1;
+        if (pdiv_d1 == 10'd767 && pdiv == 10'd0 && rf_wp == wp_d1
+            && (wp_d1 + 4'd1) == rf_rp) c_drop <= c_drop + 16'd1;
+        if (rd_edge && !(lb_v[{e_slot,e_addr22[2:1]}] &&
+            (lb_tagA[{e_slot,e_addr22[2:1]}] == e_addr22[21:3]))) c_miss <= c_miss + 16'd1;
+        if (mem_req && op_is_pf) c_pf <= c_pf + 16'd1;
+        if (rf_lvl < lvl_min_w) lvl_min_w <= rf_lvl;
+        if (dbg_snap) lvl_min_w <= 4'hF;                  // ventana nueva
+    end
+end
+
+// --- emisor de tramas ---
+reg [31:0] dbg_timer;
+reg        dbg_snap;
+reg [7:0]  fr [0:15];
+reg [4:0]  fr_i;          // 0-15=trama, 16=sum, 17=reposo
+reg [3:0]  bit_i;         // 0=start 1..8=datos 9=stop 10=fin
+reg [8:0]  baud;
+reg [7:0]  seq, sum;
+integer fi;
+always @(posedge clk_eng or negedge erst_n) begin
+    if (!erst_n) begin
+        dbg_timer <= 0; dbg_snap <= 0; fr_i <= 5'd17; bit_i <= 0; baud <= 0;
+        seq <= 0; sum <= 0; dbg_tx <= 1'b1;
+    end
+    else begin
+        dbg_snap <= 1'b0;
+        if (dbg_timer == DBG_FRAME_CYC) begin
+            dbg_timer <= 0;
+            dbg_snap  <= 1'b1;
+            fr[0] <= 8'hA5;         fr[1] <= seq;
+            fr[2] <= c_rep[15:8];   fr[3] <= c_rep[7:0];
+            fr[4] <= c_drop[15:8];  fr[5] <= c_drop[7:0];
+            fr[6] <= c_push[15:8];  fr[7] <= c_push[7:0];
+            fr[8] <= c_tick[15:8];  fr[9] <= c_tick[7:0];
+            fr[10] <= c_miss[15:8]; fr[11] <= c_miss[7:0];
+            fr[12] <= c_pf[15:8];   fr[13] <= c_pf[7:0];
+            fr[14] <= {lvl_min_w, rf_lvl};
+            fr[15] <= {ifw_hits, alive};   // el sum va aparte como byte 16
+            seq <= seq + 8'd1;
+            fr_i <= 5'd0; bit_i <= 0; baud <= 0; sum <= 8'd0;
+        end
+        else dbg_timer <= dbg_timer + 32'd1;
+
+        if (fr_i != 5'd17 || bit_i != 0) begin
+            if (baud == DBG_BAUD_DIV - 1) begin
+                baud <= 0;
+                if (bit_i == 0) begin dbg_tx <= 1'b0; bit_i <= 4'd1; end        // start
+                else if (bit_i <= 8) begin
+                    dbg_tx <= (fr_i == 5'd16) ? sum[bit_i-1]
+                                              : fr[fr_i][bit_i-1];
+                    bit_i <= bit_i + 4'd1;
+                end
+                else begin                                                       // stop
+                    dbg_tx <= 1'b1;
+                    bit_i <= 0;
+                    if (fr_i < 5'd16) begin
+                        sum  <= sum + fr[fr_i];
+                        fr_i <= fr_i + 5'd1;    // 15->16 = el byte sum
+                    end
+                    else fr_i <= 5'd17;         // sum enviado -> reposo
+                end
+            end
+            else baud <= baud + 9'd1;
+        end
+        else dbg_tx <= 1'b1;
+    end
+end
 
 endmodule

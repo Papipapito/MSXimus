@@ -2695,6 +2695,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [1:0]  opl4wave_status;
     wire signed [15:0] opl4pcm_l, opl4pcm_r;
     wire [5:0]  opl4_mixfm;    // _110: reg F8 del motor (via opl4_pcm)
+    wire        opl4_dbg_tx;   // _111: telemetria UART (E22)
     // (_104: los weng_* estan declarados arriba, junto al bloque wdbg;
     //  el reloj del motor es clk_wave375 = CLKOUT4 del PLLA)
 `ifdef ENABLE_OPL4_WAVE
@@ -2714,6 +2715,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wave_wait_n (opl4pcm_wait_n),
         .wave_status (opl4wave_status),
         .mix_fm      (opl4_mixfm),
+        .dbg_tx      (opl4_dbg_tx),
         .pcm_l       (opl4pcm_l),
         .pcm_r       (opl4pcm_r),
         .clk_eng     (clk_wave375),   // _104: 37.5MHz del PLLA (CLKOUT4)
@@ -2734,6 +2736,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign opl4wave_status = 2'b00;
     assign opl4pcm_l = 16'sd0;
     assign opl4_mixfm = 6'd0;   // _110: sin motor, FM a 0dB
+    assign opl4_dbg_tx = 1'b1;  // _111: sin motor, linea en reposo
     assign opl4pcm_r = 16'sd0;
     assign weng_req = 1'b0;  assign weng_we = 1'b0;
     assign weng_addr = 22'd0; assign weng_wdata = 8'd0;
@@ -4023,7 +4026,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `elsif ENABLE_WIFI
     assign dbg_pmod1[4] = bl616_uart_tx_w;   // E22 = UART TX del WiFi (WIFI_PMOD_TEST)
 `else
-    assign dbg_pmod1[4] = 1'b1;
+    assign dbg_pmod1[4] = opl4_dbg_tx;   // _111: telemetria del motor wave
 `endif
     // dbg_pmod1[5]/D22 eliminado: pasa a uart_pmod_rx (input) para el modo PMOD test
 

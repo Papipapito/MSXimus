@@ -162,6 +162,28 @@ task wreg(input [7:0] r, input [7:0] v);
 begin outp(8'h7E, r); outp(8'h7F, v); end
 endtask
 
+// ---- _111 debug: patron ISR de VGMPlay (+isr=1): cada 885us el Z80 lee
+// el status C4 (BUSY poll + flag del timer) y escribe el ack reg4=0x80.
+// opl4_pcm reenvia TODO eso al motor wave (lectura C4 como A=0, escrituras
+// C4/C5 como A=0/1): si cada evento perturba una muestra, el batido
+// 1130Hz vs 44100Hz genera la "vibracion" lenta que se oye SOLO con
+// VGMPlay/MBWave (los juegos no tocan C4 durante la musica).
+integer ISRON = 0;
+initial begin
+    if (!$value$plusargs("isr=%d", ISRON)) ISRON = 0;
+    if (ISRON) begin
+        wait (umem.RstSeq === 5'b11111);
+        #200000;
+        forever begin
+            inp(8'hC4);              // poll de status del ISR
+            outp(8'hC4, 8'h04);      // select reg 4
+            outp(8'hC5, 8'h80);      // ack
+            inp(8'hC4);              // re-lectura tras ack
+            #870000;                 // ~885us total
+        end
+    end
+end
+
 // ---- trafico Z80 de fondo (realista: 1 acceso cada ~0.4-0.9us) ----
 integer CPUON = 0;
 reg [7:0] cpu_rd;
@@ -219,6 +241,42 @@ always @(posedge clk_eng) begin
     if (dut.mem_req && dut.op_is_pf) c_pf = c_pf + 1;
 end
 
+// ---- _110 debug: FIFO del reclock — repeticiones, descartes, nivel ----
+integer u_rep=0, p_drop=0, pfr=0;
+integer lvl, lvl_min=99, lvl_max=-1;
+reg t_x_d=0; reg [3:0] rp_d=0; reg [9:0] pdiv_d=0;
+integer flvl; initial flvl=$fopen("fifo_level.txt","w");
+always @(posedge clk_eng) begin
+    t_x_d <= dut.pcm_t_x;
+    rp_d  <= dut.rf_rp;
+    pdiv_d<= dut.pdiv;
+    if (dut.pcm_t_x !== t_x_d && dut.rf_rp === rp_d) u_rep = u_rep + 1;  // tick sin pull = repeticion
+    if (pdiv_d == 10'd767 && dut.pdiv == 10'd0) pfr = pfr + 1;           // frame del productor
+    lvl = (dut.rf_wp - dut.rf_rp) & 4'hF;
+    if (ticks > 400) begin
+        if (lvl < lvl_min) lvl_min = lvl;
+        if (lvl > lvl_max) lvl_max = lvl;
+    end
+    if (dut.pcm_t_x !== t_x_d) $fdisplay(flvl, "%0d", lvl);
+end
+
+// ---- _111: receptor de la telemetria UART (valida tramas en sim) ----
+defparam dut.DBG_FRAME_CYC = 32'd200000;   // trama cada ~5.3ms en sim
+integer fdbg; initial fdbg=$fopen("dbg_bytes.txt","w");
+reg [7:0] rxb; integer rxi;
+initial begin
+    forever begin
+        @(negedge dut.dbg_tx);              // start
+        repeat (489) @(posedge clk_eng);    // 1.5 bits (326*1.5)
+        rxb = 0;
+        for (rxi = 0; rxi < 8; rxi = rxi + 1) begin
+            rxb[rxi] = dut.dbg_tx;
+            repeat (326) @(posedge clk_eng);
+        end
+        $fdisplay(fdbg, "%02x", rxb);
+    end
+end
+
 // ---- pushes del productor (la medida REAL del pitch) ----
 integer pushes = 0, pushes0 = 0;
 reg [3:0] rf_wp_d = 0;
@@ -256,6 +314,8 @@ always @(posedge clk_host) begin
                      (lat_sum-lat_sum0)/(t_end-t_start)*100.0);
             $display("CACHE: reads=%0d hits=%0d (%.1f%%) pf_emitidos=%0d",
                      c_rd, c_hit, c_hit*100.0/(c_rd>0?c_rd:1), c_pf);
+            $display("FIFO: repeticiones=%0d drops=%0d(frames %0d - pushes) nivel=[%0d..%0d]",
+                     u_rep, pfr-pushes, pfr, lvl_min, lvl_max);
             $display("PRODUCTOR: %0d pushes / %0d ticks -> ratio %.5f = %.1f cents",
                      pushes-pushes0, NSAMP,
                      (pushes-pushes0)*1.0/NSAMP,

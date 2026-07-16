@@ -1044,6 +1044,41 @@ wave_end:
 //=============================================================================
 // MAIN
 //=============================================================================
+//-----------------------------------------------------------------------------
+// TEST 5 (_111): TONO SOSTENIDO — discriminador del "vibrato" del VGMPlay.
+// Una sola nota wave 10s y una sola nota FM 10s, sin player de por medio:
+// si el tono vibra AQUI, el problema es del core en condiciones minimas;
+// si es continuo, la vibracion viene de la interaccion con el player.
+//-----------------------------------------------------------------------------
+void Test5Sostenido()
+{
+	Screen0();
+	Print_DrawTextAt(1, 1,  "TEST 5: TONO SOSTENIDO");
+	Print_DrawTextAt(1, 3,  "1/2: WAVE (piano 303, 10s)");
+	Print_DrawTextAt(1, 5,  "Escucha: debe ser CONTINUO,");
+	Print_DrawTextAt(1, 6,  "sin vibrato ni pumping.");
+	Opl4Wr1(0x05, 0x03);
+	MoonWr(0xF9, 0x00);
+	MoonWr(0x68, 0x00);
+	MoonWr(0x20, 0x01);                    // fnum=0, WTN8
+	MoonWr(0x38, 0x10);                    // oct=1
+	MoonWr(0x50, 0x01);                    // TL=0, LD
+	MoonWr(0x08, 0x2F);                    // onda 303
+	MoonWaitLD();
+	MoonWr(0x68, 0x80);                    // KEY on
+	if (!WaitFramesOrSpace(255)) WaitFramesOrSpace(255);
+	MoonWr(0x68, 0x40);                    // off + damp
+
+	Print_DrawTextAt(1, 9,  "2/2: FM del OPL4 (440Hz, 10s)");
+	Opl4Wr1(0x05, 0x01);                   // NEW (FM OPL3)
+	Opl4SetVoice(0, g_AudComp);
+	Opl4KeyOn(0, 69);
+	if (!WaitFramesOrSpace(255)) WaitFramesOrSpace(255);
+	Opl4KeyOff(0);
+	Print_DrawTextAt(1, 12, "ESPACIO para seguir");
+	WaitSpace();
+}
+
 void main()
 {
 	Bios_SetKeyClick(FALSE);
@@ -1067,6 +1102,7 @@ void main()
 		TestOPL4FM();
 		TestWaveDDR3();
 		TestOPL4Wave();
+		Test5Sostenido();
 
 		Screen0();
 		Print_DrawTextAt(1, 1, "FIN - ESPACIO = repetir");
