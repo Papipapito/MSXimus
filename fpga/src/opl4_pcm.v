@@ -49,6 +49,7 @@ module opl4_pcm (
     output wire [7:0]  wave_dout,      // dato 7Eh/7Fh
     output wire        wave_wait_n,    // /WAIT al Z80 durante IN 7Fh (ver abajo)
     output wire [1:0]  wave_status,    // {LD,BUSY} sync a host (OR en status C4)
+    output reg [5:0]  mix_fm,          // _110: F8 sincronizado a host
     output reg signed [15:0] pcm_l,    // OUT1 del motor, registrado en host
     output reg signed [15:0] pcm_r,
 
@@ -147,6 +148,11 @@ reg        rd_done_t;               // x1: flip al completar lectura 7F
 reg [7:0]  rd_data_x;
 reg        pcm_t_x;                 // x1: flip a cada muestra nueva
 reg signed [15:0] pcm_l_x, pcm_r_x; // x1: OUT1 retenido
+reg [5:0] mixfm_s0, mixfm_s1;       // _110: F8 motor->host (cuasi-estatico)
+always @(posedge clk_host) begin
+    mixfm_s0 <= eng_mixfm;
+    mixfm_s1 <= mixfm_s0;
+end
 reg        busy_x, ld_x;            // x1: status muestreado con bus en reposo
 
 always @(posedge clk_host or negedge rst_n) begin
@@ -166,6 +172,7 @@ always @(posedge clk_host or negedge rst_n) begin
         if (pcm_h3 != pcm_ack) begin
             pcm_ack <= pcm_h3;
             pcm_l   <= pcm_l_x;
+            mix_fm  <= mixfm_s1;    // _110: cuasi-estatico, 2FF
             pcm_r   <= pcm_r_x;
         end
         st_b1 <= busy_x;  st_b2 <= st_b1;
@@ -401,6 +408,7 @@ reg [18:0]  lb_tagA [0:127];       // addr[21:3]
 reg [127:0] lb_v;
 reg [127:0] lb_pfb;                // entrada traida por prefetch (OBL tag)
 wire [4:0]  e_slot;                // slot dueno del fetch (del motor)
+wire [5:0]  eng_mixfm;             // _110: reg F8 (dominio motor)
 reg         lb_hit;                // el ultimo fetch se sirvio de la cache
 reg         lb_fast;               // hit en curso: completa al ciclo siguiente
 reg [7:0]   lb_byte;
@@ -698,10 +706,15 @@ YMF278B u_engine (
     .MWR_N  (e_mwr_n),
     .MCS_N  (e_mcs_n),
     .MEM_SLOT (e_slot),
+    .MIX_FM   (eng_mixfm),
 
     .OUT0_L (), .OUT0_R (),     // FM del stub (siempre 0)
-    .OUT1_L (o1_l), .OUT1_R (o1_r),   // PCM puro <- nuestra salida
-    .OUT2_L (), .OUT2_R (),     // mezcla interna FM+PCM (no usada)
+    // _110: OUT2 en vez de OUT1 — OUT2 = MixCalc(PCM, F9) + MixCalc(stub=0)
+    // = el PCM CON la atenuacion del reg F9 aplicada, que hasta ahora se
+    // ignoraba (VGMPlay/MBWave la usan para balancear; con F9=0 por reset
+    // OUT2 == OUT1 bit a bit y toda la regresion se mantiene).
+    .OUT1_L (), .OUT1_R (),
+    .OUT2_L (o1_l), .OUT2_R (o1_r),
 
     .SND_EN (3'b111),
 

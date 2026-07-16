@@ -2694,6 +2694,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0]  opl4pcm_dout;
     wire [1:0]  opl4wave_status;
     wire signed [15:0] opl4pcm_l, opl4pcm_r;
+    wire [5:0]  opl4_mixfm;    // _110: reg F8 del motor (via opl4_pcm)
     // (_104: los weng_* estan declarados arriba, junto al bloque wdbg;
     //  el reloj del motor es clk_wave375 = CLKOUT4 del PLLA)
 `ifdef ENABLE_OPL4_WAVE
@@ -2712,6 +2713,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wave_dout   (opl4pcm_dout),
         .wave_wait_n (opl4pcm_wait_n),
         .wave_status (opl4wave_status),
+        .mix_fm      (opl4_mixfm),
         .pcm_l       (opl4pcm_l),
         .pcm_r       (opl4pcm_r),
         .clk_eng     (clk_wave375),   // _104: 37.5MHz del PLLA (CLKOUT4)
@@ -2731,6 +2733,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign opl4pcm_wait_n = 1'b1;
     assign opl4wave_status = 2'b00;
     assign opl4pcm_l = 16'sd0;
+    assign opl4_mixfm = 6'd0;   // _110: sin motor, FM a 0dB
     assign opl4pcm_r = 16'sd0;
     assign weng_req = 1'b0;  assign weng_we = 1'b0;
     assign weng_addr = 22'd0; assign weng_wdata = 8'd0;
@@ -2979,7 +2982,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // como el FM del Y8950; >>>1 de margen (el mixer suma sin saturacion)
     wire [15:0] y8950_adpcm_term = {y8950_adpcm_wav[15], y8950_adpcm_wav[15:1]};
     // _83: OPL3 ya sale a nivel nativo (como jt2413_wav) — sin >>1
-    wire [15:0] opl4fm_term      = opl4fm_wav;
+    // _110: atenuacion del reg F8 (MixCalc del motor: >>> 2*codigo). Hasta
+    // ahora F8 se ignoraba y el FM entraba siempre a 0dB aunque el software
+    // pidiera bajarlo (MBWave/VGMPlay balancean FM vs wave con F8/F9).
+    wire [15:0] opl4fm_term      = $signed(opl4fm_wav) >>> {opl4_mixfm[2:0], 1'b0};
 
     // _89: PCM del MoonSound (motor YMF278B). Mono = (L+R)/2 con extension de
     // signo EXPLICITA (leccion _85: las concatenaciones son unsigned) y >>1
@@ -2989,15 +2995,39 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [15:0] opl4pcm_term_l = {opl4pcm_l[15], opl4pcm_l[15:1]};           // L>>1
     wire [15:0] opl4pcm_term_r = {opl4pcm_r[15], opl4pcm_r[15:1]};           // R>>1
 
+    // _110: MIXER CON SATURACION. La suma iba en 16 bits "sin saturacion"
+    // (comentario historico): con VGMPlay/MBWave (20+ slots wave + FM a la
+    // vez) el pico desborda y HACE WRAP al signo contrario = zumbido aspero
+    // que en notas sostenidas se percibe como "vibracion" + "saturacion de
+    // volumen" + "sonido sucio" (sintomas del usuario en la _109). Suma en
+    // 19 bits (9 terminos de 16) y clamp simetrico a 16.
+    function [15:0] sat16(input signed [18:0] v);
+        sat16 = (v > 19'sd32767)  ? 16'h7FFF :
+                (v < -19'sd32768) ? 16'h8000 : v[15:0];
+    endfunction
+    wire signed [18:0] mixL_st = {{3{1'b0}}, 1'b0, psgSound3, 6'b000000}
+        + {{3{scc_term[15]}}, scc_term} + {{3{jt2413_wav[15]}}, jt2413_wav}
+        + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
+        + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term_l[15]}}, opl4pcm_term_l};
+    wire signed [18:0] mixR_st = {{3{1'b0}}, 1'b0, psg2Sound3, 6'b000000}
+        + {{3{scc2x_wav[14]}}, scc2x_wav, 1'b0} + {{3{jt2413_wav[15]}}, jt2413_wav}
+        + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
+        + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term_r[15]}}, opl4pcm_term_r};
+    wire signed [18:0] mix_mono = {{3{1'b0}}, 1'b0, psgSound3, 6'b000000}
+        + {{3{1'b0}}, 1'b0, psg2Sound3, 6'b000000}
+        + {{3{scc_term[15]}}, scc_term} + {{3{scc2x_wav[14]}}, scc2x_wav, 1'b0}
+        + {{3{jt2413_wav[15]}}, jt2413_wav} + {{3{y8950_wav[15]}}, y8950_wav}
+        + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
+        + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term[15]}}, opl4pcm_term};
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
             if (config_enable_stereo == 1) begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + scc_term + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term_l;
-                audio_sample_r <= { 2'b0 , psg2Sound3 , 6'b000000 } + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term_r;
+                audio_sample   <= sat16(mixL_st);
+                audio_sample_r <= sat16(mixR_st);
             end
             else begin
-                audio_sample   <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term;
-                audio_sample_r <= { 2'b0 , psgSound3 , 6'b000000 } + { 2'b0 , psg2Sound3 , 6'b000000 } + scc_term + { scc2x_wav, 1'b0 } + jt2413_wav + y8950_wav + y8950_adpcm_term + opl4fm_term + opl4pcm_term;
+                audio_sample   <= sat16(mix_mono);
+                audio_sample_r <= sat16(mix_mono);
             end
         end
     end

@@ -51,6 +51,7 @@ module YMF278B
 	output             MWR_N,
 	output     [ 9: 0] MCS_N,
 	output     [ 4: 0] MEM_SLOT,   // _107: slot dueno del fetch en curso (OP3)
+	output     [ 5: 0] MIX_FM,     // _110: atenuacion F8 (el FM real vive fuera)
 	
 	output     [15: 0] OUT0_L,
 	output     [15: 0] OUT0_R,
@@ -427,6 +428,7 @@ module YMF278B
 	wire [21: 0] WD_OFFS = WD_DATA_LEN == 2'h0 ? SO_MOD_BY_1 : WD_DATA_LEN == 2'h1 ? SO_MOD_BY_1_5 : SO_MOD_BY_2;
 	assign WD_ADDR = WD_SA + WD_OFFS + (!CYCLE_NUM[1] ? 16'd0 : 16'd1);
 	assign MEM_SLOT = OP3.SLOT;   // _107: coherente con WD_SA (latch conjunto)
+	assign MIX_FM = MIXFM;        // _110: reg F8 hacia el mixer del top
 	
 	always @(posedge CLK or negedge RST_N) begin
 		bit  [15: 0] WD;

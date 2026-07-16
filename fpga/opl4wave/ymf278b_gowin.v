@@ -18,6 +18,7 @@ module YMF278B (
 	MWR_N,
 	MCS_N,
 	MEM_SLOT,
+	MIX_FM,
 	OUT0_L,
 	OUT0_R,
 	OUT1_L,
@@ -47,6 +48,7 @@ module YMF278B (
 	output wire MWR_N;
 	output wire [9:0] MCS_N;
 	output wire [4:0] MEM_SLOT;
+	output wire [5:0] MIX_FM;
 	output wire [15:0] OUT0_L;
 	output wire [15:0] OUT0_R;
 	output wire [15:0] OUT1_L;
@@ -441,6 +443,7 @@ module YMF278B (
 	wire [21:0] WD_OFFS = (WD_DATA_LEN == 2'h0 ? SO_MOD_BY_1 : (WD_DATA_LEN == 2'h1 ? SO_MOD_BY_1_5 : SO_MOD_BY_2));
 	assign WD_ADDR = (WD_SA + WD_OFFS) + (!CYCLE_NUM[1] ? 16'd0 : 16'd1);
 	assign MEM_SLOT = OP3[65-:5];
+	assign MIX_FM = MIXFM;
 	reg [1:0] OP4_DATA_LEN = 0;
 	reg OP4_SO0_CURR = 0;
 	reg OP4_SO0_NEXT = 0;
