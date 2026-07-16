@@ -1,0 +1,281 @@
+// ============================================================================
+// tb_sandwich7.v — EL EXPERIMENTO DEL DESAFINADO (_105): 7 slots sonando
+// sobre la pila SDRAM REAL (memory_ctrl + W9825 + wave_sdram + opl4_pcm).
+// Mide el periodo real de salida (ideal 22.676us) y la latencia de fetch
+// vista por el motor. Si el periodo se estira => hambre de CE confirmada
+// (la firma del "desafinado" de la _104 en placa).
+// La YRW801 real se PRECARGA en el modelo W9825 con el mapeo wave de
+// memory.v: row={1,00,A[21:12]}, bank=A[11:10], col=A[9:1], lane=A[0].
+// ============================================================================
+`timescale 1ns/1ps
+
+module tb_sandwich7;
+
+reg clk_108 = 0;
+always #4.63 clk_108 = ~clk_108;           // 108 MHz
+reg clk_host = 0;
+initial begin #4.63; forever begin clk_host = ~clk_host; #9.26; end end
+reg clk_eng = 0;
+always #13.333 clk_eng = ~clk_eng;         // 37.5 MHz (CLKOUT4)
+
+// fases de video (cadencia del TB de memory)
+reg [3:0] phc = 0;
+always @(posedge clk_108) phc <= phc + 1;
+wire video_dhclk = ~phc[2];
+wire video_dlclk = ~phc[3];
+
+reg rst_n = 0;
+
+// ---- puerto host del shim: OCIOSO (el loader no interviene) ----
+reg         h_req = 0, h_we = 0;
+reg  [21:0] h_addr = 0;
+reg  [7:0]  h_wdata = 0;
+wire [7:0]  h_rdata;
+wire        h_done, h_ready;
+
+// ---- motor ----
+reg  eng_rst_n = 0;
+wire mem_req, mem_we, mem_done_t;
+wire [21:0] mem_addr;
+wire [7:0]  mem_wdata, mem_rdata;
+wire [15:0] mem_rword;
+
+reg iorq_n = 1, rd_n = 1, wr_n = 1, m1_n = 1;
+reg [7:0] a = 0, din = 0;
+wire wave_rd, wave_wait_n;
+wire [7:0] wave_dout;
+wire [1:0] wave_status;
+wire signed [15:0] pcm_l, pcm_r;
+
+// ---- pila SDRAM real ----
+wire        wv_req, wv_we, wv_done;
+wire [21:0] wv_addr;
+wire [7:0]  wv_wdata;
+wire [15:0] wv_dout;
+wire        sd_clk, sd_cke, sd_cs_n, sd_cas_n, sd_ras_n, sd_wen_n;
+wire [15:0] sd_dq;
+wire [12:0] sd_addr;
+wire [1:0]  sd_ba, sd_dqm;
+wire [15:0] nc_vram_dout; wire nc_ram_busy;
+
+wave_sdram uwsdram (
+    .clk_host(clk_host), .rst_n(rst_n),
+    .req_toggle(h_req), .we(h_we), .addr(h_addr), .wdata(h_wdata),
+    .rdata(h_rdata), .done_toggle(h_done), .ready(h_ready),
+    .clk_eng(clk_eng),
+    .eng_req(mem_req), .eng_we(mem_we), .eng_addr(mem_addr),
+    .eng_wdata(mem_wdata), .eng_rdata(mem_rdata), .eng_rword(mem_rword),
+    .eng_done_t(mem_done_t),
+    .diag(),
+    .clk_108m(clk_108),
+    .wv_req(wv_req), .wv_we(wv_we), .wv_addr(wv_addr), .wv_wdata(wv_wdata),
+    .wv_dout(wv_dout), .wv_done(wv_done)
+);
+
+reg  [7:0]  ram_din = 0;
+reg         ram_req = 0, ram_write = 0;
+reg  [22:0] ram_addr = 0;
+wire [7:0]  ram_dout;
+wire        ram_busy;
+
+memory_ctrl umem (
+    .clk_27m(clk_host), .clk_108m(clk_108), .bus_reset_n(rst_n),
+    .video_dhclk(video_dhclk), .video_dlclk(video_dlclk),
+    .ram_din(ram_din), .ram_req(ram_req), .ram_write(ram_write), .ram_addr(ram_addr),
+    .vram_din(8'h00), .vram_write(1'b0), .vram_addr(17'd0), .bus_rfsh_n(1'b1),
+    .ram_dout(ram_dout), .vram_dout(nc_vram_dout), .ram_busy(ram_busy),
+    .wv_req(wv_req), .wv_we(wv_we), .wv_addr(wv_addr), .wv_wdata(wv_wdata),
+    .wv_dout(wv_dout), .wv_done(wv_done),
+    .O_sdram_clk(sd_clk), .O_sdram_cke(sd_cke), .O_sdram_cs_n(sd_cs_n),
+    .O_sdram_cas_n(sd_cas_n), .O_sdram_ras_n(sd_ras_n), .O_sdram_wen_n(sd_wen_n),
+    .IO_sdram_dq(sd_dq), .O_sdram_addr(sd_addr), .O_sdram_ba(sd_ba),
+    .O_sdram_dqm(sd_dqm)
+);
+
+w9825_model sdram (
+    .clk(sd_clk), .cke(sd_cke), .cs_n(sd_cs_n), .ras_n(sd_ras_n),
+    .cas_n(sd_cas_n), .we_n(sd_wen_n), .addr(sd_addr), .ba(sd_ba),
+    .dqm(sd_dqm), .dq(sd_dq)
+);
+
+opl4_pcm dut (
+    .rst_n(rst_n), .clk_host(clk_host),
+    .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n), .m1_n(m1_n),
+    .addr(a), .din(din),
+    .wave_rd(wave_rd), .wave_dout(wave_dout), .wave_wait_n(wave_wait_n),
+    .wave_status(wave_status),
+    .pcm_l(pcm_l), .pcm_r(pcm_r),
+    .clk_eng(clk_eng), .eng_rst_n(eng_rst_n),
+    .mem_req(mem_req), .mem_we(mem_we), .mem_addr(mem_addr),
+    .mem_wdata(mem_wdata), .mem_rdata(mem_rdata), .mem_rword(mem_rword), .mem_done_t(mem_done_t)
+);
+
+// init acelerada de la SDRAM
+initial begin
+    wait (rst_n === 1'b1);
+    while (umem.RstSeq !== 5'b11111) begin
+        @(negedge clk_108);
+        force umem.FreeCounter = 16'hFFF0;
+        @(negedge clk_108);
+        release umem.FreeCounter;
+        repeat (90) @(posedge clk_108);
+    end
+end
+
+// ---- PRECARGA de la YRW801 real en el W9825 (mapeo wave de memory.v) ----
+reg [7:0] rom [0:2097151];
+integer pa;
+reg [23:0] pidx;
+initial begin
+    $readmemh("yrw801_2m.hex", rom);
+    wait (umem.RstSeq === 5'b11111);       // tras la init (no pisar el mode reg)
+    for (pa = 0; pa < 2097152; pa = pa + 2) begin
+        // index = {bank(2), row(13), col(9)}; row={1,00,A[21:12]}, col=A[9:1]
+        pidx = {pa[11:10], 3'b100, pa[21:12], pa[9:1]};
+        sdram.mem[pidx] = {rom[pa+1], rom[pa]};
+    end
+    $display("== YRW801 precargada en el W9825 ==");
+end
+
+// ---- tareas Z80 (identicas al sandwich) ----
+task outp(input [7:0] p, input [7:0] v);
+begin
+    @(negedge clk_host); a = p; din = v; iorq_n = 0; wr_n = 0;
+    #420; @(negedge clk_host); wr_n = 1; iorq_n = 1;
+    #2500;
+end
+endtask
+
+reg [7:0] rdv;
+task inp(input [7:0] p);
+begin
+    @(negedge clk_host); a = p; iorq_n = 0; rd_n = 0;
+    #460;
+    while (!wave_wait_n) @(posedge clk_host);
+    #5; rdv = wave_dout;
+    #80; @(negedge clk_host); rd_n = 1; iorq_n = 1;
+    #1500;
+end
+endtask
+
+task wreg(input [7:0] r, input [7:0] v);
+begin outp(8'h7E, r); outp(8'h7F, v); end
+endtask
+
+// ---- trafico Z80 de fondo (realista: 1 acceso cada ~0.4-0.9us) ----
+integer CPUON = 0;
+reg [7:0] cpu_rd;
+task cpu_op(input wr, input [22:0] ca, input [7:0] wd);
+begin
+    @(negedge clk_host);
+    ram_addr = ca; ram_din = wd; ram_write = wr; ram_req = 1;
+    @(posedge ram_busy); @(negedge ram_busy);
+    @(negedge clk_host);
+    cpu_rd = ram_dout; ram_req = 0;
+    @(negedge clk_host);
+end
+endtask
+initial begin
+    if (!$value$plusargs("cpu=%d", CPUON)) CPUON = 0;
+    if (CPUON) begin
+        wait (umem.RstSeq === 5'b11111);
+        #70000;
+        forever begin
+            cpu_op({$random}%4 == 0, {$random}&23'h3FFFFF, {$random});
+            #(400 + {$random}%500);
+        end
+    end
+end
+
+// ---- telemetria: latencia de fetch vista por el motor ----
+real t_req, lat, lat_sum = 0, lat_max = 0;
+integer lat_n = 0;
+reg pend = 0, done_seen = 0;
+always @(posedge clk_eng) begin
+    if (mem_req) begin t_req = $realtime; pend <= 1; done_seen <= mem_done_t; end
+    else if (pend && (mem_done_t !== done_seen)) begin
+        lat = $realtime - t_req;
+        lat_sum = lat_sum + lat;
+        if (lat > lat_max) lat_max = lat;
+        lat_n = lat_n + 1;
+        pend <= 0;
+    end
+end
+
+// ---- pushes del productor (la medida REAL del pitch) ----
+integer pushes = 0, pushes0 = 0;
+reg [3:0] rf_wp_d = 0;
+always @(posedge clk_eng) begin
+    rf_wp_d <= dut.rf_wp;
+    if (dut.rf_wp !== rf_wp_d) pushes = pushes + 1;
+end
+
+// ---- medida del periodo de salida (ticks de muestra del reclock) ----
+integer NSLOTS = 7, NSAMP = 1500;
+integer fd, ticks = 0;
+real t_start = 0, t_end = 0, per;
+reg pcm_seen = 0;
+real lat_sum0; integer lat_n0;
+always @(posedge clk_host) begin
+    pcm_seen <= dut.pcm_h3;
+    if (dut.pcm_h3 !== pcm_seen) begin
+        ticks = ticks + 1;
+        if (ticks == 500) begin
+            t_start = $realtime; lat_sum0 = lat_sum; lat_n0 = lat_n;
+            pushes0 = pushes;
+        end
+        if (ticks >= 500 && ticks < 500 + NSAMP) $fdisplay(fd, "%0d", pcm_l);
+        if (ticks == 500 + NSAMP) begin
+            t_end = $realtime;
+            per = (t_end - t_start) / NSAMP;
+            $display("== RESULTADO %0d slots ==", NSLOTS);
+            $display("periodo medio: %.4f us (ideal 22.6757; +%.2f%% = %.1f cents FLAT)",
+                     per/1000.0, (per/22675.7-1.0)*100.0,
+                     1731.2*(per/22675.7-1.0));   // ~1200/ln2*ln(x)≈1731*(x-1)
+            $display("fetches en ventana: %0d (%.2f/muestra), lat media %.0f ns, max %.0f ns",
+                     lat_n-lat_n0, (lat_n-lat_n0)*1.0/NSAMP,
+                     (lat_sum-lat_sum0)/((lat_n-lat_n0)>0?(lat_n-lat_n0):1), lat_max);
+            $display("carga de stall aprox: %.1f%% (margen CE 10.7%%)",
+                     (lat_sum-lat_sum0)/(t_end-t_start)*100.0);
+            $display("PRODUCTOR: %0d pushes / %0d ticks -> ratio %.5f = %.1f cents",
+                     pushes-pushes0, NSAMP,
+                     (pushes-pushes0)*1.0/NSAMP,
+                     1731.2*((pushes-pushes0)*1.0/NSAMP-1.0));
+            $finish;
+        end
+    end
+end
+
+integer i;
+initial begin
+    if (!$value$plusargs("nslots=%d", NSLOTS)) NSLOTS = 7;
+    if (!$value$plusargs("nsamp=%d", NSAMP)) NSAMP = 1500;
+    fd = $fopen("s7_dump.txt", "w");
+    #500  rst_n = 1;
+    wait (umem.RstSeq === 5'b11111);
+    #2000;
+    eng_rst_n = 1;
+    #60000;                                   // barrido de reset del motor
+    outp(8'hC6, 8'h05);
+    outp(8'hC7, 8'h03);                       // NEW/NEW2
+    for (i = 0; i < NSLOTS; i = i + 1) begin
+        wreg(8'h20 + i[7:0], 8'h01);          // fnum=0 / WTN8=1 (onda 303)
+        wreg(8'h38 + i[7:0], 8'h10);          // oct=1, fnum alto=0 (canon)
+        wreg(8'h50 + i[7:0], 8'h01);          // TL=0, LD
+        wreg(8'h08 + i[7:0], 8'h2F);          // dispara header (0x12F=303)
+        inp(8'hC4); inp(8'h7E);
+        while (rdv[1]) begin #10000; inp(8'hC4); inp(8'h7E); end
+    end
+    $display("== %0d headers cargados ==", NSLOTS);
+    for (i = 0; i < NSLOTS; i = i + 1)
+        wreg(8'h68 + i[7:0], 8'h80);          // KEY on
+    $display("== KEY on x%0d, midiendo... ==", NSLOTS);
+end
+
+initial begin
+    #200000000;
+    $display("TIMEOUT (ticks=%0d)", ticks);
+    $finish;
+end
+
+endmodule

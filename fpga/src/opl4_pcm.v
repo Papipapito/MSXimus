@@ -375,9 +375,18 @@ wire [9:0]  e_mcs_n;
 // los chip-selects: MCS_N[1]=0 <=> MEM_A[21]=1
 wire [21:0] e_addr22 = {~e_mcs_n[1], e_ma};
 
-reg [15:0]  lb_word;               // _104: cache de PALABRA (el par de bytes)
-reg [20:0]  lb_tag;                // addr[21:1]
-reg         lb_v;
+// _105: cache de 16 PALABRAS direct-mapped (indice addr[4:1], tag addr[21:5]).
+// La cache de 1 palabra de la _104 se moria de hambre: el motor lee DOS
+// muestras por tick (interpolacion) => ~2 fetches/slot/muestra, y con 7
+// slots la carga de stalls (18-20% con fetches de ~300ns por turno vacio
+// de SDRAM) superaba el margen del CE (10.7%) => la FIFO del reclock
+// repetia muestras => pitch PLANO y variable con la polifonia = el
+// "desafinado" de la _104 en placa (reproducido en tb_sandwich7 con la
+// pila SDRAM real: 1432/1500 pushes = -78c en vacio, -106c con CPU).
+// Con 16 entradas cada palabra del stream de un slot se trae UNA vez.
+reg [15:0]  lb_word [0:15];
+reg [16:0]  lb_tagA [0:15];        // addr[21:5]
+reg [15:0]  lb_v;
 reg         lb_hit;                // el ultimo fetch se sirvio de la cache
 reg         lb_fast;               // hit en curso: completa al ciclo siguiente
 reg [7:0]   lb_byte;
@@ -403,7 +412,7 @@ always @(posedge clk_eng or negedge erst_n) begin
         mem_req <= 1'b0; mem_we <= 1'b0;
         mem_addr <= 22'd0; mem_wdata <= 8'd0;
         mem_inflight <= 1'b0;
-        lb_word <= 16'd0; lb_tag <= 21'd0; lb_v <= 1'b0;
+        lb_v <= 16'd0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
         ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
         fill_pend <= 1'b0; fill_tag <= 21'd0;
@@ -446,9 +455,9 @@ always @(posedge clk_eng or negedge erst_n) begin
         end
         if (fill_pend) begin
             fill_pend <= 1'b0;
-            lb_word <= mem_rword;      // payload asentado: captura limpia
-            lb_tag  <= fill_tag;
-            lb_v    <= 1'b1;
+            lb_word[fill_tag[3:0]] <= mem_rword;   // payload asentado
+            lb_tagA[fill_tag[3:0]] <= fill_tag[20:4];
+            lb_v[fill_tag[3:0]]    <= 1'b1;
         end
         if (lb_fast) begin
             // hit del ciclo anterior: lb_byte ya es valido -> soltar el CE.
@@ -459,9 +468,10 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_inflight <= 1'b0;
         end
         if (~e_mrd_n && !mrd_d1) begin
-            if (lb_v && (e_addr22[21:1] == lb_tag)) begin
+            if (lb_v[e_addr22[4:1]] && (lb_tagA[e_addr22[4:1]] == e_addr22[21:5])) begin
                 lb_hit  <= 1'b1;                       // HIT: sin transaccion
-                lb_byte <= e_addr22[0] ? lb_word[15:8] : lb_word[7:0];
+                lb_byte <= e_addr22[0] ? lb_word[e_addr22[4:1]][15:8]
+                                       : lb_word[e_addr22[4:1]][7:0];
                 lb_fast <= 1'b1;                       // completa en 1 ciclo
                 mem_inflight <= 1'b1;                  // sujeta la CYCLE1
             end
@@ -480,8 +490,8 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_addr  <= e_addr22;
             mem_wdata <= e_mdo;
             mem_inflight <= 1'b1;      // tambien en escritura: serializa
-            if (e_addr22[21:1] == lb_tag)
-                lb_v <= 1'b0;          // no servir datos rancios tras escribir
+            if (lb_tagA[e_addr22[4:1]] == e_addr22[21:5])
+                lb_v[e_addr22[4:1]] <= 1'b0;   // no servir datos rancios
             fill_pend <= 1'b0;         // _96: y cancelar un fill pendiente —
                                        // cachearia la linea PRE-escritura
         end
