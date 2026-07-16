@@ -147,6 +147,18 @@ module timers
         if (timer2_overflow_pulse && !mt2)
             ft2 <= 1;
 
+        // _109 (canon ymfm/YMF262): escribir los bits de MASCARA (bit7=0)
+        // tambien LIMPIA los flags correspondientes (set_reset_status con
+        // reset_mask en ymfm). El detect AdLib de Grauw limpia con
+        // reg4=0x78 SIN 0x80 final y hace EI confiando en esto: sin la
+        // limpieza, la IRQ quedaba clavada -> tormenta -> VGMPlay colgado
+        // EN LA DETECCION en cuanto la _108 cableo la IRQ.
+        if (opl3_reg_wr.valid && opl3_reg_wr.bank_num == 0 &&
+            opl3_reg_wr.address == 4 && !opl3_reg_wr.data[7]) begin
+            if (opl3_reg_wr.data[6]) ft1 <= 0;
+            if (opl3_reg_wr.data[5]) ft2 <= 0;
+        end
+
         if (reset || irq_rst || force_clear_flags) begin
             ft1 <= 0;
             ft2 <= 0;
