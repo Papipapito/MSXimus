@@ -829,7 +829,7 @@ module YMF278B (
 		begin
 			S = 4'd0 + PAN;
 			TEMP = $signed($signed(WAVE) >>> {S[2:0], 1'b0});
-			YMF278B_PKG_PanLCalc = (PAN == 4'h8 ? 16'h0000 : (PAN[3] ? $signed(TEMP) : WAVE));
+			YMF278B_PKG_PanLCalc = (PAN == 4'h0 ? WAVE : (PAN == 4'h8 ? 16'h0000 : (PAN[3] ? WAVE : $signed(TEMP))));
 		end
 	endfunction
 	function signed [15:0] YMF278B_PKG_PanRCalc;
@@ -840,7 +840,7 @@ module YMF278B (
 		begin
 			S = 4'd0 - PAN;
 			TEMP = $signed($signed(WAVE) >>> {S[2:0], 1'b0});
-			YMF278B_PKG_PanRCalc = (PAN == 4'h8 ? 16'h0000 : (!PAN[3] ? $signed(TEMP) : WAVE));
+			YMF278B_PKG_PanRCalc = (PAN == 4'h0 ? WAVE : (PAN == 4'h8 ? 16'h0000 : (!PAN[3] ? WAVE : $signed(TEMP))));
 		end
 	endfunction
 	reg [4:0] S = 0;

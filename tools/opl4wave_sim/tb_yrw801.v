@@ -39,6 +39,7 @@ integer NSAMP = 600;
 integer HDRREL = 0;
 integer FMT8 = 0;
 integer HDR7 = 0;
+integer PANV = 0;
 // seno de 8 bits, periodo 100 (tabla generada: round(120*sin(2*pi*i/100)))
 function [7:0] sin8(input integer i);
     integer v;
@@ -136,6 +137,7 @@ initial begin
     if (!$value$plusargs("hdrrel=%d", HDRREL)) HDRREL = 0;
     if (!$value$plusargs("fmt8=%d", FMT8)) FMT8 = 0;
     if (!$value$plusargs("hdr7=%d", HDR7)) HDR7 = 0;
+    if (!$value$plusargs("pan=%d", PANV)) PANV = 0;
     fd = $fopen("pcm_dump.txt", "w");
     $readmemh("yrw801_2m.hex", wavemem);
     if (HDRREL) begin
@@ -179,7 +181,7 @@ initial begin
         #10000; inp(8'hC4); inp(8'h7E); i = i + 1;
     end
     $display("LD limpio tras %0d polls", i);
-    wreg(8'h68, 8'h80);                       // KEY on
+    wreg(8'h68, 8'h80 | PANV[3:0]);           // KEY on (+pan=N, _116)
 end
 
 initial begin

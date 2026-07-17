@@ -787,8 +787,13 @@ always @(posedge clk_eng or negedge erst_n) begin
         if (rf_wp != wp_d1) c_push <= c_push + 16'd1;
         if (pdiv_d1 == 10'd767 && pdiv == 10'd0 && rf_wp == wp_d1
             && (wp_d1 + 4'd1) == rf_rp) c_drop <= c_drop + 16'd1;
-        if (rd_edge && !(lb_v[{e_slot,e_addr22[2:1]}] &&
-            (lb_tagA[{e_slot,e_addr22[2:1]}] == e_addr22[21:3]))) c_miss <= c_miss + 16'd1;
+        // _116: la replica usaba el indexado VIEJO de 4 palabras ({slot,
+        // addr[2:1]}, tag[21:3]) desde la _112 -> d_miss MENTIA (contaba
+        // "miss" en lecturas que la cache real de 8 palabras acertaba; los
+        // "44100/6140 constantes" de la saga eran en parte este espejismo).
+        // Ahora replica EXACTA del hit real: {slot, addr[3:1]}, tag[21:4].
+        if (rd_edge && !(lb_v[{e_slot,e_addr22[3:1]}] &&
+            (lb_tagA[{e_slot,e_addr22[3:1]}] == e_addr22[21:4]))) c_miss <= c_miss + 16'd1;
         if (mem_req && op_is_pf) c_pf <= c_pf + 16'd1;
         if (rf_lvl < lvl_min_w) lvl_min_w <= rf_lvl;
         if (dbg_snap) lvl_min_w <= 4'hF;                  // ventana nueva

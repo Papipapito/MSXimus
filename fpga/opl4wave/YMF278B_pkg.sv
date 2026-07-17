@@ -343,7 +343,11 @@ package YMF278B_PKG;
 		
 		S = 4'd0 + PAN;
 		TEMP = $signed($signed(WAVE)>>>{S[2:0],1'b0});
-		return PAN == 4'h8 ? 16'h0000 : PAN[3] ? $signed(TEMP) : WAVE;
+		// _116: fix de pan del upstream (srg320 5379b34): el sentido de PAN[3]
+		// estaba INVERTIDO (atenuaba el canal equivocado; un pan suave -1
+		// casi muteaba la izquierda). Canon: PAN>0 atenua IZQUIERDA (suena
+		// derecha), PAN<0 (bit3) deja la izquierda ENTERA; 0=centro, 8=mute.
+		return PAN == 4'h0 ? WAVE : PAN == 4'h8 ? 16'h0000 : PAN[3] ? WAVE : $signed(TEMP);
 	endfunction
 	
 	function bit signed [15:0] PanRCalc(bit signed [15:0] WAVE, bit [3:0] PAN);
@@ -352,7 +356,9 @@ package YMF278B_PKG;
 		
 		S = 4'd0 - PAN;
 		TEMP = $signed($signed(WAVE)>>>{S[2:0],1'b0});
-		return PAN == 4'h8 ? 16'h0000 : !PAN[3] ? $signed(TEMP) : WAVE;
+		// _116: espejo del fix de PanLCalc (srg320 5379b34): PAN<0 atenua
+		// DERECHA; PAN>0 la deja entera.
+		return PAN == 4'h0 ? WAVE : PAN == 4'h8 ? 16'h0000 : !PAN[3] ? WAVE : $signed(TEMP);
 	endfunction
 	
 	function bit signed [15:0] MixCalc(bit signed [15:0] WAVE, bit [2:0] MIX);
