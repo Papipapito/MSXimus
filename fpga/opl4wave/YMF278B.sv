@@ -301,18 +301,11 @@ module YMF278B
 	
 	bit  [ 2:0] KEY_RAM_D;
 	bit  [ 2:0] KEY_RAM_Q;
-		(* syn_keep = 1 *) wire [2:0] KEY_RAM_D_N   = ~KEY_RAM_D;
-	(* syn_keep = 1 *) wire [2:0] KEY_RAM_D_DLY = ~KEY_RAM_D_N;
-	OPL4_KEY_RAM KEY_RAM(CLK, OP2.SLOT, KEY_RAM_D_DLY, SLOT1_CE, SLOT, KEY_RAM_Q);
+		OPL4_KEY_RAM KEY_RAM(CLK, OP2.SLOT, KEY_RAM_D, SLOT1_CE, SLOT, KEY_RAM_Q);
 	
 	bit  [21:0] LFO_RAM_D;
 	bit  [21:0] LFO_RAM_Q;
-	// _113: escudo anti-hold reg->BSRAM DI (par de inversores preservados,
-	// ~1 LUT de retardo; holds de -49ps pegajosos en 3 semillas/rutados y
-	// setup con >20ns de margen). Funcion identica (doble negacion).
-	(* syn_keep = 1 *) wire [21:0] LFO_RAM_D_N   = ~LFO_RAM_D;
-	(* syn_keep = 1 *) wire [21:0] LFO_RAM_D_DLY = ~LFO_RAM_D_N;
-	OPL4_LFO_RAM LFO_RAM(CLK, OP2.SLOT, LFO_RAM_D_DLY, SLOT1_CE, LFO_RA, LFO_RAM_Q);
+	OPL4_LFO_RAM LFO_RAM(CLK, OP2.SLOT, LFO_RAM_D, SLOT1_CE, LFO_RA, LFO_RAM_Q);
 
 	
 	//Operation 2: MD read, ADP
@@ -416,15 +409,11 @@ module YMF278B
 	end
 	bit [15:0] SO_RAM_D;
 	bit [15:0] SO_RAM_Q;
-		(* syn_keep = 1 *) wire [15:0] SO_RAM_D_N   = ~SO_RAM_D;
-	(* syn_keep = 1 *) wire [15:0] SO_RAM_D_DLY = ~SO_RAM_D_N;
-	OPL4_SO_RAM SO_RAM(CLK, OP3.SLOT, SO_RAM_D_DLY, SLOT1_CE, OP2.SLOT, SO_RAM_Q);
+		OPL4_SO_RAM SO_RAM(CLK, OP3.SLOT, SO_RAM_D, SLOT1_CE, OP2.SLOT, SO_RAM_Q);
 	
 	bit  [13:0] PHASE_FRAC_RAM_D;
 	bit  [13:0] PHASE_FRAC_RAM_Q;
-		(* syn_keep = 1 *) wire [13:0] PHASE_FRAC_RAM_D_N   = ~PHASE_FRAC_RAM_D;
-	(* syn_keep = 1 *) wire [13:0] PHASE_FRAC_RAM_D_DLY = ~PHASE_FRAC_RAM_D_N;
-	OPL4_PHASE_RAM PHASE_FRAC_RAM(CLK, OP3.SLOT, PHASE_FRAC_RAM_D_DLY, SLOT1_CE, OP2.SLOT, PHASE_FRAC_RAM_Q);
+		OPL4_PHASE_RAM PHASE_FRAC_RAM(CLK, OP3.SLOT, PHASE_FRAC_RAM_D, SLOT1_CE, OP2.SLOT, PHASE_FRAC_RAM_Q);
 	
 	//Operation 3:  
 	bit  [21: 0] WD_SA;
@@ -648,9 +637,7 @@ module YMF278B
 	end
 	bit [11:0] EVOL_RAM_D;
 	bit [11:0] EVOL_RAM_Q;
-		(* syn_keep = 1 *) wire [11:0] EVOL_RAM_D_N   = ~EVOL_RAM_D;
-	(* syn_keep = 1 *) wire [11:0] EVOL_RAM_D_DLY = ~EVOL_RAM_D_N;
-	OPL4_EVOL_RAM EVOL_RAM(CLK, OP5.SLOT, EVOL_RAM_D_DLY, SLOT1_CE, EVOL_RA, EVOL_RAM_Q);
+		OPL4_EVOL_RAM EVOL_RAM(CLK, OP5.SLOT, EVOL_RAM_D, SLOT1_CE, EVOL_RA, EVOL_RAM_Q);
 
 	//Operation 5: Level calculation
 	bit  [ 6: 0] OP5_TL;
@@ -696,9 +683,7 @@ module YMF278B
 	end
 	bit [16:0] TL_RAM_D;
 	bit [16:0] TL_RAM_Q;
-		(* syn_keep = 1 *) wire [16:0] TL_RAM_D_N   = ~TL_RAM_D;
-	(* syn_keep = 1 *) wire [16:0] TL_RAM_D_DLY = ~TL_RAM_D_N;
-	OPL4_TL_RAM TL_RAM(CLK, OP6.SLOT, TL_RAM_D_DLY, SLOT1_CE, OP5.SLOT, TL_RAM_Q);
+		OPL4_TL_RAM TL_RAM(CLK, OP6.SLOT, TL_RAM_D, SLOT1_CE, OP5.SLOT, TL_RAM_Q);
 
 	//Operation 6: Level calculation
 	always @(posedge CLK or negedge RST_N) begin		

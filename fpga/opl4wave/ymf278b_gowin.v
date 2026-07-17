@@ -331,22 +331,18 @@ module YMF278B (
 			end
 		end
 	end
-	(* syn_keep = 1 *) wire [2:0] KEY_RAM_D_N = ~KEY_RAM_D;
-	(* syn_keep = 1 *) wire [2:0] KEY_RAM_D_DLY = ~KEY_RAM_D_N;
 	OPL4_KEY_RAM KEY_RAM(
 		.CLK(CLK),
 		.WRADDR(OP2[44-:5]),
-		.DATA(KEY_RAM_D_DLY),
+		.DATA(KEY_RAM_D),
 		.WREN(SLOT1_CE),
 		.RDADDR(SLOT),
 		.Q(KEY_RAM_Q)
 	);
-	(* syn_keep = 1 *) wire [21:0] LFO_RAM_D_N = ~LFO_RAM_D;
-	(* syn_keep = 1 *) wire [21:0] LFO_RAM_D_DLY = ~LFO_RAM_D_N;
 	OPL4_LFO_RAM LFO_RAM(
 		.CLK(CLK),
 		.WRADDR(OP2[44-:5]),
-		.DATA(LFO_RAM_D_DLY),
+		.DATA(LFO_RAM_D),
 		.WREN(SLOT1_CE),
 		.RDADDR(LFO_RA),
 		.Q(LFO_RAM_Q)
@@ -441,22 +437,18 @@ module YMF278B (
 			end
 		end
 	end
-	(* syn_keep = 1 *) wire [15:0] SO_RAM_D_N = ~SO_RAM_D;
-	(* syn_keep = 1 *) wire [15:0] SO_RAM_D_DLY = ~SO_RAM_D_N;
 	OPL4_SO_RAM SO_RAM(
 		.CLK(CLK),
 		.WRADDR(OP3[65-:5]),
-		.DATA(SO_RAM_D_DLY),
+		.DATA(SO_RAM_D),
 		.WREN(SLOT1_CE),
 		.RDADDR(OP2[44-:5]),
 		.Q(SO_RAM_Q)
 	);
-	(* syn_keep = 1 *) wire [13:0] PHASE_FRAC_RAM_D_N = ~PHASE_FRAC_RAM_D;
-	(* syn_keep = 1 *) wire [13:0] PHASE_FRAC_RAM_D_DLY = ~PHASE_FRAC_RAM_D_N;
 	OPL4_PHASE_RAM PHASE_FRAC_RAM(
 		.CLK(CLK),
 		.WRADDR(OP3[65-:5]),
-		.DATA(PHASE_FRAC_RAM_D_DLY),
+		.DATA(PHASE_FRAC_RAM_D),
 		.WREN(SLOT1_CE),
 		.RDADDR(OP2[44-:5]),
 		.Q(PHASE_FRAC_RAM_Q)
@@ -736,12 +728,10 @@ module YMF278B (
 			end
 		end
 	end
-	(* syn_keep = 1 *) wire [11:0] EVOL_RAM_D_N = ~EVOL_RAM_D;
-	(* syn_keep = 1 *) wire [11:0] EVOL_RAM_D_DLY = ~EVOL_RAM_D_N;
 	OPL4_EVOL_RAM EVOL_RAM(
 		.CLK(CLK),
 		.WRADDR(OP5[41-:5]),
-		.DATA(EVOL_RAM_D_DLY),
+		.DATA(EVOL_RAM_D),
 		.WREN(SLOT1_CE),
 		.RDADDR(EVOL_RA),
 		.Q(EVOL_RAM_Q)
@@ -795,12 +785,10 @@ module YMF278B (
 			end
 		end
 	end
-	(* syn_keep = 1 *) wire [16:0] TL_RAM_D_N = ~TL_RAM_D;
-	(* syn_keep = 1 *) wire [16:0] TL_RAM_D_DLY = ~TL_RAM_D_N;
 	OPL4_TL_RAM TL_RAM(
 		.CLK(CLK),
 		.WRADDR(OP6[33-:5]),
-		.DATA(TL_RAM_D_DLY),
+		.DATA(TL_RAM_D),
 		.WREN(SLOT1_CE),
 		.RDADDR(OP5[41-:5]),
 		.Q(TL_RAM_Q)
