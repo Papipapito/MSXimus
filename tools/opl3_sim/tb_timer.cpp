@@ -83,18 +83,36 @@ int main(int argc, char **argv) {
         if (!f) { printf("*** no puedo abrir %s ***\n", argv[2]); return 1; }
         int bank, reg, val, wait; long nsamp = 0; double acc = 0; int blk = 0;
         int sv = dut->sample_valid; double peak_rms = 0;
+        // _115-diag: sample_l es de 24 BITS (el cast a int16 de antes media
+        // basura). Modela la cadena REAL del wrapper con los DOS ordenes:
+        //   HW hoy:  mono>>5 -> clamp16 -> x0.375 (F8=3/3)   [clamp ANTES]
+        //   fix:     mono>>5 -> x0.375 -> clamp16            [atten ANTES]
+        long clipA = 0, clipB = 0; int smin = 0, smax = 0;
         while (fscanf(f, "%d %d %d %d", &bank, &reg, &val, &wait) == 4) {
             while (wait > 0) {
                 tick();
                 if (dut->sample_valid && !sv) {
                     wait--; nsamp++;
-                    double s = (double)(int16_t)dut->sample_l;
+                    // sign-extend 24 bits (mono = L, el TB no promedia L/R)
+                    int32_t s24 = (int32_t)(dut->sample_l << 8) >> 8;
+                    int32_t nat = s24 >> 5;                  // mono_n nativo
+                    if (nat > smax) smax = nat;
+                    if (nat < smin) smin = nat;
+                    // orden HW hoy: clamp16 -> x0.375
+                    int32_t a = nat > 32767 ? 32767 : nat < -32768 ? -32768 : nat;
+                    if (a != nat) clipA++;
+                    // orden fix: x0.375 -> clamp16
+                    int32_t b = (nat >> 1) + (nat >> 2);
+                    if (b > 32767 || b < -32768) clipB++;
+                    double s = (double)a * 0.375;
                     acc += s * s;
                     if (++blk == 4410) {
                         double rms = sqrt(acc / 4410);
                         if (rms > peak_rms) peak_rms = rms;
-                        printf("t=%4.1fs rms=%6.0f\n", nsamp / 44100.0, rms);
-                        acc = 0; blk = 0;
+                        printf("t=%4.1fs rms=%6.0f natMin=%7d natMax=%7d "
+                               "clipHOY=%ld clipFIX=%ld\n",
+                               nsamp / 44100.0, rms, smin, smax, clipA, clipB);
+                        acc = 0; blk = 0; smin = 0; smax = 0;
                     }
                 }
                 sv = dut->sample_valid;

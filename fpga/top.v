@@ -2727,7 +2727,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .mem_rdata   (weng_rdata),
         .mem_rword   (weng_rword),    // _104: palabra (cache de palabra)
         .mem_done_t  (weng_done),
-        .diag        (wdbg_diag_eng)
+        .diag        (wdbg_diag_eng),
+        // _114diag: estado del video a la telemetria (COM11). {pll27_lock,
+        // frame_cnt[2:0]} del modo activo; opl4_pcm lo cruza a clk_eng.
+        .vid_diag    ({pll27_lock, dbg_video_w[0] ? dbg_fdiv_pal[2:0]
+                                                  : dbg_fdiv_ntsc[2:0]})
     );
 `else
     assign opl4pcm_rd_w   = 1'b0;
@@ -2992,11 +2996,18 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // atajo ">>>{code,1'b0}" (-12dB/paso) convertia el reset canon del F8
     // (3/3 = -8.5dB) en /64: el FM quedaba INAUDIBLE con software que nunca
     // escribe F8 (VGMPlay reproduciendo VGMs YMF262/OPL3 puros).
+    // _115: ¡LECCION _85 OTRA VEZ! El 16'd0 UNSIGNED del ternario de la _114
+    // envenenaba la signedness de la expresion entera -> el >>> degeneraba en
+    // shift LOGICO -> negativos rectificados a positivos enormes = el
+    // "horrible distorsionado" de los VGM OPL3 (F8=3 => shift 1 roto; juegos
+    // con F8=0 => shift 0 inocuo, por eso sonaban bien). Probado en iverilog:
+    // -1000 -> +32268 (bug) vs -500 (fix). El shift vive ahora en un wire
+    // SIGNED propio (aritmetica autodeterminada); el ternario solo muxea bits.
     wire signed [15:0] o4fm_s    = $signed(opl4fm_wav);
     wire signed [15:0] o4fm_base = opl4_mixfm[0] ? (o4fm_s >>> 1) + (o4fm_s >>> 2)
                                                  : o4fm_s;
-    wire [15:0] opl4fm_term      = (opl4_mixfm[2:0] == 3'd7) ? 16'd0
-                                 : $signed(o4fm_base) >>> opl4_mixfm[2:1];
+    wire signed [15:0] o4fm_att  = o4fm_base >>> opl4_mixfm[2:1];
+    wire [15:0] opl4fm_term      = (opl4_mixfm[2:0] == 3'd7) ? 16'd0 : o4fm_att;
 
     // _89: PCM del MoonSound (motor YMF278B). Mono = (L+R)/2 con extension de
     // signo EXPLICITA (leccion _85: las concatenaciones son unsigned) y >>1
@@ -3927,6 +3938,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         else if (clk_enable_3m6_54) led_cnt <= led_cnt + 1'b1;
     end
 
+    // _115: LEDs restaurados (el estado del video vive PERMANENTE en la
+    // telemetria UART: byte15 nibble alto = {pll27_lock, frame_cnt[2:0]},
+    // lector tools/dbg_video_reader.py — diagnostico de HDMI sin cables).
     assign led[0] = turbo ? led_cnt[18] : led_cnt[20];  // VISIBLE (G11): rapido=turbo, lento=normal
     assign led[1] = ~sd_busy_w;                         // VISIBLE (U12): actividad SD
     assign led[5] = turbo ? 1'b0 : led_cnt[20];         // sin pin en el 60K (semantica nano conservada)

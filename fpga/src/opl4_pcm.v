@@ -72,7 +72,10 @@ module opl4_pcm (
     // nibble bajo distinto = el dominio del motor esta VIVO. Muestreado en
     // crudo desde clk_host (diagnostico humano, el tearing da igual).
     output wire [7:0]  diag,
-    output reg         dbg_tx          // _111: telemetria UART TX (E22)
+    output reg         dbg_tx,         // _111: telemetria UART TX (E22)
+    input  wire [3:0]  vid_diag        // _114diag: estado del video (crudo, se
+                                        // cruza a clk_eng aqui). {pll27_lock,
+                                        // frame_cnt[2:0]} — lo mete en la trama.
 );
 
 // ===========================================================================
@@ -801,6 +804,8 @@ reg [3:0]  bit_i;         // 0=start 1..8=datos 9=stop 10=fin
 reg [8:0]  baud;
 reg [7:0]  seq, sum;
 integer fi;
+reg [3:0]  vid_s0, vid_s1;   // _114diag: 2FF de vid_diag a clk_eng
+always @(posedge clk_eng) begin vid_s0 <= vid_diag; vid_s1 <= vid_s0; end
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
         dbg_timer <= 0; dbg_snap <= 0; fr_i <= 5'd17; bit_i <= 0; baud <= 0;
@@ -819,7 +824,11 @@ always @(posedge clk_eng or negedge erst_n) begin
             fr[10] <= c_miss[15:8]; fr[11] <= c_miss[7:0];
             fr[12] <= c_pf[15:8];   fr[13] <= c_pf[7:0];
             fr[14] <= {lvl_min_w, rf_lvl};
-            fr[15] <= {ifw_hits, alive};   // el sum va aparte como byte 16
+            // _114diag: nibble alto = estado de VIDEO (2FF), bajo = alive del
+            // motor. Yo (COM11) veo: alive avanza=motor vivo; vid[2:0]=frame_cnt
+            // avanza entre tramas => el pipeline de video GENERA FRAMES;
+            // vid[3]=pll27_lock. (Restaurar a {ifw_hits,alive} tras diagnostico.)
+            fr[15] <= {vid_s1, alive};     // el sum va aparte como byte 16
             seq <= seq + 8'd1;
             fr_i <= 5'd0; bit_i <= 0; baud <= 0; sum <= 8'd0;
         end
