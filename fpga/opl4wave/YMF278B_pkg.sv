@@ -85,15 +85,16 @@ package YMF278B_PKG;
 		bit [26:0] P;
 		bit [3:0] S;
 		bit [10:0] F;
-		bit [14:0] TEMP;
 		bit [11:0] FM;
-		
+
 		S = OCT^4'h8;
 		F = 11'h400 + FNUM;
-		TEMP = $signed(PLFO_WAVE) * F[10:4];
-		FM = {{3{TEMP[14]}},TEMP[14:6]};
+		// _113 canon (datasheet/openMSX): el vibrato se SUMA directo a F
+		// (VIB=7 -> ±48*15/12=±60 sobre 0x400 = ±79.3 cents, la cifra del
+		// datasheet). El original escalaba por F/1024 (hasta ±204 cents).
+		FM = {{4{PLFO_WAVE[7]}},PLFO_WAVE};
 		P = {15'b000000000000000,{1'b0,F}+FM}<<(S-1);
-		
+
 		return P[26:4];
 	endfunction
 	
@@ -114,16 +115,65 @@ package YMF278B_PKG;
 		return RET - 10'd1;
 	endfunction
 	
+	// _113: LFO canon (datasheet YMF278B / openMSX). El original usaba el
+	// contador LFO en CRUDO como onda de modulacion: una SIERRA con un
+	// acantilado de fase/volumen una vez por ciclo (0.17-6.9Hz) y el doble
+	// (AM) o 2.6x (PM) de profundidad maxima — el "vibrato"/"bombeo" audible
+	// en los instrumentos GM sostenidos (sonyc/MoonBlaster/VGMPlay). El chip
+	// real modula con TRIANGULO plegado y tablas de profundidad fijas.
 	function bit [7:0] AMCalc(bit [7:0] DATA, bit [2:0] AM);
-		return AM ? ((DATA&8'hFE)>>(~AM)) : '0;
+		bit [6:0] TRI;
+		bit [9:0] S5;
+		bit [8:0] S3;
+
+		TRI = DATA[7] ? ~DATA[6:0] : DATA[6:0];  // triangulo 0..7F..0 (256 pasos)
+		// (TRI*DEPTH)>>7 con DEPTH={0,14h,20h,28h,30h,40h,50h,80h} (max 11.91dB)
+		// descompuesto en 2 sumadores + mux de shifts (EXACTO, verificado
+		// exhaustivo) — un mult 8x8 real aqui hundio el timing de la _113.
+		S5 = {3'b000,TRI} + {1'b0,TRI,2'b00};    // TRI*5
+		S3 = {2'b00,TRI} + {1'b0,TRI,1'b0};      // TRI*3
+		case (AM)
+			3'h0: AMCalc = 8'd0;
+			3'h1: AMCalc = {3'b000,S5[9:5]};     // *20>>7 = *5>>5
+			3'h2: AMCalc = {3'b000,TRI[6:2]};    // *32>>7
+			3'h3: AMCalc = {2'b00,S5[9:4]};      // *40>>7 = *5>>4
+			3'h4: AMCalc = {2'b00,S3[8:3]};      // *48>>7 = *3>>3
+			3'h5: AMCalc = {2'b00,TRI[6:1]};     // *64>>7
+			3'h6: AMCalc = {1'b0,S5[9:3]};       // *80>>7 = *5>>3
+			3'h7: AMCalc = {1'b0,TRI};           // *128>>7
+		endcase
 	endfunction
-	
+
 	function bit [7:0] VIBCalc(bit [7:0] DATA, bit [2:0] VIB);
-		bit [7:0] RET;
-		
-		RET = VIB ? $signed($signed(DATA&8'hFE)>>>(~VIB)) : '0;
-		
-		return RET;
+		bit [5:0] FM6;
+		bit [3:0] A;
+		bit [1:0] D6;
+		bit [2:0] D3;
+		bit [6:0] MAG;
+		bit       NEG;
+
+		FM6 = DATA[7:2];                          // 64 pasos por ciclo
+		if (FM6[4]) FM6 = FM6 ^ 6'h1F;            // pliegue: 0..15..0
+		NEG = FM6[5];                             // mitad negativa
+		A   = FM6[3:0];                           // |triangulo| 0..15
+		// canon = trunc(TRI*DEPTH/12) con DEPTH={0,2,3,4,6,12,24,48}
+		// (cents max: 3.4/5.1/6.8/10.1/20.2/40.1/79.3) => DEPTH/12 =
+		// {0,1/6,1/4,1/3,1/2,1,2,4}: LUTs de 16 entradas para /6 y /3 +
+		// shifts (EXACTO, verificado exhaustivo; sin mult ni divisor).
+		D6 = (A >= 4'd12) ? 2'd2 : (A >= 4'd6) ? 2'd1 : 2'd0;          // A/6
+		D3 = (A == 4'd15) ? 3'd5 : (A >= 4'd12) ? 3'd4 : (A >= 4'd9) ? 3'd3 :
+		     (A >= 4'd6)  ? 3'd2 : (A >= 4'd3)  ? 3'd1 : 3'd0;         // A/3
+		case (VIB)
+			3'h0: MAG = 7'd0;
+			3'h1: MAG = {5'b00000,D6};            // A/6  (±2)
+			3'h2: MAG = {5'b00000,A[3:2]};        // A/4  (±3)
+			3'h3: MAG = {4'b0000,D3};             // A/3  (±5)
+			3'h4: MAG = {4'b0000,A[3:1]};         // A/2  (±7)
+			3'h5: MAG = {3'b000,A};               // A    (±15)
+			3'h6: MAG = {2'b00,A,1'b0};           // A*2  (±30)
+			3'h7: MAG = {1'b0,A,2'b00};           // A*4  (±60)
+		endcase
+		VIBCalc = NEG ? (~{1'b0,MAG} + 8'd1) : {1'b0,MAG};  // signo (compl. a 2)
 	endfunction
 	
 	function bit [15:0] Interpolate(input bit [15:0] WAVE0, input bit [15:0] WAVE1, bit [5:0] PHASE);

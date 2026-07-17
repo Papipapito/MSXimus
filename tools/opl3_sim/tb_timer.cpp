@@ -132,6 +132,75 @@ int main(int argc, char **argv) {
     double base = (rA > rA2 ? rA : rA2);
     printf(rB > base*2 && rB > 0.05 ? "*** FM + ISR: MODULADO (senal real) ***\n"
                                     : "*** FM + ISR: LIMPIO (rugosidad comparable al control) ***\n");
+
+    // === test 4: VIBRATO del FM (canon YMF262: 6.07Hz; DVB=1 -> +/-14c) ===
+    // Los parches de toda la saga llevaban VIB=0: vibrato.sv JAMAS se ha
+    // validado. Las canciones reales (MoonDriver/MBWave) lo encienden en
+    // casi todo: si la tasa/profundidad esta mal, "los instrumentos vibran".
+    ticks(200000);
+    wr(0x105, 0x01);
+    wr(0x20, 0x61); wr(0x40, 0x10); wr(0x60, 0xF0); wr(0x80, 0x0F);  // op1 VIB+EGT (sostiene)
+    wr(0x23, 0x41); wr(0x43, 0x00); wr(0x63, 0xF0); wr(0x83, 0x0F);  // op2 VIB
+    wr(0xC0, 0x31);                    // salida L+R, alg aditivo
+    wr(0xBD, 0x40);                    // DVB=1 (vibrato profundo)
+    wr(0xA0, 0x41); wr(0xB0, 0x32);    // keyon blk4 (~440Hz)
+    static int16_t vbuf[132000];
+    { int n=0, sv=dut->sample_valid;
+      while (n < 132000) { tick();
+        if (dut->sample_valid && !sv) vbuf[n++] = (int16_t)dut->sample_l;
+        sv = dut->sample_valid; } }
+    wr(0xB0, 0x12);
+    { FILE *fv = fopen("vib_on.raw", "wb");
+      fwrite(vbuf, 2, 132000, fv); fclose(fv); }
+    // control: misma nota con VIB=0
+    ticks(200000);
+    wr(0x20, 0x21); wr(0x23, 0x21);    // VIB off, EGT on
+    wr(0xA0, 0x41); wr(0xB0, 0x32);
+    { int n=0, sv=dut->sample_valid;
+      while (n < 132000) { tick();
+        if (dut->sample_valid && !sv) vbuf[n++] = (int16_t)dut->sample_l;
+        sv = dut->sample_valid; } }
+    wr(0xB0, 0x12);
+    { FILE *fv = fopen("vib_off.raw", "wb");
+      fwrite(vbuf, 2, 132000, fv); fclose(fv); }
+    // tremolo: AM=1 en ambos ops + DAM=1 (canon: 4.8dB a 3.7Hz)
+    ticks(200000);
+    wr(0x20, 0xA1); wr(0x23, 0xA1);    // AM+EGT, VIB off
+    wr(0xBD, 0x80);                    // DAM=1 (tremolo profundo)
+    wr(0xA0, 0x41); wr(0xB0, 0x32);
+    { int n=0, sv=dut->sample_valid;
+      while (n < 132000) { tick();
+        if (dut->sample_valid && !sv) vbuf[n++] = (int16_t)dut->sample_l;
+        sv = dut->sample_valid; } }
+    wr(0xB0, 0x12);
+    { FILE *fv = fopen("trem_on.raw", "wb");
+      fwrite(vbuf, 2, 132000, fv); fclose(fv); }
+    printf("dumps vib_on/vib_off/trem_on escritos\n");
+    {
+        double t_prev = -1; int k = 0;
+        static double ft[8000]; static double tt[8000];
+        for (int i = 44100; i < 131999 && k < 8000; ++i) {
+            if (vbuf[i] < 0 && vbuf[i+1] >= 0) {
+                double frac = (double)(-vbuf[i]) / ((double)vbuf[i+1] - vbuf[i]);
+                double tc = (i + frac) / 44100.0;
+                if (t_prev > 0 && tc > t_prev) { ft[k] = 1.0/(tc - t_prev); tt[k] = tc; k++; }
+                t_prev = tc;
+            }
+        }
+        if (k < 100) { printf("*** VIB: sin senal utilizable ***\n"); return 1; }
+        double fmin=1e9, fmax=0, fsum=0;
+        for (int j = 0; j < k; ++j) { if (ft[j]<fmin) fmin=ft[j]; if (ft[j]>fmax) fmax=ft[j]; fsum+=ft[j]; }
+        double favg = fsum/k;
+        double depth_c = 1200.0 * log2(fmax/fmin) / 2.0;
+        int mc = 0; double tfirst=-1, tlast=0;
+        for (int j = 1; j < k; ++j)
+            if ((ft[j-1] < favg) != (ft[j] < favg)) { if (tfirst<0) tfirst=tt[j]; tlast=tt[j]; mc++; }
+        double rate = (mc > 2 && tlast > tfirst) ? (mc/2.0) / (tlast - tfirst) : 0;
+        printf("VIBRATO FM: f=%.1fHz, profundidad ~+/-%.1f cents, tasa ~%.2f Hz\n", favg, depth_c, rate);
+        printf("canon YMF262 con DVB=1: +/-14 cents a 6.07 Hz\n");
+        bool okv = depth_c > 5 && depth_c < 25 && rate > 4.5 && rate < 8.0;
+        printf(okv ? "*** VIBRATO: DENTRO DEL CANON ***\n" : "*** VIBRATO: FUERA DE CANON ***\n");
+    }
     return 0;
 
 }

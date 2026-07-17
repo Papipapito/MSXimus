@@ -37,6 +37,16 @@ reg [15:0] FNUM = 0;
 reg [7:0]  OCT = 1;
 integer NSAMP = 600;
 integer HDRREL = 0;
+integer FMT8 = 0;
+integer HDR7 = 0;
+// seno de 8 bits, periodo 100 (tabla generada: round(120*sin(2*pi*i/100)))
+function [7:0] sin8(input integer i);
+    integer v;
+    begin
+        v = $rtoi(120.0 * $sin(6.28318530718 * i / 100.0));
+        sin8 = v[7:0];
+    end
+endfunction
 
 opl4_pcm dut (
     .rst_n(rst_n), .clk_host(clk_host),
@@ -124,6 +134,8 @@ initial begin
     if (!$value$plusargs("oct=%d", OCT)) OCT = 1;
     if (!$value$plusargs("nsamp=%d", NSAMP)) NSAMP = 600;
     if (!$value$plusargs("hdrrel=%d", HDRREL)) HDRREL = 0;
+    if (!$value$plusargs("fmt8=%d", FMT8)) FMT8 = 0;
+    if (!$value$plusargs("hdr7=%d", HDR7)) HDR7 = 0;
     fd = $fopen("pcm_dump.txt", "w");
     $readmemh("yrw801_2m.hex", wavemem);
     if (HDRREL) begin
@@ -131,6 +143,22 @@ initial begin
         // (wavetblhdr=4 -> base 4*0x80000 = 0x200000; onda 384 = indice 0)
         for (li = 0; li < 12; li = li + 1)
             wavemem[22'h200000 + li] = wavemem[303*12 + li];
+    end
+    if (FMT8) begin
+        // _107-test: onda 8-BIT sintetica (seno periodo 100) en RAM, cabecera
+        // relocada fmt=0, start=0x210000, loop=0, end=4000 (raw = ~end)
+        wavemem[22'h200000+0]  = 8'h21;  // fmt0 | start[21:16]
+        wavemem[22'h200000+1]  = 8'h00;
+        wavemem[22'h200000+2]  = 8'h00;
+        wavemem[22'h200000+3]  = 8'h00; wavemem[22'h200000+4] = 8'h00;   // loop=0
+        wavemem[22'h200000+5]  = 8'hF0; wavemem[22'h200000+6] = 8'h60;   // -4000 (compl. a 2: canon)
+        wavemem[22'h200000+7]  = HDR7[7:0];  // {LFO[5:3],VIB[2:0]} (_113: +hdr7=N)
+        wavemem[22'h200000+8]  = 8'hF0;  // AR=15 D1R=0
+        wavemem[22'h200000+9]  = 8'h00;  // DL=0 D2R=0
+        wavemem[22'h200000+10] = 8'h0F;  // RC=0 RR=15
+        wavemem[22'h200000+11] = 8'h00;
+        for (li = 0; li < 5000; li = li + 1)
+            wavemem[22'h210000 + li] = sin8(li % 100);
     end
     #500  rst_n = 1;
     #1000 eng_rst_n = 1;
@@ -140,7 +168,7 @@ initial begin
               // se suelta ~7s antes de que el software escriba nada)
     outp(8'hC6, 8'h05);
     outp(8'hC7, 8'h03);                       // NEW/NEW2
-    if (HDRREL) wreg(8'h02, 8'h10);           // wavetblhdr=4 (bits 4:2)
+    if (HDRREL || FMT8) wreg(8'h02, 8'h10);   // wavetblhdr=4 (bits 4:2)
     wreg(8'h20, (FNUM[6:0]<<1) | WAVEN[8]);   // FNUM low / WTN8
     wreg(8'h38, (OCT[3:0]<<4) | FNUM[9:7]);   // _104c: FNUM[9:7] en bits 2:0 (canon)
     wreg(8'h50, 8'h01);                       // TL=0, LD
@@ -155,7 +183,7 @@ initial begin
 end
 
 initial begin
-    #80000000;  // 80ms guardia
+    #400000000;  // 400ms guardia (_113: cruzar wraps de loop)
     $display("TIMEOUT con %0d muestras", n);
     $finish;
 end

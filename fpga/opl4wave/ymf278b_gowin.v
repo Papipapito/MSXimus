@@ -189,13 +189,11 @@ module YMF278B (
 		reg [26:0] P;
 		reg [3:0] S;
 		reg [10:0] F;
-		reg [14:0] TEMP;
 		reg [11:0] FM;
 		begin
 			S = OCT ^ 4'h8;
 			F = 11'h400 + FNUM;
-			TEMP = $signed(PLFO_WAVE) * F[10:4];
-			FM = {{3 {TEMP[14]}}, TEMP[14:6]};
+			FM = {{4 {PLFO_WAVE[7]}}, PLFO_WAVE};
 			P = {15'b000000000000000, {1'b0, F} + FM} << (S - 1);
 			YMF278B_PKG_PhaseCalc = P[26:4];
 		end
@@ -203,10 +201,31 @@ module YMF278B (
 	function [7:0] YMF278B_PKG_VIBCalc;
 		input reg [7:0] DATA;
 		input reg [2:0] VIB;
-		reg [7:0] RET;
+		reg [5:0] FM6;
+		reg [3:0] A;
+		reg [1:0] D6;
+		reg [2:0] D3;
+		reg [6:0] MAG;
+		reg NEG;
 		begin
-			RET = (VIB ? $signed($signed(DATA & 8'hfe) >>> ~VIB) : {8 {1'sb0}});
-			YMF278B_PKG_VIBCalc = RET;
+			FM6 = DATA[7:2];
+			if (FM6[4])
+				FM6 = FM6 ^ 6'h1f;
+			NEG = FM6[5];
+			A = FM6[3:0];
+			D6 = (A >= 4'd12 ? 2'd2 : (A >= 4'd6 ? 2'd1 : 2'd0));
+			D3 = (A == 4'd15 ? 3'd5 : (A >= 4'd12 ? 3'd4 : (A >= 4'd9 ? 3'd3 : (A >= 4'd6 ? 3'd2 : (A >= 4'd3 ? 3'd1 : 3'd0)))));
+			case (VIB)
+				3'h0: MAG = 7'd0;
+				3'h1: MAG = {5'b00000, D6};
+				3'h2: MAG = {5'b00000, A[3:2]};
+				3'h3: MAG = {4'b0000, D3};
+				3'h4: MAG = {4'b0000, A[3:1]};
+				3'h5: MAG = {3'b000, A};
+				3'h6: MAG = {2'b00, A, 1'b0};
+				3'h7: MAG = {1'b0, A, 2'b00};
+			endcase
+			YMF278B_PKG_VIBCalc = (NEG ? ~{1'b0, MAG} + 8'd1 : {1'b0, MAG});
 		end
 	endfunction
 	reg [9:0] OP1_LFO_DIV = 0;
@@ -312,18 +331,22 @@ module YMF278B (
 			end
 		end
 	end
+	(* syn_keep = 1 *) wire [2:0] KEY_RAM_D_N = ~KEY_RAM_D;
+	(* syn_keep = 1 *) wire [2:0] KEY_RAM_D_DLY = ~KEY_RAM_D_N;
 	OPL4_KEY_RAM KEY_RAM(
 		.CLK(CLK),
 		.WRADDR(OP2[44-:5]),
-		.DATA(KEY_RAM_D),
+		.DATA(KEY_RAM_D_DLY),
 		.WREN(SLOT1_CE),
 		.RDADDR(SLOT),
 		.Q(KEY_RAM_Q)
 	);
+	(* syn_keep = 1 *) wire [21:0] LFO_RAM_D_N = ~LFO_RAM_D;
+	(* syn_keep = 1 *) wire [21:0] LFO_RAM_D_DLY = ~LFO_RAM_D_N;
 	OPL4_LFO_RAM LFO_RAM(
 		.CLK(CLK),
 		.WRADDR(OP2[44-:5]),
-		.DATA(LFO_RAM_D),
+		.DATA(LFO_RAM_D_DLY),
 		.WREN(SLOT1_CE),
 		.RDADDR(LFO_RA),
 		.Q(LFO_RAM_Q)
@@ -418,18 +441,22 @@ module YMF278B (
 			end
 		end
 	end
+	(* syn_keep = 1 *) wire [15:0] SO_RAM_D_N = ~SO_RAM_D;
+	(* syn_keep = 1 *) wire [15:0] SO_RAM_D_DLY = ~SO_RAM_D_N;
 	OPL4_SO_RAM SO_RAM(
 		.CLK(CLK),
 		.WRADDR(OP3[65-:5]),
-		.DATA(SO_RAM_D),
+		.DATA(SO_RAM_D_DLY),
 		.WREN(SLOT1_CE),
 		.RDADDR(OP2[44-:5]),
 		.Q(SO_RAM_Q)
 	);
+	(* syn_keep = 1 *) wire [13:0] PHASE_FRAC_RAM_D_N = ~PHASE_FRAC_RAM_D;
+	(* syn_keep = 1 *) wire [13:0] PHASE_FRAC_RAM_D_DLY = ~PHASE_FRAC_RAM_D_N;
 	OPL4_PHASE_RAM PHASE_FRAC_RAM(
 		.CLK(CLK),
 		.WRADDR(OP3[65-:5]),
-		.DATA(PHASE_FRAC_RAM_D),
+		.DATA(PHASE_FRAC_RAM_D_DLY),
 		.WREN(SLOT1_CE),
 		.RDADDR(OP2[44-:5]),
 		.Q(PHASE_FRAC_RAM_Q)
@@ -602,7 +629,24 @@ module YMF278B (
 	function [7:0] YMF278B_PKG_AMCalc;
 		input reg [7:0] DATA;
 		input reg [2:0] AM;
-		YMF278B_PKG_AMCalc = (AM ? (DATA & 8'hfe) >> ~AM : {8 {1'sb0}});
+		reg [6:0] TRI;
+		reg [9:0] S5;
+		reg [8:0] S3;
+		begin
+			TRI = (DATA[7] ? ~DATA[6:0] : DATA[6:0]);
+			S5 = {3'b000, TRI} + {1'b0, TRI, 2'b00};
+			S3 = {2'b00, TRI} + {1'b0, TRI, 1'b0};
+			case (AM)
+				3'h0: YMF278B_PKG_AMCalc = 8'd0;
+				3'h1: YMF278B_PKG_AMCalc = {3'b000, S5[9:5]};
+				3'h2: YMF278B_PKG_AMCalc = {3'b000, TRI[6:2]};
+				3'h3: YMF278B_PKG_AMCalc = {2'b00, S5[9:4]};
+				3'h4: YMF278B_PKG_AMCalc = {2'b00, S3[8:3]};
+				3'h5: YMF278B_PKG_AMCalc = {2'b00, TRI[6:1]};
+				3'h6: YMF278B_PKG_AMCalc = {1'b0, S5[9:3]};
+				3'h7: YMF278B_PKG_AMCalc = {1'b0, TRI};
+			endcase
+		end
 	endfunction
 	localparam [41:0] YMF278B_PKG_OP5_RESET = 42'h00000000000;
 	reg [10:0] ATTACK_VOL_CALC = 0;
@@ -692,10 +736,12 @@ module YMF278B (
 			end
 		end
 	end
+	(* syn_keep = 1 *) wire [11:0] EVOL_RAM_D_N = ~EVOL_RAM_D;
+	(* syn_keep = 1 *) wire [11:0] EVOL_RAM_D_DLY = ~EVOL_RAM_D_N;
 	OPL4_EVOL_RAM EVOL_RAM(
 		.CLK(CLK),
 		.WRADDR(OP5[41-:5]),
-		.DATA(EVOL_RAM_D),
+		.DATA(EVOL_RAM_D_DLY),
 		.WREN(SLOT1_CE),
 		.RDADDR(EVOL_RA),
 		.Q(EVOL_RAM_Q)
@@ -749,10 +795,12 @@ module YMF278B (
 			end
 		end
 	end
+	(* syn_keep = 1 *) wire [16:0] TL_RAM_D_N = ~TL_RAM_D;
+	(* syn_keep = 1 *) wire [16:0] TL_RAM_D_DLY = ~TL_RAM_D_N;
 	OPL4_TL_RAM TL_RAM(
 		.CLK(CLK),
 		.WRADDR(OP6[33-:5]),
-		.DATA(TL_RAM_D),
+		.DATA(TL_RAM_D_DLY),
 		.WREN(SLOT1_CE),
 		.RDADDR(OP5[41-:5]),
 		.Q(TL_RAM_Q)

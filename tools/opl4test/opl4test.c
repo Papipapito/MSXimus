@@ -457,6 +457,26 @@ __sfr __at(0xC7) g_Opl4Dat1;    // write: dato bank 1
 __sfr __at(0x7F) g_Opl4Wave;    // stub wave (lectura: device ID 0x20)
 
 void Opl4Wr0(u8 reg, u8 v) { g_Opl4Sel0 = reg; g_Opl4Dat0 = v; }
+
+//-----------------------------------------------------------------------------
+// IRQ del OPL4 (v9/_113): desde que _108 cableo el /INT del OPL4 al bus, la
+// medicion del reloj (T1 sin mascara + polling del flag) dispara KEYINT en
+// tormenta: el flag nunca baja y el test se cuelga tras "Readback: OK".
+// Mismo remedio que el Y8950: gancho H.KEYI que cuenta, limpia (baja /INT)
+// y RE-ARMA (v8: este core aplica TODOS los bits del reg 4 en cada
+// escritura, el ack a secas tambien para el timer).
+//-----------------------------------------------------------------------------
+volatile u16 g_Opl4T1Count;
+
+void Opl4T1Hook()
+{
+	if (g_Opl4Sel0 & 0x40)              // bit6 = FT1 del OPL4
+	{
+		Opl4Wr0(0x04, 0x80);            // borra flags -> baja /INT (y para T1)
+		Opl4Wr0(0x04, 0x01);            // re-arranca T1
+		++g_Opl4T1Count;
+	}
+}
 void Opl4Wr1(u8 reg, u8 v) { g_Opl4Sel1 = reg; g_Opl4Dat1 = v; }
 
 void Opl4SetVoice(u8 ch, const u8* v)   // mismo formato de 9 bytes que g_AudPiano
@@ -541,25 +561,31 @@ void TestOPL4FM()
 	// (el Y8950 no necesita control: su afinacion ya esta validada en HW, y
 	//  ademas su IRQ esta cableada — un flag visible aqui daria tormenta)
 	{
-		u16 t0; u16 cO = 0; u8 fifty;
+		u16 t0; u16 cO; u8 fifty;
+		u8 hookSave[5];
+		u8* hook = (u8*)0xFD9A;          // H.KEYI
 		fifty = (*(volatile u8*)0x002B & 0x80) ? 1 : 0;
 
+		// v9: la IRQ esta cableada (_108) -> conteo por gancho H.KEYI (que
+		// ademas re-arma, ver Opl4T1Hook). Polear el flag con EI = tormenta;
+		// polear bajo DI = JIFFY congelado. El gancho es la unica via limpia.
+		g_Opl4T1Count = 0;
+		__asm__("di");
+		for (u8 i = 0; i < 5; ++i) hookSave[i] = hook[i];
+		hook[0] = 0xC3;                  // JP Opl4T1Hook
+		hook[1] = (u8)((u16)&Opl4T1Hook);
+		hook[2] = (u8)((u16)&Opl4T1Hook >> 8);
 		Opl4Wr0(0x04, 0x60); Opl4Wr0(0x04, 0x80);
 		Opl4Wr0(0x02, 0x00);             // T1 periodo maximo (20.48ms/desborde)
-		Opl4Wr0(0x04, 0x01);             // arranca (OPL4 sin IRQ cableada = seguro)
+		Opl4Wr0(0x04, 0x01);             // arranca T1 sin mascara
+		__asm__("ei");
 		t0 = *(volatile u16*)0xFC9E;     // JIFFY
-		while ((u16)(*(volatile u16*)0xFC9E - t0) < 120)
-			if (g_Opl4Sel0 & 0x40)
-			{
-				++cO;
-				// v8: RE-ARRANCAR tras cada clear — este core aplica TODOS
-				// los bits del reg 4 en cada escritura (el 0x80 a secas
-				// tambien escribe ST1=0 y PARA el timer: el "T1x2s=001"
-				// de la v7 nos lo paramos nosotros mismos)
-				Opl4Wr0(0x04, 0x80);
-				Opl4Wr0(0x04, 0x01);
-			}
+		while ((u16)(*(volatile u16*)0xFC9E - t0) < 120) {}
+		__asm__("di");
 		Opl4Wr0(0x04, 0x60); Opl4Wr0(0x04, 0x80);
+		for (u8 i = 0; i < 5; ++i) hook[i] = hookSave[i];
+		__asm__("ei");
+		cO = g_Opl4T1Count;
 
 		Print_DrawTextAt(1, 6, "Reloj: T1x2s=");
 		PrintU8Dec((u8)(cO > 255 ? 255 : cO));
