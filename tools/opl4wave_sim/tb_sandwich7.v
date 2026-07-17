@@ -184,6 +184,85 @@ initial begin
     end
 end
 
+// ---- _113b: ARRANQUE DE MBWAVE 1.17 (+mbwave=1) — reproduce el CUELGUE.
+// Del desensamblado de MBWAVE.COM: toda escritura/lectura wave gira en
+// "IN A,(C4); RRA; JR c" = espera BUSY=0 SIN timeout (rutinas 32EB/32FE).
+// El init (2B6E): 24 canales x { read 68+ch -> AND 7F -> write (keyoff),
+// read 68+ch -> SET5 (LFORST!) -> write, write 80+ch (LFO/VIB!), write
+// E0+ch (AM) } + volumen F9 read-modify-write. VGMPlay NUNCA lee regs
+// wave ni escribe LFO directo: por eso solo MBWave muere. Si BUSY se
+// queda a 1, el poll gira para siempre = el cuelgue total de la placa.
+integer MBW = 0, mbch, mbpoll, mbhang;
+task mb_poll_busy;   // el spin exacto de 32EB/32FE (con lectura C4 real:
+begin                // cada IN C4 ademas limpia LD2 en el motor, como el HW)
+    mbpoll = 0;
+    inp(8'hC4);
+    while (wave_status[0] && mbpoll < 3000) begin
+        inp(8'hC4);
+        mbpoll = mbpoll + 1;
+    end
+    if (mbpoll >= 3000) begin
+        mbhang = 1;
+        $display("*** CUELGUE REPRODUCIDO: BUSY clavado a 1 (canal %0d) ***", mbch);
+    end
+end
+endtask
+task mb_wr(input [7:0] r, input [7:0] v);   // 32EB
+begin mb_poll_busy; outp(8'h7E, r); mb_poll_busy; outp(8'h7F, v); end
+endtask
+task mb_rd(input [7:0] r);                  // 32FE
+begin mb_poll_busy; outp(8'h7E, r); mb_poll_busy; inp(8'h7F); end
+endtask
+initial begin
+    if (!$value$plusargs("mbwave=%d", MBW)) MBW = 0;
+    if (MBW) begin
+        mbhang = 0;
+        wait (umem.RstSeq === 5'b11111);
+        #100000;                     // barrido de reset del motor
+        mb_wr(8'h02, 8'h10);         // modo (2AE1)
+        mb_rd(8'hF9);                // volumen: readback F9 (2CDB)
+        mb_poll_busy;
+        outp(8'h7F, 8'h00);          // write F9 directo (reg ya selecc., 2CEC)
+        for (mbch = 0; mbch < 24 && !mbhang; mbch = mbch + 1) begin
+            mb_rd(8'h68 + mbch[7:0]);                    // 2FC7: read
+            mb_wr(8'h68 + mbch[7:0], rdv & 8'h7F);       //   keyoff
+            mb_rd(8'h68 + mbch[7:0]);                    // 3147: read
+            mb_wr(8'h68 + mbch[7:0], rdv | 8'h20);       //   SET LFORST
+            mb_wr(8'h80 + mbch[7:0], 8'h07);             //   LFO/VIB a tope
+            mb_wr(8'hE0 + mbch[7:0], 8'h07);             //   AM a tope
+        end
+        if (!mbhang) begin
+            // veredicto: el motor debe seguir VIVO (BUSY limpiable) tras todo
+            mb_wr(8'h02, 8'h10);
+            $display("MBWAVE INIT: COMPLETO SIN CUELGUE (BUSY siempre bajo a 0)");
+        end
+        // ---- FASE 2: el note-on del replayer (overlay .004 +02E4): escribe
+        // 0x38 (oct), 0x20 (fnum/WTN8), 0x08 (ONDA -> arranca carga de
+        // cabecera, LD=1) y GIRA en "IN C4; BIT 1; JR nz" hasta LD==0.
+        // SIN timeout: si la carga no termina, cuelgue total. 24 canales
+        // seguidos (ondas de piano 300-306 y vecinas, como el kit real).
+        for (mbch = 0; mbch < 24 && !mbhang; mbch = mbch + 1) begin
+            mb_wr(8'h38 + mbch[7:0], 8'h10);                    // oct=1
+            mb_wr(8'h20 + mbch[7:0], 8'h01);                    // fnum=0, WTN8=1
+            mb_wr(8'h08 + mbch[7:0], 8'h2C + mbch[7:0]);        // ondas 300..
+            mbpoll = 0;
+            inp(8'hC4);                                          // spin LD (+0313)
+            while (wave_status[1] && mbpoll < 3000) begin
+                inp(8'hC4);
+                mbpoll = mbpoll + 1;
+            end
+            if (mbpoll >= 3000) begin
+                mbhang = 1;
+                $display("*** CUELGUE REPRODUCIDO: LD clavado a 1 (canal %0d) ***", mbch);
+            end
+        end
+        if (!mbhang)
+            $display("MBWAVE NOTE-ON x24: COMPLETO SIN CUELGUE (LD siempre baja)");
+        #2000000;
+        $finish;
+    end
+end
+
 // ---- _112: tormenta de RETRIGGERS (+retrig=1): cada ~1.2ms re-dispara
 // la cabecera de un slot rotatorio (como percusion rapida / sonyc):
 // cada note-on carga 12 bytes = 6 palabras — el patron que trituraba

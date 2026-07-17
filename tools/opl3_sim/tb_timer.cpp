@@ -102,6 +102,46 @@ int main(int argc, char **argv) {
     printf(ok ? "*** TIMER CANON: PASA ***\n" : "*** PERIODOS MAL ***\n");
     if (!ok) return 1;
 
+    // === test 5 (_114): el REGIMEN DE MBWAVE — replayer por IRQ del OPL4
+    //     a 48-100Hz (teambomba: "uses the OPL4 interrupt", hook #FD9A).
+    //     48.8Hz = T1 preset 0 (256 x 80us = 20.48ms = 552960 c @27M).
+    //     Nunca validado: VGMPlay usa preset -11; MBWave el maximo.
+    wr(0x04, 0x78); wr(0x04, 0x80);
+    wr(0x02, 0x00);          // T1 preset 0 -> periodo maximo
+    wr(0x04, 0x21);          // mt2 + st1 (T1 sin mascara)
+    {
+        uint64_t m[3];
+        for (int i = 0; i < 3; ++i) {
+            m[i] = wait_irq(700000);
+            if (!m[i]) { printf("*** FALLO MBWave-T1: IRQ %d no llego ***\n", i+1); return 1; }
+            wr(0x04, 0x80);
+        }
+        long long q1 = (long long)(m[1]-m[0]), q2 = (long long)(m[2]-m[1]);
+        printf("MBWave T1=0: periodos %lld %lld (nominal ~552960)\n", q1, q2);
+        bool okm = q1 > 530000 && q1 < 580000 && q2 > 530000 && q2 < 580000;
+        printf(okm ? "*** MBWAVE T1 (48.8Hz): PASA ***\n" : "*** MBWAVE T1: PERIODOS MAL ***\n");
+        if (!okm) return 1;
+        wr(0x04, 0x78); wr(0x04, 0x80);
+    }
+    //     T2 (nunca ejercitado en ninguna sim): preset 0xF0 -> 16 x 320us
+    //     = 5.12ms = 138240 c. Arranca con bit1 (ST2), T1 enmascarado.
+    wr(0x03, 0xF0);          // T2 preset
+    wr(0x04, 0x42);          // mt1 + st2 (T2 sin mascara)
+    {
+        uint64_t m[3];
+        for (int i = 0; i < 3; ++i) {
+            m[i] = wait_irq(200000);
+            if (!m[i]) { printf("*** FALLO T2: IRQ %d no llego ***\n", i+1); return 1; }
+            wr(0x04, 0x80);
+        }
+        long long q1 = (long long)(m[1]-m[0]), q2 = (long long)(m[2]-m[1]);
+        printf("T2=0xF0: periodos %lld %lld (nominal ~138240)\n", q1, q2);
+        bool okt = q1 > 130000 && q1 < 147000 && q2 > 130000 && q2 < 147000;
+        printf(okt ? "*** T2 (canon 320us/tick): PASA ***\n" : "*** T2: PERIODOS MAL ***\n");
+        if (!okt) return 1;
+        wr(0x04, 0x78); wr(0x04, 0x80);
+    }
+
     // === test 3: nota sostenida — control (A vs A2, ambas sin ISR) y
     //     experimento (A vs B, con acks a 1130Hz) ===
     static int16_t bufA[24000], bufA2[24000], bufB[24000];
