@@ -4023,9 +4023,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign dbg_pmod1[3] = 1'b1;
 `ifdef WIFI_TAP_BL616TX
     assign dbg_pmod1[4] = bl616_jtagsel;     // E22 = ESPEJO del TX del BL616 (V14) para pinchar con el CH340
-`elsif ENABLE_WIFI
-    assign dbg_pmod1[4] = bl616_uart_tx_w;   // E22 = UART TX del WiFi (WIFI_PMOD_TEST)
 `else
+    // _111b: la telemetria GANA el pin E22. (La rama ENABLE_WIFI que sacaba
+    // aqui el espejo de la UART del WiFi era un resto de diagnostico _77 y
+    // le robaba el pin a la telemetria: el lector no veia NADA.)
     assign dbg_pmod1[4] = opl4_dbg_tx;   // _111: telemetria del motor wave
 `endif
     // dbg_pmod1[5]/D22 eliminado: pasa a uart_pmod_rx (input) para el modo PMOD test
