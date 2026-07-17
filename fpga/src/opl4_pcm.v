@@ -404,10 +404,20 @@ wire [21:0] e_addr22 = {~e_mcs_n[1], e_ma};
 // — nunca llega). Particionando, cada slot tiene sus 4 palabras
 // (actual, vecina de interpolacion, +2 del prefetch) SIN colisiones
 // por construccion: el hit rate ya no depende de la polifonia.
-reg [15:0]  lb_word [0:127];
-reg [18:0]  lb_tagA [0:127];       // addr[21:3]
-reg [127:0] lb_v;
-reg [127:0] lb_pfb;                // entrada traida por prefetch (OBL tag)
+// _112: ventana de 8 PALABRAS por slot (antes 4) + PREFETCH POR STRIDE.
+// La telemetria en placa (Bombaman seq 183-194) cazo tormentas de ~6
+// misses/muestra correladas con la "vibracion": cada NOTE-ON carga una
+// cabecera de 12 bytes = 6 palabras que NO CABIAN en la ventana de 4
+// (la nota se trituraba su propia cache), y las notas agudas (paso >=2)
+// dejaban atras el lookahead fijo de +2. Con 8 palabras caben cabecera
+// y stream, y el stride por slot predice el salto real.
+reg [15:0]  lb_word [0:255];
+reg [17:0]  lb_tagA [0:255];       // addr[21:4]
+reg [255:0] lb_v;
+reg [255:0] lb_pfb;                // entrada traida por prefetch (OBL tag)
+reg [20:0]  sl_last [0:31];        // ultima palabra pedida por slot
+reg [2:0]   sl_stride [0:31];      // stride en palabras (1..4; 0=sin entrenar)
+wire [2:0]  eff_stride = (sl_stride[e_slot] == 3'd0) ? 3'd2 : sl_stride[e_slot];
 wire [4:0]  e_slot;                // slot dueno del fetch (del motor)
 wire [5:0]  eng_mixfm;             // _110: reg F8 (dominio motor)
 reg         lb_hit;                // el ultimo fetch se sirvio de la cache
@@ -456,7 +466,7 @@ always @(posedge clk_eng or negedge erst_n) begin
         mem_req <= 1'b0; mem_we <= 1'b0;
         mem_addr <= 22'd0; mem_wdata <= 8'd0;
         mem_inflight <= 1'b0;
-        lb_v <= 128'd0; lb_pfb <= 128'd0;
+        lb_v <= 256'd0; lb_pfb <= 256'd0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
         ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
         fill_pend <= 1'b0; fill_tag <= 21'd0; fill_is_pf <= 1'b0;
@@ -501,10 +511,10 @@ always @(posedge clk_eng or negedge erst_n) begin
         end
         if (fill_pend) begin
             fill_pend <= 1'b0;
-            lb_word[{fill_slot,fill_tag[1:0]}] <= mem_rword;  // asentado (_96)
-            lb_tagA[{fill_slot,fill_tag[1:0]}] <= fill_tag[20:2];
-            lb_v[{fill_slot,fill_tag[1:0]}]    <= 1'b1;
-            lb_pfb[{fill_slot,fill_tag[1:0]}]  <= fill_is_pf;
+            lb_word[{fill_slot,fill_tag[2:0]}] <= mem_rword;  // asentado (_96)
+            lb_tagA[{fill_slot,fill_tag[2:0]}] <= fill_tag[20:3];
+            lb_v[{fill_slot,fill_tag[2:0]}]    <= 1'b1;
+            lb_pfb[{fill_slot,fill_tag[2:0]}]  <= fill_is_pf;
         end
         if (lb_fast) begin
             // hit del ciclo anterior: lb_byte ya es valido -> soltar el CE.
@@ -514,21 +524,19 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_inflight <= 1'b0;
         end
         if (rd_edge) begin
-            if (lb_v[{e_slot,e_addr22[2:1]}] &&
-                (lb_tagA[{e_slot,e_addr22[2:1]}] == e_addr22[21:3])) begin
+            if (lb_v[{e_slot,e_addr22[3:1]}] &&
+                (lb_tagA[{e_slot,e_addr22[3:1]}] == e_addr22[21:4])) begin
                 lb_hit  <= 1'b1;                   // HIT: sin transaccion
-                lb_byte <= e_addr22[0] ? lb_word[{e_slot,e_addr22[2:1]}][15:8]
-                                       : lb_word[{e_slot,e_addr22[2:1]}][7:0];
+                lb_byte <= e_addr22[0] ? lb_word[{e_slot,e_addr22[3:1]}][15:8]
+                                       : lb_word[{e_slot,e_addr22[3:1]}][7:0];
                 lb_fast <= 1'b1;                   // completa en 1 ciclo
                 mem_inflight <= 1'b1;              // sujeta la CYCLE1 (_94)
-                if (lb_pfb[{e_slot,e_addr22[2:1]}]) begin  // OBL etiquetado
-                    lb_pfb[{e_slot,e_addr22[2:1]}] <= 1'b0;
+                if (lb_pfb[{e_slot,e_addr22[3:1]}]) begin  // OBL etiquetado
+                    lb_pfb[{e_slot,e_addr22[3:1]}] <= 1'b0;
                     if (!pfq_full) begin
-                        // distancia +2: el motor toca W y W+1 en el MISMO
-                        // tick (interpolacion, 213ns entre lecturas) — un
-                        // pf a +1 llega tarde y duplica el fetch; +2 es la
-                        // palabra del tick SIGUIENTE (22us de margen)
-                        pfq[pfq_wp] <= {e_slot, e_addr22[21:1] + 21'd2};
+                        // _112: la proxima palabra segun el STRIDE del slot
+                        pfq[pfq_wp] <= {e_slot, e_addr22[21:1]
+                                        + {18'd0, eff_stride}};
                         pfq_wp <= pfq_wp + 3'd1;
                     end
                 end
@@ -540,8 +548,21 @@ always @(posedge clk_eng or negedge erst_n) begin
                 eng_pend_addr <= e_addr22;
                 eng_pend_slot <= e_slot;
                 mem_inflight  <= 1'b1;  // congela la CYCLE1_CE hasta el done
-                if (!pfq_full) begin    // _107b: OBL encolado en el miss (+2)
-                    pfq[pfq_wp] <= {e_slot, e_addr22[21:1] + 21'd2};
+                // _112: stride del slot = salto entre misses consecutivos
+                // (clamp 1..4 palabras; saltos grandes = cambio de region
+                //  -> vuelve a 2, el caso 12-bit paso 1)
+                begin : strided
+                    reg [20:0] dw;
+                    dw = e_addr22[21:1] - sl_last[e_slot];
+                    if (dw != 21'd0 && dw <= 21'd4)
+                        sl_stride[e_slot] <= dw[2:0];
+                    else if (dw > 21'd8)
+                        sl_stride[e_slot] <= 3'd2;
+                    sl_last[e_slot] <= e_addr22[21:1];
+                end
+                if (!pfq_full) begin    // pf al stride del slot
+                    pfq[pfq_wp] <= {e_slot, e_addr22[21:1]
+                                    + {18'd0, eff_stride}};
                     pfq_wp <= pfq_wp + 3'd1;
                 end
             end

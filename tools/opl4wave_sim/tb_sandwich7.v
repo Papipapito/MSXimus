@@ -184,6 +184,26 @@ initial begin
     end
 end
 
+// ---- _112: tormenta de RETRIGGERS (+retrig=1): cada ~1.2ms re-dispara
+// la cabecera de un slot rotatorio (como percusion rapida / sonyc):
+// cada note-on carga 12 bytes = 6 palabras — el patron que trituraba
+// la ventana de 4 palabras en placa (telemetria seq 183-194).
+integer RETRIG = 0, rslot = 0;
+initial begin
+    if (!$value$plusargs("retrig=%d", RETRIG)) RETRIG = 0;
+    if (RETRIG) begin
+        wait (umem.RstSeq === 5'b11111);
+        #900000;
+        forever begin
+            wreg(8'h68 + rslot[7:0], 8'h00);              // key off
+            wreg(8'h08 + rslot[7:0], 8'd44 + rslot[7:0]); // re-dispara header
+            wreg(8'h68 + rslot[7:0], 8'h80);              // key on
+            rslot = (rslot + 1) % NSLOTS;
+            #1200000;
+        end
+    end
+end
+
 // ---- trafico Z80 de fondo (realista: 1 acceso cada ~0.4-0.9us) ----
 integer CPUON = 0;
 reg [7:0] cpu_rd;
