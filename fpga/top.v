@@ -16,7 +16,7 @@
 `define VIDEO720
 `define ENABLE_WIFI       // F1 (_73): WiFi UNAPI por el BL616 ONBOARD (UART en V14/U15, ver uwifi)
 //`define WIFI_PMOD_TEST  // (_77diag) UART del WiFi al PMOD1 — apagado
-`define WIFI_TAP_BL616TX  // _78diag: enlace ONBOARD real + espejo del TX del BL616 (V14) a E22 para pinchar
+//`define WIFI_TAP_BL616TX  // _78diag (APAGADO en _111c: llevaba desde la _78 robandole E22 a todo; la telemetria _111 nunca salio por su culpa)
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
 `define ENABLE_Y8950        // F2 (_79): MSX-Audio (Y8950) FM via jtopl2 (core ya vendido en fpga/jtopl/), puertos C0/C1. VALIDADO EN HW (juego OK)
 `define ENABLE_Y8950_ADPCM  // F2 (_80): ADPCM-B del Y8950 — y8950_adpcm.v (glue openMSX-exacto) + decoder jt10_adpcmb + RAM samples 32KB BSRAM (NMS-1205 de serie). VALIDADO HW+VGMPlay
