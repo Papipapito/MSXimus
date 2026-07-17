@@ -73,6 +73,52 @@ int main(int argc, char **argv) {
     dut->ic_n = 1;
     ticks(4096);
 
+    // === modo VGM (_113d): ./Vopl3 vgm <fichero> — reproduce el volcado de
+    // escrituras de un VGM YMF262 real (bank reg val espera_en_muestras) y
+    // mide el RMS de salida por bloques de 0.1s. Para el caso "OPL3 Demo
+    // muda en VGMPlay": si aqui TAMBIEN calla, el bug es del core/wrapper;
+    // si suena, el problema esta en el camino MSX (VGMPlay/mixer/status).
+    if (argc > 2 && argv[1][0] == 'v') {
+        FILE *f = fopen(argv[2], "r");
+        if (!f) { printf("*** no puedo abrir %s ***\n", argv[2]); return 1; }
+        int bank, reg, val, wait; long nsamp = 0; double acc = 0; int blk = 0;
+        int sv = dut->sample_valid; double peak_rms = 0;
+        while (fscanf(f, "%d %d %d %d", &bank, &reg, &val, &wait) == 4) {
+            while (wait > 0) {
+                tick();
+                if (dut->sample_valid && !sv) {
+                    wait--; nsamp++;
+                    double s = (double)(int16_t)dut->sample_l;
+                    acc += s * s;
+                    if (++blk == 4410) {
+                        double rms = sqrt(acc / 4410);
+                        if (rms > peak_rms) peak_rms = rms;
+                        printf("t=%4.1fs rms=%6.0f\n", nsamp / 44100.0, rms);
+                        acc = 0; blk = 0;
+                    }
+                }
+                sv = dut->sample_valid;
+            }
+            wr((bank << 8) | reg, (uint8_t)val);
+        }
+        fclose(f);
+        for (int i = 0; i < 44100; ) {   // cola de 1s
+            tick();
+            if (dut->sample_valid && !sv) {
+                i++; double s = (double)(int16_t)dut->sample_l; acc += s * s;
+                if (++blk == 4410) {
+                    double rms = sqrt(acc / 4410);
+                    if (rms > peak_rms) peak_rms = rms;
+                    printf("cola   rms=%6.0f\n", rms); acc = 0; blk = 0;
+                }
+            }
+            sv = dut->sample_valid;
+        }
+        printf(peak_rms > 500 ? "*** VGM OPL3: EL CORE SUENA (pico rms=%.0f) ***\n"
+                              : "*** VGM OPL3: SILENCIO EN EL CORE (pico rms=%.0f) ***\n", peak_rms);
+        return 0;
+    }
+
     // === test 1: OPL3_DetectPort de VGMPlay (Grauw), secuencia exacta ===
     wr(0x04, 0x80);          // reset flags
     wr(0x02, 0xFF);          // T1 = -1 -> 80us

@@ -2988,7 +2988,15 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // _110: atenuacion del reg F8 (MixCalc del motor: >>> 2*codigo). Hasta
     // ahora F8 se ignoraba y el FM entraba siempre a 0dB aunque el software
     // pidiera bajarlo (MBWave/VGMPlay balancean FM vs wave con F8/F9).
-    wire [15:0] opl4fm_term      = $signed(opl4fm_wav) >>> {opl4_mixfm[2:0], 1'b0};
+    // _114 canon: pasos de -3dB = {1,0.75,0.5,0.375,...,MUTE} (openMSX). El
+    // atajo ">>>{code,1'b0}" (-12dB/paso) convertia el reset canon del F8
+    // (3/3 = -8.5dB) en /64: el FM quedaba INAUDIBLE con software que nunca
+    // escribe F8 (VGMPlay reproduciendo VGMs YMF262/OPL3 puros).
+    wire signed [15:0] o4fm_s    = $signed(opl4fm_wav);
+    wire signed [15:0] o4fm_base = opl4_mixfm[0] ? (o4fm_s >>> 1) + (o4fm_s >>> 2)
+                                                 : o4fm_s;
+    wire [15:0] opl4fm_term      = (opl4_mixfm[2:0] == 3'd7) ? 16'd0
+                                 : $signed(o4fm_base) >>> opl4_mixfm[2:1];
 
     // _89: PCM del MoonSound (motor YMF278B). Mono = (L+R)/2 con extension de
     // signo EXPLICITA (leccion _85: las concatenaciones son unsigned) y >>1

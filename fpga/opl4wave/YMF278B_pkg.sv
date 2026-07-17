@@ -356,11 +356,18 @@ package YMF278B_PKG;
 	endfunction
 	
 	function bit signed [15:0] MixCalc(bit signed [15:0] WAVE, bit [2:0] MIX);
-		bit [15:0] TEMP;
-		
-		TEMP = $signed($signed(WAVE)>>>{MIX,1'b0});
-		
-		return TEMP;
+		bit signed [15:0] BASE;
+
+		// _114 canon (openMSX/datasheet): pasos de -3dB aproximados como
+		// {1, 0.75, 0.5, 0.375, 0.25, 0.1875, 0.125, MUTE} = (impar? 0.75 : 1)
+		// >> (MIX/2); 0.75x = (x>>1)+(x>>2), un solo sumador. El atajo
+		// original ">>>{MIX,1'b0}" era -12dB/paso: el reset canon del F8
+		// (0x1B = 3/3, -8.5dB de FM) se convertia en /64 = FM inaudible en
+		// software que nunca escribe F8 (VGMPlay con VGMs YMF262/OPL3).
+		BASE = MIX[0] ? ($signed(WAVE)>>>1) + ($signed(WAVE)>>>2)
+		              : $signed(WAVE);
+
+		return (MIX == 3'd7) ? 16'sd0 : $signed(BASE >>> MIX[2:1]);
 	endfunction
 	
 	function bit signed [15:0] TrimWave(bit signed [17:0] WAVE);

@@ -1343,10 +1343,10 @@ module YMF278B (
 	function signed [15:0] YMF278B_PKG_MixCalc;
 		input reg signed [15:0] WAVE;
 		input reg [2:0] MIX;
-		reg [15:0] TEMP;
+		reg signed [15:0] BASE;
 		begin
-			TEMP = $signed($signed(WAVE) >>> {MIX, 1'b0});
-			YMF278B_PKG_MixCalc = TEMP;
+			BASE = (MIX[0] ? ($signed(WAVE) >>> 1) + ($signed(WAVE) >>> 2) : $signed(WAVE));
+			YMF278B_PKG_MixCalc = (MIX == 3'd7 ? 16'sd0 : $signed(BASE >>> MIX[2:1]));
 		end
 	endfunction
 	assign OUT2_L = YMF278B_PKG_MixCalc(PCM_L, MIXPCM[2:0]) + YMF278B_PKG_MixCalc(OPL3_OUT_A, MIXFM[2:0]);
