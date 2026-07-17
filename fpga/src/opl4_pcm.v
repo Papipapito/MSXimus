@@ -576,9 +576,12 @@ always @(posedge clk_eng or negedge erst_n) begin
                 eng_pend_slot <= e_slot;
                 eng_pend_data <= e_mdo;
                 mem_inflight  <= 1'b1;             // tambien en escritura (_91)
-                lb_v   <= 128'd0;                  // _107c: FLUSH total (una
-                lb_pfb <= 128'd0;                  //  escritura CPU no tiene
+                lb_v   <= 256'd0;                  // _107c: FLUSH total (una
+                lb_pfb <= 256'd0;                  //  escritura CPU no tiene
                                                    //  slot; rancio = fuera)
+                                                   // (_113: literal 128->256;
+                                                   //  cero-extension = mismo
+                                                   //  netlist, solo claridad)
                 fill_pend <= 1'b0;                 // _96: cancelar fill pendiente
                 pfq_rp <= pfq_wp;                  // _107b: vaciar wants rancios
                 if (port_busy && op_is_pf && mem_addr[21:1] == e_addr22[21:1])

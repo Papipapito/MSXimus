@@ -1080,16 +1080,19 @@ void Test5Sostenido()
 {
 	Screen0();
 	Print_DrawTextAt(1, 1,  "TEST 5: TONO SOSTENIDO");
-	Print_DrawTextAt(1, 3,  "1/2: WAVE (piano 303, 10s)");
+	Print_DrawTextAt(1, 3,  "1/2: WAVE (onda 51, 10s)");
 	Print_DrawTextAt(1, 5,  "Escucha: debe ser CONTINUO,");
 	Print_DrawTextAt(1, 6,  "sin vibrato ni pumping.");
 	Opl4Wr1(0x05, 0x03);
 	MoonWr(0xF9, 0x00);
 	MoonWr(0x68, 0x00);
-	MoonWr(0x20, 0x01);                    // fnum=0, WTN8
+	// v10 (_113): la 303 (piano) DECAE por diseno (D1R=2->DL, D2R=4): en HW
+	// sono "un ping" y parecia un fallo. La 51 sostiene DE VERDAD: AR=15,
+	// D2R=0 (sustain infinito), loop de 13875 muestras, sin vibrato.
+	MoonWr(0x20, 0x00);                    // fnum=0, WTN8=0
 	MoonWr(0x38, 0x10);                    // oct=1
 	MoonWr(0x50, 0x01);                    // TL=0, LD
-	MoonWr(0x08, 0x2F);                    // onda 303
+	MoonWr(0x08, 0x33);                    // onda 51 (sostenida)
 	MoonWaitLD();
 	MoonWr(0x68, 0x80);                    // KEY on
 	if (!WaitFramesOrSpace(255)) WaitFramesOrSpace(255);
