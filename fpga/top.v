@@ -28,6 +28,7 @@
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
+//`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
 
 module top
 #(
@@ -1513,6 +1514,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     assign vdp_csw_n = (vdp_io_hit == 1 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 0:1; // VDP write
     assign vdp_csr_n = (vdp_io_hit == 1 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0)? 0:1; // VDP read
 
+`ifndef ENABLE_V9968_VDP
     v9958_top vdp4 (
         .clk (clk_27m),
         .clk_135 (clk_135),           // legado (sin uso con VIDEO720)
@@ -1577,6 +1579,155 @@ assign keyboard_addr = ppi_port_c[3:0];
         .tmds_data_p   (data_p),
         .tmds_data_n   (data_n)
     );
+
+`else  // ==================== ENABLE_V9968_VDP ====================
+    // F1 V9968: el VDP de HRA! (fpga/v9968, parche tag+eco) sustituye al
+    // v9958_top ENTERO. VRAM en la SDRAM compartida via shim (contrato 8
+    // ciclos) + bridge CDC al puerto wv2 de memory.v. Video: puente 800px
+    // msx2hdmi_v9968 (ring BRAM, back-end TMDS intacto). v1: NTSC (la
+    // geometria 50Hz del V9968 esta sin medir; pal_mode=0).
+
+    // ---- reloj maestro 85.909 MHz (27 x 35/11, 0 ppm vs 24x colorburst) ----
+    wire clk_86, pll86_lock;
+    pll_86 pll86_vdp ( .clkout0(clk_86), .lock(pll86_lock), .clkin(clk27_video) );
+
+    reg [3:0] rst86_sync = 4'd0;
+    always @(posedge clk_86) rst86_sync <= {rst86_sync[2:0], bus_reset_n & pll86_lock};
+    wire rst86_n = rst86_sync[3];
+
+    // ---- glue bus T80 -> valid/ready (una transaccion por ciclo I/O) ----
+    wire [2:0] v68_bus_address;
+    wire       v68_ioreq, v68_write, v68_valid, v68_ready;
+    wire [7:0] v68_wdata, v68_rdata;
+    wire       v68_rdata_en;
+    v9968_cpu_glue u_v68glue (
+        .clk_86(clk_86), .rst_n(rst86_n),
+        .csw_n(vdp_csw_n), .csr_n(vdp_csr_n),
+        .mode(bus_addr[1:0]), .cdo(cpu_dout), .cdi_r(vdp_dout),
+        .bus_address(v68_bus_address), .bus_ioreq(v68_ioreq),
+        .bus_write(v68_write), .bus_valid(v68_valid), .bus_ready(v68_ready),
+        .bus_wdata(v68_wdata), .bus_rdata(v68_rdata), .bus_rdata_en(v68_rdata_en)
+    );
+
+    // ---- el V9968 ----
+    wire [17:2] v68_vram_address;
+    wire        v68_vram_write, v68_vram_valid, v68_vram_refresh;
+    wire [31:0] v68_vram_wdata, v68_vram_rdata;
+    wire [3:0]  v68_vram_mask;
+    wire [4:0]  v68_vram_tag, v68_vram_rtag;
+    wire        v68_vram_rdata_en;
+    wire        v68_hs, v68_vs, v68_de;
+    wire [7:0]  v68_r8, v68_g8, v68_b8;
+    vdp u_v9968 (
+        .reset_n(rst86_n), .clk(clk_86), .initial_busy(1'b0),
+        .bus_address(v68_bus_address), .bus_ioreq(v68_ioreq), .bus_write(v68_write),
+        .bus_valid(v68_valid), .bus_ready(v68_ready),
+        .bus_wdata(v68_wdata), .bus_rdata(v68_rdata), .bus_rdata_en(v68_rdata_en),
+        .int_n(vdp_int),
+        .vram_address(v68_vram_address), .vram_write(v68_vram_write),
+        .vram_valid(v68_vram_valid), .vram_wdata(v68_vram_wdata),
+        .vram_wdata_mask(v68_vram_mask),
+        .vram_rdata(v68_vram_rdata), .vram_rdata_en(v68_vram_rdata_en),
+        .vram_tag(v68_vram_tag), .vram_rtag(v68_vram_rtag),
+        .vram_refresh(v68_vram_refresh),
+        .display_hs(v68_hs), .display_vs(v68_vs), .display_en(v68_de),
+        .display_r(v68_r8), .display_g(v68_g8), .display_b(v68_b8),
+        .force_highspeed(1'b0), .button(2'b00),
+        .pulse0(), .pulse1(), .pulse2(), .pulse3(),
+        .pulse4(), .pulse5(), .pulse6(), .pulse7()
+    );
+
+    // ---- shim VRAM (contrato 8 ciclos) + bridge CDC 85.9<->108 ----
+    wire        v68bk_req, v68bk_we, v68bk_done_t;
+    wire [21:0] v68bk_addr;
+    wire [7:0]  v68bk_wdata;
+    wire [15:0] v68bk_rword;
+    v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_v68shim (
+        .clk_vdp(clk_86), .rst_n(rst86_n),
+        .vram_address(v68_vram_address), .vram_write(v68_vram_write),
+        .vram_valid(v68_vram_valid), .vram_wdata(v68_vram_wdata),
+        .vram_wdata_mask(v68_vram_mask), .vram_tag(v68_vram_tag),
+        .vram_rdata(v68_vram_rdata), .vram_rdata_en(v68_vram_rdata_en),
+        .vram_rtag(v68_vram_rtag),
+        .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
+        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .diag()
+    );
+    v9968_sdram_bridge u_v68bridge (
+        .clk_vdp(clk_86), .rst_n(rst86_n),
+        .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
+        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .clk_108m(clk_108m),
+        .wv2_req(wv2_req), .wv2_we(wv2_we), .wv2_addr(wv2_addr),
+        .wv2_wdata(wv2_wdata), .wv2_dout(wv2_dout), .wv2_done(wv2_done)
+    );
+
+    // ---- puente de video 800px -> HDMI 720p (back-end TMDS intacto) ----
+    // ce de pixel: el V9968 emite 1 pixel cada 2 ciclos de 85.9; un toggle
+    // libre muestrea cada pixel exactamente una vez (la fase da igual: el
+    // dato es estable 2 ciclos y la captura se auto-alinea con HS).
+    reg ce86 = 1'b0;
+    always @(posedge clk_86) ce86 <= ~ce86;
+
+    msx2hdmi_v9968 u_msx2hdmi68 (
+        .clk          (clk_86),
+        .resetn       (rst86_n),
+        .ce           (ce86),
+        .r            (v68_r8[7:2]),
+        .g            (v68_g8[7:2]),
+        .b            (v68_b8[7:2]),
+        .hs_n         (v68_hs),          // ACTIVO ALTO (convencion V9968)
+        .vs_n         (v68_vs),
+        .blank        (~v68_de),
+        .pal_mode     (1'b0),            // v1: solo back-end NTSC (720p60)
+`ifdef ENABLE_CONFIG
+        .aspect_wide  (config_enable_16_9),
+        .scanlines    (config_enable_scanlines),
+`else
+        .aspect_wide  (1'b0),
+        .scanlines    (1'b0),
+`endif
+        .audio_l      (audio_sample),
+        .audio_r      (audio_sample_r),
+        .clk_pixel    (clk_hdmi),
+        .clk_5x_pixel (clk_hdmi5),
+        .tmds_clk_n   (clk_n),
+        .tmds_clk_p   (clk_p),
+        .tmds_d_n     (data_n),
+        .tmds_d_p     (data_p),
+        .dbg_vs_tick  (),
+        .dbg_wr_act   (),
+        .dbg_nonblack (),
+        .dbg_lock_tgl (),
+        .dbg_hdmi_rst (),
+        .dbg_rd_act   ()
+    );
+
+    // ---- dh/dl: divisor LIBRE clk_108m ÷8/÷16 — el patron EXACTO con el
+    // que sdr16_tb valida memory_ctrl (T1-T10, W1-W4). Slots CPU a 6.75MHz:
+    // mas huecos vacios para wave+wv2 que con el VDP viejo.
+    reg [3:0] v68_phc = 4'd0;
+    always @(posedge clk_108m) v68_phc <= v68_phc + 1'b1;
+    assign VideoDHClk = ~v68_phc[2];
+    assign VideoDLClk = ~v68_phc[3];
+
+    // VRAM del VDP viejo: inactiva (el slot VDP de la SDRAM queda vacio)
+    assign WeVdp_n = 1'b1;
+    assign VdpAdr  = 17'd0;
+    assign VrmDbo  = 8'd0;
+
+    // sondas de video del bring-up: pll86_lock + contador de frames (vs)
+    reg [2:0] v68_frm = 3'd0;
+    reg       v68_vs_d = 1'b0;
+    always @(posedge clk_86) begin
+        v68_vs_d <= v68_vs;
+        if (v68_vs & ~v68_vs_d) v68_frm <= v68_frm + 1'b1;
+    end
+    assign dbg_video_w = {1'b0, 1'b0, 1'b0, v68_frm[2], pll86_lock, 1'b0};
+`ifdef VIDEO720
+    assign dbg_bridge_w = 6'd0;
+`endif
+`endif // ENABLE_V9968_VDP
 
 `ifdef ENABLE_MAPPER
     //mapper
@@ -1741,6 +1892,17 @@ wire        wv_req, wv_we, wv_done;
 wire [21:0] wv_addr;
 wire [7:0]  wv_wdata;
 wire [15:0] wv_dout;
+// V9968: puerto wv2 (VRAM del V9968 via bridge CDC); atado a 0 sin el define
+wire        wv2_req, wv2_we, wv2_done;
+wire [21:0] wv2_addr;
+wire [7:0]  wv2_wdata;
+wire [15:0] wv2_dout;
+`ifndef ENABLE_V9968_VDP
+assign wv2_req   = 1'b0;
+assign wv2_we    = 1'b0;
+assign wv2_addr  = 22'd0;
+assign wv2_wdata = 8'd0;
+`endif
 
 memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .clk_27m(clk_54m),
@@ -1769,6 +1931,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .wv_wdata(wv_wdata),
     .wv_dout(wv_dout),
     .wv_done(wv_done),
+
+    // V9968: puerto wv2 (mismos turnos vacios, prioridad wave>wv2)
+    .wv2_req(wv2_req),
+    .wv2_we(wv2_we),
+    .wv2_addr(wv2_addr),
+    .wv2_wdata(wv2_wdata),
+    .wv2_dout(wv2_dout),
+    .wv2_done(wv2_done),
 
     .O_sdram_clk(O_sdram_clk),
     .O_sdram_cke(O_sdram_cke),

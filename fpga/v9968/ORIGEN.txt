@@ -1,0 +1,7 @@
+Core V9968 de Takayuki Hara (HRA!) — hra1129/V9968_Cartridge
+Revision fijada: 5978d18 (2026-07-08)
+Licencia: BSD-like no comercial de HRA! (cabeceras de cada fichero) —
+redistribucion con avisos intactos; publicacion gratuita OK, venta NO.
+Ficheros parcheados para el MSXimus (marcados "MSXimus:" en el codigo):
+  - vdp_vram_interface.v  (routing de respuestas por TAG FIFO, latencia libre)
+El resto, INTACTO. Regen/diff contra upstream: proyectosAI/msx/V9968_Cartridge
