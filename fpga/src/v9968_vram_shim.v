@@ -109,6 +109,10 @@ reg [15:0] wrk_addr1;
 reg [31:0] wrk_data1;
 reg [3:0]  wrk_mask1;                    // DQM (0 = escribir byte)
 
+// OBL diferido (hit de ventana en ciclo 0 -> chequeo+encolado en ciclo 1)
+reg        obl_pend;
+reg [15:0] obl_w;
+
 // escritura muxeada de la cache (1 solo write-site por array): el FILL
 // (completacion rq de sprite) espera en fill_* si el ciclo lo usa un update
 reg        fill_pend;
@@ -225,6 +229,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         bg_miss <= 0;
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
+        obl_pend <= 0; obl_w <= 0;
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0;
         scq_v <= 0;
         for (pi = 0; pi < 7; pi = pi + 1) pipe[pi] <= 38'd0;
@@ -257,6 +262,14 @@ always @(posedge clk_vdp or negedge rst_n) begin
         else vram_rdata_en <= 1'b0;
         for (pi = 6; pi > 0; pi = pi - 1) pipe[pi] <= pipe[pi-1];
         pipe[0] <= 38'd0;
+
+        // ---------- OBL diferido: chequeo de ventana + encolado (ciclo 1) ----
+        obl_pend <= 1'b0;
+        if (obl_pend && !pfq_full &&
+            !(pw_v[obl_w[5:0]] && pw_tagA[obl_w[5:0]] == obl_w[15:6])) begin
+            pfq[pfq_wp] <= obl_w;
+            pfq_wp <= pfq_wp + 2'd1;
+        end
 
         // ---------- etapa 1 del lookup en cache (dato BSRAM ya en scq_*) ----
         // Sirve a SPRITES y al FONDO con miss de ventana (v3). HIT: inyecta
@@ -309,13 +322,13 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     pw_tagA[vram_address[7:2]] == vram_address[17:8]) begin
                     // HIT: agenda respuesta a 8 ciclos
                     pipe[0] <= {1'b1, vram_tag, pw_data[vram_address[7:2]]};
-                    // OBL: prefetch de la siguiente palabra si no esta
-                    if (!pfq_full &&
-                        !(pw_v[nxt_w[5:0]] && pw_tagA[nxt_w[5:0]] == nxt_w[15:6]))
-                    begin
-                        pfq[pfq_wp] <= nxt_w;
-                        pfq_wp <= pfq_wp + 2'd1;
-                    end
+                    // OBL DIFERIDO al ciclo 1 (timing _118: sumador + chequeo
+                    // de ventana 64:1 + escritura pfq en el ciclo 0 era el
+                    // peor camino, -1.044; desde registro cierra). El fetch
+                    // siguiente llega a >=8 ciclos: un ciclo de retardo del
+                    // prefetch es invisible.
+                    obl_pend <= 1'b1;
+                    obl_w    <= nxt_w;
                 end
                 else begin
                     // MISS de ventana (v3): prueba la CACHE — en modos de
