@@ -71,10 +71,11 @@ always @(posedge clk) begin
     end
     else if (p_pend) begin
         p_cnt <= p_cnt + 1;
-        if (p_cnt == 5) begin   // rdata_en al 7o ciclo = latencia EXACTA del
-                                 // ip_sdram de HRA (ready->activate->2nop->
-                                 // read->nop->fetch->finish); responder ANTES
-                                 // rompe el muestreo de fase fija del consumidor
+        if (p_cnt == 6) begin   // rdata_en al 8o ciclo = latencia EXACTA del
+                                 // ip_sdram de HRA, MEDIDA en tb_screen5b con
+                                 // el modelo Micron: min=8 max=8 constante.
+                                 // (4 y 7 renderizaban NEGRO: el consumidor
+                                 // muestrea en fase fija => spec del shim = 8)
             vram_rdata    <= vram_mem[p_addr];
             vram_rdata_en <= 1'b1;
             p_pend        <= 1'b0;
@@ -122,7 +123,7 @@ always @(posedge clk) begin
             $display("FRAME SCREEN5 VOLCADO (lecturas VRAM/frame ~%0d, escrituras %0d)",
                      rd_count / (vs_count > 0 ? vs_count : 1), wr_count);
         end
-        else if (dump_state == 0 && vs_count == 16) begin
+        else if (dump_state == 0 && vs_count == 12) begin
             fd = $fopen("s5_frame.txt", "w");
             dump_state <= 1;
         end
@@ -176,12 +177,16 @@ initial begin
     vdp_reg(6'd14, 8'h00);
     bus_wr(3'd1, 8'h00);          // addr low
     bus_wr(3'd1, 8'h40);          // addr high | write
+    // cadencia Z80 REAL (~OTIR 6us/byte): a 233ns desbordaba el buffer de
+    // escritura CPU del chip (1.5M escrituras fantasma, VRAM basura roja) —
+    // en el MSX real el Z80 ES el limite, en el TB hay que imitarlo.
     for (y = 0; y < 212; y = y + 1)
         for (x = 0; x < 128; x = x + 1) begin : fill_p0
             logic [3:0] c0, c1;
             c0 = ((x*2) >> 4) ^ (y >> 4);
             c1 = ((x*2+1) >> 4) ^ (y >> 4);
             bus_wr(3'd0, {c0, c1});
+            repeat (150) @(posedge clk);   // ~2us/byte total
         end
     $display("VRAM cargada por puerto 0 (27136 bytes) en vs=%0d", vs_count);
     $display("DIAG vram_mem[0]=%08x [1]=%08x [2]=%08x [3]=%08x",
@@ -193,7 +198,7 @@ initial begin
 end
 
 initial begin
-    #380000000;   // 380ms guardia (frame 16)
+    #420000000;   // 420ms guardia
     $display("TIMEOUT vs=%0d dump=%0d", vs_count, dump_state);
     $finish;
 end
