@@ -51,7 +51,7 @@ logic [31:0] vram_mem [0:65535];
 logic [15:0] p_addr;
 logic [2:0]  p_cnt = 0;
 logic        p_pend = 0;
-integer      rd_count = 0, wr_count = 0;
+integer      rd_count = 0, wr_count = 0, diag_rd = 0;
 always @(posedge clk) begin
     vram_rdata_en <= 1'b0;
     if (vram_valid && vram_write) begin
@@ -63,11 +63,18 @@ always @(posedge clk) begin
     end
     else if (vram_valid && !vram_write && !p_pend) begin
         rd_count <= rd_count + 1;
+        if (dump_state == 1 && diag_rd < 40) begin
+            $display("DIAG fetch[%0d] palabra=%05x", diag_rd, vram_address);
+            diag_rd <= diag_rd + 1;
+        end
         p_pend <= 1'b1; p_addr <= vram_address; p_cnt <= 0;
     end
     else if (p_pend) begin
         p_cnt <= p_cnt + 1;
-        if (p_cnt == 2) begin
+        if (p_cnt == 5) begin   // rdata_en al 7o ciclo = latencia EXACTA del
+                                 // ip_sdram de HRA (ready->activate->2nop->
+                                 // read->nop->fetch->finish); responder ANTES
+                                 // rompe el muestreo de fase fija del consumidor
             vram_rdata    <= vram_mem[p_addr];
             vram_rdata_en <= 1'b1;
             p_pend        <= 1'b0;
@@ -115,7 +122,7 @@ always @(posedge clk) begin
             $display("FRAME SCREEN5 VOLCADO (lecturas VRAM/frame ~%0d, escrituras %0d)",
                      rd_count / (vs_count > 0 ? vs_count : 1), wr_count);
         end
-        else if (dump_state == 0 && vs_count == 6) begin
+        else if (dump_state == 0 && vs_count == 16) begin
             fd = $fopen("s5_frame.txt", "w");
             dump_state <= 1;
         end
@@ -132,20 +139,6 @@ initial begin
     // Patron: franjas verticales de 16px con los 16 colores + degradado
     // vertical (cambia el color base cada 16 lineas) => tablero colorido.
     for (x = 0; x < 65536; x = x + 1) vram_mem[x] = 32'h00000000;
-    for (y = 0; y < 212; y = y + 1)
-        for (x = 0; x < 128; x = x + 1) begin : fill
-            logic [3:0] c0, c1;
-            logic [16:0] baddr;
-            c0 = ((x*2) >> 4) ^ (y >> 4);
-            c1 = ((x*2+1) >> 4) ^ (y >> 4);
-            baddr = y * 128 + x;
-            case (baddr[1:0])
-                2'd0: vram_mem[baddr >> 2][ 7: 0] = {c0, c1};
-                2'd1: vram_mem[baddr >> 2][15: 8] = {c0, c1};
-                2'd2: vram_mem[baddr >> 2][23:16] = {c0, c1};
-                2'd3: vram_mem[baddr >> 2][31:24] = {c0, c1};
-            endcase
-        end
 
     repeat (50) @(posedge clk);
     reset_n = 1;
@@ -167,11 +160,32 @@ initial begin
     vdp_pal(4'd13, 3'd0, 3'd3, 3'd3);
     vdp_pal(4'd14, 3'd3, 3'd3, 3'd3);
     vdp_pal(4'd15, 3'd7, 3'd4, 3'd0);
-    // SCREEN 5 (G4): R#0=0x06, R#2 tabla en 0x0000 (0x1F), borde gris
-    vdp_reg(6'd0, 8'h06);
-    vdp_reg(6'd2, 8'h1F);
-    vdp_reg(6'd7, 8'h0E);
-    vdp_reg(6'd1, 8'h60);        // BL=1 IE0=1
+    // SCREEN 5 (G4) — receta EXACTA de su test_top_SCREEN5_HMMV (tb.sv:446):
+    // R#0=06, R#1=40, R#2=1F, R#8=2A (¡bit VR! sin el, el direccionamiento
+    // VRAM del V9958 se revuelve — mi 1ª iteracion salia todo borde),
+    // R#20=01 (registro de extension V9968 que su test tambien pone).
+    vdp_reg(6'd0,  8'h06);
+    vdp_reg(6'd1,  8'h40);
+    vdp_reg(6'd2,  8'h1F);
+    vdp_reg(6'd8,  8'h2A);
+    vdp_reg(6'd20, 8'h01);
+    vdp_reg(6'd7,  8'h0F);  // borde NARANJA (15): distingue borde vs patron
+    // VRAM por el PUERTO 0 (el camino canonico del chip; la precarga directa
+    // del array no casaba con el mapeo interno y el area salia negra):
+    // R#14=0 + puerto1 addr(bit14..8 con bit6=write) y chorro al puerto 0.
+    vdp_reg(6'd14, 8'h00);
+    bus_wr(3'd1, 8'h00);          // addr low
+    bus_wr(3'd1, 8'h40);          // addr high | write
+    for (y = 0; y < 212; y = y + 1)
+        for (x = 0; x < 128; x = x + 1) begin : fill_p0
+            logic [3:0] c0, c1;
+            c0 = ((x*2) >> 4) ^ (y >> 4);
+            c1 = ((x*2+1) >> 4) ^ (y >> 4);
+            bus_wr(3'd0, {c0, c1});
+        end
+    $display("VRAM cargada por puerto 0 (27136 bytes) en vs=%0d", vs_count);
+    $display("DIAG vram_mem[0]=%08x [1]=%08x [2]=%08x [3]=%08x",
+             vram_mem[0], vram_mem[1], vram_mem[2], vram_mem[3]);
     wait (dump_state == 2);
     #1000;
     $display("*** SCREEN5: RENDER COMPLETO (vs=%0d) ***", vs_count);
@@ -179,7 +193,7 @@ initial begin
 end
 
 initial begin
-    #200000000;   // 200ms guardia
+    #380000000;   // 380ms guardia (frame 16)
     $display("TIMEOUT vs=%0d dump=%0d", vs_count, dump_state);
     $finish;
 end
