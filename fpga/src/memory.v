@@ -73,6 +73,17 @@ module memory_ctrl #(
     output reg  [15:0] wv_dout,       // PALABRA leida (el shim elige byte)
     output reg         wv_done,       // pulso 1 ciclo = operacion completada
 
+    // ---- V9968: puerto WV2 (VRAM del V9968 via v9968_sdram_bridge) ----
+    // Mismo contrato y aislamiento que el puerto wave (filas 4096+); tambien
+    // roba SOLO turnos de CPU vacios, con PRIORIDAD para la wave del OPL4
+    // (audio, poco trafico) — wv2 toma los huecos restantes.
+    input  wire        wv2_req,       // nivel: peticion pendiente
+    input  wire        wv2_we,
+    input  wire [21:0] wv2_addr,      // direccion de BYTE (ventana de 4MB wave)
+    input  wire [7:0]  wv2_wdata,
+    output reg  [15:0] wv2_dout,      // PALABRA leida (el shim elige byte)
+    output reg         wv2_done,      // pulso 1 ciclo = operacion completada
+
     // SDRAM externa (módulo Tang SDRAM, W9825G6KH 16M×16) por GPIO
     output wire O_sdram_clk,
     output wire O_sdram_cke,
@@ -302,7 +313,7 @@ module memory_ctrl #(
             if( video_dlclk == 0 ) begin
                 // _104: si la fase 0 le dio el turno a la wave (SdrWav), el
                 // flag de escritura es el suyo; si no, el del CPU.
-                SdrSta[0] <= SdrWav ? wv_we : sdram_write;    //-- for cpu/wave
+                SdrSta[0] <= SdrWav ? wv_we : SdrWv2 ? wv2_we : sdram_write;    //-- for cpu/wave/wv2
             end
             else begin
                 SdrSta[0] <= vram_write;       //-- for vdp
@@ -318,6 +329,11 @@ module memory_ctrl #(
     reg SdrWav = 0;
     reg wv_inflight = 0;
     wire wav_take = (enable_sdram == 0 && wv_req == 1 && wv_inflight == 0);
+    // V9968: wv2 solo toma el hueco si la wave NO lo quiere este turno
+    reg SdrWv2 = 0;
+    reg wv2_inflight = 0;
+    wire wv2_take = (enable_sdram == 0 && wv2_req == 1 && wv2_inflight == 0
+                     && wav_take == 0);
     always @ ( posedge clk_108m ) begin
         if( ff_sdr_seq == 3'b000 ) begin
             SdrWav <= (SdrSta[2] == 1) && (video_dlclk == 0) && wav_take
@@ -325,11 +341,17 @@ module memory_ctrl #(
             if( (SdrSta[2] == 1) && (video_dlclk == 0) && wav_take
                 && (RstSeq[4:3] == 2'b11) )
                 wv_inflight <= 1'b1;
+            SdrWv2 <= (SdrSta[2] == 1) && (video_dlclk == 0) && wv2_take
+                      && (RstSeq[4:3] == 2'b11);
+            if( (SdrSta[2] == 1) && (video_dlclk == 0) && wv2_take
+                && (RstSeq[4:3] == 2'b11) )
+                wv2_inflight <= 1'b1;
         end
         //-- 4 fases: inflight se suelta cuando el shim BAJA wv_req (tras ver
         //-- su wv_done) — sin esto, la siguiente fase 0 podia re-conceder la
         //-- MISMA operacion antes de que el shim retirase la peticion.
         if( wv_inflight == 1 && wv_req == 0 ) wv_inflight <= 1'b0;
+        if( wv2_inflight == 1 && wv2_req == 0 ) wv2_inflight <= 1'b0;
     end
 
     // (_104: el latch de palabra wave va mas abajo, tras declarar
@@ -386,9 +408,9 @@ module memory_ctrl #(
                     end
                     else begin
                         if( video_dlclk == 0 ) begin
-                            //-- cpu/wave write: lane por addr[0] (0=bajo, 1=alto)
-                            SdrUdq <= ~( SdrWav ? wv_addr[0] : sdram_addr[0] );
-                            SdrLdq <=  ( SdrWav ? wv_addr[0] : sdram_addr[0] );
+                            //-- cpu/wave/wv2 write: lane por addr[0] (0=bajo, 1=alto)
+                            SdrUdq <= ~( SdrWav ? wv_addr[0] : SdrWv2 ? wv2_addr[0] : sdram_addr[0] );
+                            SdrLdq <=  ( SdrWav ? wv_addr[0] : SdrWv2 ? wv2_addr[0] : sdram_addr[0] );
                         end
                         else begin
                             //-- vdp write: lane por vram_addr[16]
@@ -423,6 +445,11 @@ module memory_ctrl #(
                             SdrAdr <= { 1'b1, 2'b00, wv_addr[21:12] };
                             SdrBa  <= wv_addr[11:10];
                         end
+                        else if( wv2_take ) begin
+                            //-- V9968: misma ventana aislada de filas 4096+
+                            SdrAdr <= { 1'b1, 2'b00, wv2_addr[21:12] };
+                            SdrBa  <= wv2_addr[11:10];
+                        end
                         else begin
                             SdrAdr <= { 2'b00, sdram_addr[12:2] };   //-- cpu read/write (fila = mismos bits que el original)
                             SdrBa  <= sdram_addr[22:21];                         //-- bank A+B+C+D
@@ -442,6 +469,9 @@ module memory_ctrl #(
                     if( SdrWav ) begin
                         //-- _104: wave col = wv[9:1] (9 bits)
                         SdrAdr[8:0] <= wv_addr[9:1];
+                    end
+                    else if( SdrWv2 ) begin
+                        SdrAdr[8:0] <= wv2_addr[9:1];
                     end
                     else begin
                         //-- cpu: col = {addr[20:13], addr[1]} — el bit addr[1] (antes
@@ -467,8 +497,10 @@ module memory_ctrl #(
                 else begin
                     dq_oe <= 1;
                     if( video_dlclk == 0 ) begin
-                        //-- "101"(cpu/wave write): byte duplicado, DQM elige lane
-                        SdrDat <= SdrWav ? { wv_wdata, wv_wdata } : { ram_din, ram_din };
+                        //-- "101"(cpu/wave/wv2 write): byte duplicado, DQM elige lane
+                        SdrDat <= SdrWav ? { wv_wdata, wv_wdata } :
+                                  SdrWv2 ? { wv2_wdata, wv2_wdata } :
+                                           { ram_din, ram_din };
                     end
                     else begin
                         SdrDat <= { vram_din, vram_din };          //-- "111"(vdp write)
@@ -507,8 +539,8 @@ module memory_ctrl #(
     always @ ( posedge clk_108m ) begin
         if( ff_sdr_seq_5 == 1 || ff_sdr_seq_6 == 1 ) begin
             //-- _104: un burst WAVE usa el encoding "read cpu" (100) — el
-            //-- guardian !SdrWav evita que pise RamDbi (contrato CPU intacto)
-            if( SdrSta_4 == 1 && SdrWav == 0 ) begin         //-- read cpu
+            //-- guardian !SdrWav/!SdrWv2 evita que pise RamDbi (contrato CPU intacto)
+            if( SdrSta_4 == 1 && SdrWav == 0 && SdrWv2 == 0 ) begin         //-- read cpu
                 if( sdram_addr[0] == 1'b0 )
                     RamDbi <= dq_in[7:0];
                 else
@@ -526,6 +558,15 @@ module memory_ctrl #(
             wv_dout <= dq_in;
         if( ff_sdr_seq == 3'b110 && SdrWav == 1 )
             wv_done <= 1'b1;
+    end
+
+    //-- V9968: latch de PALABRA + pulso de completado del puerto wv2
+    always @ ( posedge clk_108m ) begin
+        wv2_done <= 1'b0;
+        if( (ff_sdr_seq_5 == 1 || ff_sdr_seq_6 == 1) && SdrWv2 == 1 && SdrSta[0] == 0 )
+            wv2_dout <= dq_in;
+        if( ff_sdr_seq == 3'b110 && SdrWv2 == 1 )
+            wv2_done <= 1'b1;
     end
 
 

@@ -60,6 +60,13 @@ module memory_tb;
     wire [15:0] wv_dout;
     wire        wv_done;
 
+    // V9968: puerto WV2
+    reg         wv2_req = 0, wv2_we = 0;
+    reg  [21:0] wv2_addr = 0;
+    reg  [7:0]  wv2_wdata = 0;
+    wire [15:0] wv2_dout;
+    wire        wv2_done;
+
     wire        sd_clk, sd_cke, sd_cs_n, sd_cas_n, sd_ras_n, sd_wen_n;
     wire [15:0] sd_dq;
     wire [12:0] sd_addr;
@@ -89,6 +96,12 @@ module memory_tb;
         .wv_wdata    (wv_wdata),
         .wv_dout     (wv_dout),
         .wv_done     (wv_done),
+        .wv2_req     (wv2_req),
+        .wv2_we      (wv2_we),
+        .wv2_addr    (wv2_addr),
+        .wv2_wdata   (wv2_wdata),
+        .wv2_dout    (wv2_dout),
+        .wv2_done    (wv2_done),
         .O_sdram_clk   (sd_clk),
         .O_sdram_cke   (sd_cke),
         .O_sdram_cs_n  (sd_cs_n),
@@ -211,6 +224,20 @@ module memory_tb;
     task wv_write(input [21:0] a, input [7:0] d);
         begin wv_op(1, a, d, wv_rd); end
     endtask
+
+    // -------- V9968: tareas del puerto WV2 (mismo handshake) --------
+    task wv2_op(input wr, input [21:0] a, input [7:0] wd, output [15:0] rd);
+        begin
+            @(posedge clk108);
+            wv2_we = wr; wv2_addr = a; wv2_wdata = wd; wv2_req = 1;
+            @(posedge wv2_done);
+            @(posedge clk108);
+            rd = wv2_dout;
+            wv2_req = 0;
+            @(posedge clk108); @(posedge clk108);
+        end
+    endtask
+    reg [15:0] wv2_rd;
     task wv_read_check16(input [21:0] a, input [15:0] exp, input [255:0] msg);
         begin wv_op(0, a, 8'h00, wv_rd); check16(wv_rd, exp, msg); end
     endtask
@@ -542,6 +569,49 @@ module memory_tb;
             end
         end
         $display("W3 convivencia OK (200 ops wave + %0d CPU)", 2*NRAND);
+
+        // ---- V9968 W4: TRES BANDAS — wave + wv2 + CPU simultaneos ----
+        // wv2 escribe/lee en su ventana (VRAM_BASE 0x280000) mientras la wave
+        // martillea la suya y el scoreboard CPU sigue intacto. Prioridad
+        // wave>wv2: nadie pierde ops, solo se reparten los huecos.
+        fork
+            begin : w4_wave
+                integer ki;
+                for (ki = 0; ki < 150; ki = ki + 1)
+                    wv_write(22'h100000 + ki[21:0], ki[7:0] ^ 8'hC5);
+            end
+            begin : w4_wv2
+                integer kj;
+                for (kj = 0; kj < 300; kj = kj + 1)
+                    wv2_op(1, 22'h280000 + kj[21:0], kj[7:0] ^ 8'h3A, wv2_rd);
+            end
+            begin : w4_cpu
+                for (ri = 0; ri < NRAND; ri = ri + 1) begin
+                    ra = rnd_addr[ri];
+                    cpu_write(ra, ra[7:0] ^ 8'h91);
+                    exp_mem[ra] = ra[7:0] ^ 8'h91;
+                end
+                for (ri = 0; ri < NRAND; ri = ri + 1) begin
+                    ra = rnd_addr[ri];
+                    cpu_op(0, ra, 8'h00, rd_);
+                    check8(rd_, exp_mem[ra], "W4 CPU bajo trafico wave+wv2");
+                end
+            end
+        join
+        begin : w4_verify
+            integer km;
+            for (km = 0; km < 150; km = km + 1) begin
+                wv_op(0, 22'h100000 + km[21:0], 8'h00, wv_rd);
+                check8(km[0] ? wv_rd[15:8] : wv_rd[7:0], km[7:0] ^ 8'hC5,
+                       "W4 wave integra");
+            end
+            for (km = 0; km < 300; km = km + 1) begin
+                wv2_op(0, 22'h280000 + km[21:0], 8'h00, wv2_rd);
+                check8(km[0] ? wv2_rd[15:8] : wv2_rd[7:0], km[7:0] ^ 8'h3A,
+                       "W4 wv2 integra");
+            end
+        end
+        $display("W4 tres bandas OK (150 wave + 300 wv2 + %0d CPU)", 2*NRAND);
 
         if (errors == 0)
             $display("*** ALL TESTS PASS ***");
