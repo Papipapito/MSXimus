@@ -202,6 +202,7 @@ module msx2hdmi_v9968 (
     reg  [14:0] wr_addr;
     reg  [17:0] wr_data;
     reg         wr_en;
+    reg  [14:0] rel800;      // rel[5:1]*800 registrado (v4-timing)
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
@@ -210,13 +211,15 @@ module msx2hdmi_v9968 (
             wr_data <= 18'd0;
         end else if (ce) begin
             wr_en <= 1'b0;
+            // v4-timing: el producto rel*800 REGISTRADO (camino corto
+            // reg->mult->reg, patron _56b del read-side): a 85.9 el x800
+            // dentro del mux por-pixel era -2.4ns. rel es estable toda la
+            // linea y x_cnt==0 llega >=1 ce tras hs_lead: rel800 ya vale.
+            rel800 <= rel[5:1] * 15'd800;
             if (cap_ok) begin
                 wr_en   <= 1'b1;
                 wr_data <= {r_q, g_q, b_q};
-                // *800 solo al inicio de línea (constante, shift+add);
-                // por píxel solo incremento.
-                wr_addr <= (x_cnt == 10'd0) ? rel[5:1] * 15'd800
-                                            : wr_addr + 15'd1;
+                wr_addr <= (x_cnt == 10'd0) ? rel800 : wr_addr + 15'd1;
             end
         end
     end
