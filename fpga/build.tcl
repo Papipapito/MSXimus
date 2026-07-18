@@ -105,7 +105,12 @@ add_file src/wondertang/dpram.v
 add_file src/wondertang/pinfilter.v
 add_file src/wondertang/sd_reader.sv
 add_file src/wondertang/sdcmd_ctrl.sv
-add_file tn_vdp_v3_v9958/src/clockdiv.v
+# ----- F1 V9968: variable del build (0 = VDP clasico tn_vdp, 1 = V9968).
+# DEBE ir en sintonia con el `define ENABLE_V9968_VDP de top.v (el clon del
+# build _117+ pone ambos a 1 via sed). Los hdmi/*.sv van SIEMPRE (ambos
+# puentes los usan); el arbol tn_vdp solo entra en el build clasico
+# (colision de nombre vdp/VDP con el core V9968 + ahorro de CLS).
+set USE_V9968 0
 add_file tn_vdp_v3_v9958/src/hdmi/audio_clock_regeneration_packet.sv
 add_file tn_vdp_v3_v9958/src/hdmi/audio_info_frame.sv
 add_file tn_vdp_v3_v9958/src/hdmi/audio_sample_packet.sv
@@ -116,7 +121,40 @@ add_file tn_vdp_v3_v9958/src/hdmi/packet_picker.sv
 add_file tn_vdp_v3_v9958/src/hdmi/serializer.sv
 add_file tn_vdp_v3_v9958/src/hdmi/source_product_description_info_frame.sv
 add_file tn_vdp_v3_v9958/src/hdmi/tmds_channel.sv
-add_file tn_vdp_v3_v9958/src/v9958_top.v
+if {!$USE_V9968} {
+    add_file tn_vdp_v3_v9958/src/clockdiv.v
+    add_file tn_vdp_v3_v9958/src/v9958_top.v
+}
+if {$USE_V9968} {
+    # core V9968 de HRA! (rev 5978d18, parche tag+eco — ver v9968/ORIGEN.txt)
+    add_file v9968/vdp.v
+    add_file v9968/vdp_color_palette.v
+    add_file v9968/vdp_color_palette_ram.v
+    add_file v9968/vdp_command.v
+    add_file v9968/vdp_command_cache.v
+    add_file v9968/vdp_cpu_interface.v
+    add_file v9968/vdp_sprite_divide_table.v
+    add_file v9968/vdp_sprite_info_collect.v
+    add_file v9968/vdp_sprite_makeup_pixel.v
+    add_file v9968/vdp_sprite_select_visible_planes.v
+    add_file v9968/vdp_timing_control.v
+    add_file v9968/vdp_timing_control_screen_mode.v
+    add_file v9968/vdp_timing_control_sprite.v
+    add_file v9968/vdp_timing_control_ssg.v
+    add_file v9968/vdp_upscan.v
+    add_file v9968/vdp_upscan_line_buffer.v
+    add_file v9968/vdp_video_double_buffer.v
+    add_file v9968/vdp_video_out.v
+    add_file v9968/vdp_video_out_bilinear.v
+    add_file v9968/vdp_video_ram_line_buffer.v
+    add_file v9968/vdp_vram_interface.v
+    # pila MSXimus: shim VRAM + bridge CDC + glue CPU + PLL 85.909 + puente 800px
+    add_file src/v9968_vram_shim.v
+    add_file src/v9968_sdram_bridge.v
+    add_file src/v9968_cpu_glue.v
+    add_file src/pll_86.v
+    add_file video720/msx2hdmi_v9968.sv
+}
 add_file top.v
 
 # ----- Reloj GW5A: un solo PLLA (108/54/27/135) + secuencia de init mDRP -----
@@ -151,26 +189,28 @@ add_file src/ocm/lpf.vhd
 add_file src/ocm/swioports.vhd
 add_file src/ocm/uart_lite.vhd
 add_file src/ocm/wifi_lite.vhd
-add_file tn_vdp_v3_v9958/src/ram.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_colordec.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_command.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_doublebuf.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_graphic123m.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_graphic4567.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_hvcounter.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_interrupt.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_linebuf.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_ntsc_pal.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_package.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_register.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_spinforam.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_sprite.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_ssg.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_text12.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_vga.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vdp_wait_control.vhd
-add_file tn_vdp_v3_v9958/src/vdp/vencode.vhd
+if {!$USE_V9968} {
+    add_file tn_vdp_v3_v9958/src/ram.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_colordec.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_command.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_doublebuf.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_graphic123m.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_graphic4567.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_hvcounter.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_interrupt.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_linebuf.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_ntsc_pal.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_package.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_register.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_spinforam.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_sprite.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_ssg.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_text12.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_vga.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vdp_wait_control.vhd
+    add_file tn_vdp_v3_v9958/src/vdp/vencode.vhd
+}
 
 # ----- v3.0 FASE 1-REDUX: video 720p (cadena monitorcore + puente ring-BRAM) -----
 add_file video720/plla/pll_27.v
@@ -185,6 +225,11 @@ add_file src/usb_direct/usb_kbd_decode.v
 # ----- Constraints (nuevos del 60K — verificar matches>0 tras el 1er PnR) -----
 add_file constraints/msx_console60k.cst
 add_file constraints/msx_console60k.sdc
+if {$USE_V9968} {
+    # dominio clk_86 + grupos async del V9968 (fichero aparte: un create_clock
+    # con match vacio podria romper el parse del build clasico)
+    add_file constraints/msx_v9968.sdc
+}
 
 # Pines dedicados liberados como GPIO (60K): JTAG=SPI del BL616 onboard;
 # MSPI+CPU=flash compartida; DONE/READY=los 2 LEDs onboard (como C64Nano).

@@ -35,6 +35,12 @@ create_clock -name clk_hdmi5   -period  2.694 [get_pins {pll74_video/PLLA_inst/C
 # ---- F3 (_39): reloj del soft-host USB (teclado USB-A directo) ----
 create_clock -name clk_usb12 -period 83.333 [get_pins {pll12_usb/PLLA_inst/CLKOUT0}]
 
+# ---- F1 V9968: las constraints del dominio clk_86 viven en un SDC APARTE
+# (constraints/msx_v9968.sdc) que build.tcl solo añade con USE_V9968=1 —
+# un create_clock con match vacio podria romper el parse del build clasico.
+# En el build V9968, las lineas vdp4/* de ESTE fichero dan match vacio
+# (warning esperado; verificar la lista por build como siempre).
+
 # ---- F2 (_84): el OPL3 corre en clk_27m (PLLA principal, mismo grupo que
 # clk_54m) -> el cruce del host_if queda CRONOMETRADO por el STA. El reloj
 # dedicado de la _82/_83 (pll_opl3 a 33.75) se elimino.
