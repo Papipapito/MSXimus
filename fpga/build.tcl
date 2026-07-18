@@ -189,8 +189,10 @@ add_file src/ocm/lpf.vhd
 add_file src/ocm/swioports.vhd
 add_file src/ocm/uart_lite.vhd
 add_file src/ocm/wifi_lite.vhd
+# ram.vhd = modulo GENERICO 'ram' usado tambien por el RTC (src/ocm/rtc.v):
+# va SIEMPRE, aunque viva en el arbol tn_vdp (el V9968 no define ningun 'ram')
+add_file tn_vdp_v3_v9958/src/ram.vhd
 if {!$USE_V9968} {
-    add_file tn_vdp_v3_v9958/src/ram.vhd
     add_file tn_vdp_v3_v9958/src/vdp/vdp.vhd
     add_file tn_vdp_v3_v9958/src/vdp/vdp_colordec.vhd
     add_file tn_vdp_v3_v9958/src/vdp/vdp_command.vhd
@@ -224,11 +226,45 @@ add_file src/usb_direct/usb_kbd_decode.v
 
 # ----- Constraints (nuevos del 60K — verificar matches>0 tras el 1er PnR) -----
 add_file constraints/msx_console60k.cst
-add_file constraints/msx_console60k.sdc
 if {$USE_V9968} {
-    # dominio clk_86 + grupos async del V9968 (fichero aparte: un create_clock
-    # con match vacio podria romper el parse del build clasico)
-    add_file constraints/msx_v9968.sdc
+    # Gowin procesa cada .sdc AISLADO (los relojes del principal no se ven
+    # desde otro fichero -> TA2004): se genera un SDC COMBINADO principal +
+    # fragmento V9968 (constraints/msx_v9968.sdc) y se añade SOLO ese.
+    # Ajustes al principal (TA2003 = ERROR con matches vacios, leccion vieja):
+    #  1. fuera toda linea que referencie vdp4/ (el arbol tn_vdp no esta);
+    #  2. fuera los generated clocks de dh/dl Y sus referencias en los
+    #     grupos: en este build dh/dl son DATOS 108M-nativos (divisor libre);
+    #     Gowin valida la derivacion y el assign se renombra en sintesis;
+    #  3. fuera la referencia a clock_audio en los grupos (su create_clock
+    #     cae con el filtro vdp4).
+    set fp_a [open constraints/msx_console60k.sdc r]
+    set sdc_a [read $fp_a]
+    close $fp_a
+    # ORDEN: primero el filtro de LINEAS (create_generated intactas para
+    # casar), despues los regsub de TOKENS sueltos en las lineas de grupos
+    set sdc_f {}
+    foreach ln [split $sdc_a "\n"] {
+        if {[string match {*vdp4/*} $ln] ||
+            [string match {create_generated_clock -name clock_VideoD*} $ln] ||
+            [string match {*mem1/vram_dout_*} $ln]} {
+            append sdc_f "# (V9968: filtrada) $ln\n"
+        } else {
+            append sdc_f "$ln\n"
+        }
+    }
+    regsub -all -- { clock_VideoDHClk} $sdc_f {} sdc_f
+    regsub -all -- { clock_VideoDLClk} $sdc_f {} sdc_f
+    regsub -all -- {-group \[get_clocks \{clock_audio\}\] } $sdc_f {} sdc_f
+    set fp_b [open constraints/msx_v9968.sdc r]
+    set sdc_b [read $fp_b]
+    close $fp_b
+    set fp_o [open constraints/msx_v9968_combined.sdc w]
+    puts $fp_o $sdc_f
+    puts $fp_o $sdc_b
+    close $fp_o
+    add_file constraints/msx_v9968_combined.sdc
+} else {
+    add_file constraints/msx_console60k.sdc
 }
 
 # Pines dedicados liberados como GPIO (60K): JTAG=SPI del BL616 onboard;
