@@ -65,36 +65,40 @@ reg [9:0]  pw_tagA [0:63];               // addr[17:8]
 reg [63:0] pw_v;
 
 // ============================================================================
-// CACHE DE SPRITES: 1024 palabras de 32b (4KB) direct-mapped, indice
-// addr[11:2], tag addr[17:12]. Los sprites muestrean en FASE FIJA como la
-// pantalla (medido: v1 con rq/late perdia el 51% y llegaba a ms tarde).
+// CACHE DE TABLAS (v3): 4096 palabras de 32b (16KB) direct-mapped, indice
+// addr[13:2], tag addr[17:14]. Sirve a DOS consumidores de fase fija:
+//  * SPRITES (attr/color/pattern — v2, medido: sin cache se perdia el 51%)
+//  * FONDO EN MODOS DE PATRONES (v3, leccion HW _117: la ventana OBL asume
+//    fetch LINEAL — cierto SOLO en bitmap SC5+. En SCREEN 0/1/2 el fetch
+//    salta NT->PGT->CT y la ventana fallaba casi todo -> basura animada en
+//    todo texto, con el bitmap del logo perfecto. Las FOTOS lo clavaron.)
+// 16KB cubre el espacio de tablas MSX1 ENTERO (SC2 usa 12.75KB): tras un
+// frame de warm-up, SCREEN 0/1/2/3 quedan RESIDENTES.
 // WRITE-THROUGH-UPDATE: una escritura que casa el tag ACTUALIZA la entrada
-// (mover sprites cada frame no des-cachea); coherencia permanente tras 1
-// frame de warm-up. Los misses van por rq (tardios; rellenan al volver).
+// (print/scroll/animar patrones no des-cachea); coherencia permanente.
 //
 // ⚠ INFERENCIA BSRAM OBLIGATORIA (leccion _117a: los arrays con lectura
-// asincrona explotan en fabric — 1024x32 = ~45K LUTs, el diseño no cabia):
-// datos en 4 lanes 1024x8 con LECTURA SINCRONA (1 write-site por array) y
-// tags DUPLICADOS (un lector cada copia: lookup / write-check). El lookup
-// pasa a 2 ciclos e inyecta en pipe[1] -> el total sigue siendo 8 EXACTOS.
-// Solo sc_v (1024 FF) y sus muxes de 1 bit viven en fabric.
+// asincrona explotan en fabric): datos en 4 lanes 4096x8 con LECTURA
+// SINCRONA (1 write-site por array). El lookup es de 2 ciclos e inyecta en
+// pipe[1] -> el total sigue siendo 8 EXACTOS. Solo sc_v (4096 FF, con el
+// mux registrado en scq_v) vive en fabric.
 // ============================================================================
-// lookup (fetch sprite) y write-check (escritura) son mutuamente
+// lookup (fetch bg/sprite) y write-check (escritura) son mutuamente
 // exclusivos (un solo vram_valid) -> UN puerto de lectura sirve a ambos:
 // cada array queda 1R sincrono + 1W muxeado = BSRAM semi-dual limpia.
-reg [7:0]  sc_d0 [0:1023];               // lane byte 0 (BSRAM)
-reg [7:0]  sc_d1 [0:1023];
-reg [7:0]  sc_d2 [0:1023];
-reg [7:0]  sc_d3 [0:1023];
-reg [5:0]  sc_tag [0:1023];              // addr[17:12] (BSRAM)
-reg [1023:0] sc_v;                       // valid en fabric (necesita reset)
+reg [7:0]  sc_d0 [0:4095];               // lane byte 0 (BSRAM)
+reg [7:0]  sc_d1 [0:4095];
+reg [7:0]  sc_d2 [0:4095];
+reg [7:0]  sc_d3 [0:4095];
+reg [3:0]  sc_tag [0:4095];              // addr[17:14] (BSRAM)
+reg [4095:0] sc_v;                       // valid en fabric (necesita reset)
 
 // lecturas sincronas registradas (salidas BSRAM + valid)
 reg [7:0]  scq_d0, scq_d1, scq_d2, scq_d3;
-reg [5:0]  scq_tag;
+reg [3:0]  scq_tag;
 reg        scq_v;
 
-// etapa 1 del lookup de sprite
+// etapa 1 del lookup (bg con miss de ventana, o sprite)
 reg        spr_p1;
 reg [15:0] spr_addr1;                    // addr[17:2]
 reg [4:0]  spr_tag1;
@@ -167,9 +171,9 @@ reg [31:0] late_data;
 // ---- write-mux de la cache de sprites (1 solo write-site por array):
 // UPDATE (write-check con tag-match, byte a byte por mascara DQM) tiene
 // prioridad; el FILL espera en fill_pend al primer ciclo libre.
-wire wrk_hit  = wrk_p1 && scq_v && (scq_tag == wrk_addr1[15:10]);
+wire wrk_hit  = wrk_p1 && scq_v && (scq_tag == wrk_addr1[15:12]);
 wire fill_now = fill_pend && !wrk_hit;
-wire [9:0] scw_idx = wrk_hit ? wrk_addr1[9:0] : fill_addr[9:0];
+wire [11:0] scw_idx = wrk_hit ? wrk_addr1[11:0] : fill_addr[11:0];
 wire scw_we0 = (wrk_hit && !wrk_mask1[0]) || fill_now;
 wire scw_we1 = (wrk_hit && !wrk_mask1[1]) || fill_now;
 wire scw_we2 = (wrk_hit && !wrk_mask1[2]) || fill_now;
@@ -183,23 +187,23 @@ wire [7:0] scw_b3 = wrk_hit ? wrk_data1[31:24] : fill_word[31:24];
 // leccion _117a — nada de lecturas asincronas de arrays grandes) ----
 always @(posedge clk_vdp) begin
     if (scw_we0) sc_d0[scw_idx] <= scw_b0;
-    scq_d0 <= sc_d0[vram_address[11:2]];
+    scq_d0 <= sc_d0[vram_address[13:2]];
 end
 always @(posedge clk_vdp) begin
     if (scw_we1) sc_d1[scw_idx] <= scw_b1;
-    scq_d1 <= sc_d1[vram_address[11:2]];
+    scq_d1 <= sc_d1[vram_address[13:2]];
 end
 always @(posedge clk_vdp) begin
     if (scw_we2) sc_d2[scw_idx] <= scw_b2;
-    scq_d2 <= sc_d2[vram_address[11:2]];
+    scq_d2 <= sc_d2[vram_address[13:2]];
 end
 always @(posedge clk_vdp) begin
     if (scw_we3) sc_d3[scw_idx] <= scw_b3;
-    scq_d3 <= sc_d3[vram_address[11:2]];
+    scq_d3 <= sc_d3[vram_address[13:2]];
 end
 always @(posedge clk_vdp) begin
-    if (fill_now) sc_tag[fill_addr[9:0]] <= fill_addr[15:10];
-    scq_tag <= sc_tag[vram_address[11:2]];
+    if (fill_now) sc_tag[fill_addr[11:0]] <= fill_addr[15:12];
+    scq_tag <= sc_tag[vram_address[13:2]];
 end
 
 wire [21:0] sd_base = VRAM_BASE + {4'd0, cur_addrw, 2'b00};
@@ -210,7 +214,7 @@ wire [1:0]  nxt_byte = cur_mask[0] ? 2'd0 : cur_mask[1] ? 2'd1
 
 always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
-        pw_v <= 64'd0; sc_v <= 1024'd0; pfq_wp <= 0; pfq_rp <= 0;
+        pw_v <= 64'd0; sc_v <= {4096{1'b0}}; pfq_wp <= 0; pfq_rp <= 0;
         wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0;
         bsy <= 0; done_d <= 0; word_pend <= 0;
         cur_kind <= 0; cur_half <= 0; cur_addrw <= 0; cur_tag <= 0;
@@ -230,10 +234,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
         done_d <= bk_done_t;
         spr_p1 <= 1'b0;
         wrk_p1 <= 1'b0;
-        scq_v  <= sc_v[vram_address[11:2]];   // valid junto a las BSRAM
+        scq_v  <= sc_v[vram_address[13:2]];   // valid junto a las BSRAM
         if (fill_now) begin
             fill_pend <= 1'b0;
-            sc_v[fill_addr[9:0]] <= 1'b1;
+            sc_v[fill_addr[11:0]] <= 1'b1;
         end
 
         // ---------- tuberia de 8 ciclos + salida ----------
@@ -254,16 +258,28 @@ always @(posedge clk_vdp or negedge rst_n) begin
         for (pi = 6; pi > 0; pi = pi - 1) pipe[pi] <= pipe[pi-1];
         pipe[0] <= 38'd0;
 
-        // ---------- etapa 1 del lookup de sprite (dato BSRAM ya en scq_*) ----
-        // HIT: inyecta en pipe[1] -> emerge en el MISMO ciclo 8 que un hit bg
+        // ---------- etapa 1 del lookup en cache (dato BSRAM ya en scq_*) ----
+        // Sirve a SPRITES y al FONDO con miss de ventana (v3). HIT: inyecta
+        // en pipe[1] -> emerge en el MISMO ciclo 8 que un hit de ventana
         // (fetch en T, pipe[1] en T+1, pipe[6] en T+6, rdata_en en T+7).
-        // Sin colision con bg: los vram_valid van separados >=8 ciclos.
+        // Sin colision de etapas: los vram_valid van separados >=8 ciclos.
         if (spr_p1) begin
-            if (scq_v && scq_tag == spr_addr1[15:10])
+            if (scq_v && scq_tag == spr_addr1[15:12])
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};
-            else if (!rq_full) begin
-                rq[rq_wp] <= {spr_tag1, spr_addr1};
-                rq_wp <= rq_wp + 2'd1;
+            else begin
+                // MISS doble (ventana+cache): backend tardio + fill de cache
+                if (!rq_full) begin
+                    rq[rq_wp] <= {spr_tag1, spr_addr1};
+                    rq_wp <= rq_wp + 2'd1;
+                end
+                if (spr_tag1[4:2] == C_BG) begin
+                    // bg: cuenta el miss y arranca el stream OBL (bitmap)
+                    bg_miss <= bg_miss + 8'd1;
+                    if (!pfq_full) begin
+                        pfq[pfq_wp] <= spr_addr1 + 16'd1;
+                        pfq_wp <= pfq_wp + 2'd1;
+                    end
+                end
             end
         end
 
@@ -302,18 +318,13 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     end
                 end
                 else begin
-                    // MISS de pantalla: via backend (respuesta tardia; una
-                    // palabra sale negra 1 frame — el prefetch la cura). Y
-                    // arranca el stream: encola esta y la siguiente.
-                    bg_miss <= bg_miss + 8'd1;
-                    if (!rq_full) begin
-                        rq[rq_wp] <= {vram_tag, vram_address};
-                        rq_wp <= rq_wp + 2'd1;
-                    end
-                    if (!pfq_full) begin
-                        pfq[pfq_wp] <= vram_address[17:2] + 16'd1;
-                        pfq_wp <= pfq_wp + 2'd1;
-                    end
+                    // MISS de ventana (v3): prueba la CACHE — en modos de
+                    // patrones (SCREEN 0/1/2/3) las tablas NT/PGT/CT viven
+                    // residentes ahi y responden a 8 ciclos igualmente. La
+                    // etapa 1 (spr_p1) decide; el miss doble va al backend.
+                    spr_p1    <= 1'b1;
+                    spr_addr1 <= vram_address;
+                    spr_tag1  <= vram_tag;
                 end
             end
             else if (vram_tag[4:2] == C_SPRITE) begin
@@ -365,10 +376,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
                             pw_tagA[cur_addrw[5:0]] <= cur_addrw[15:6];
                             pw_v[cur_addrw[5:0]]    <= 1'b1;
                         end
-                        // ...o a la cache de sprites si es sprite (warm-up):
-                        // via fill_pend (el write-site BSRAM es unico y el
-                        // update tiene prioridad; drena en 1-2 ciclos)
-                        if (cur_tag[4:2] == C_SPRITE) begin
+                        // ...y a la CACHE si es sprite o bg (v3: las tablas
+                        // de los modos de patrones quedan residentes) — via
+                        // fill_pend (write-site BSRAM unico, update prioriza)
+                        if (cur_tag[4:2] == C_SPRITE || cur_tag[4:2] == C_BG) begin
                             fill_pend <= 1'b1;
                             fill_addr <= cur_addrw;
                             fill_word <= {bk_rword, cur_word[15:0]};
