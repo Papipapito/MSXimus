@@ -97,7 +97,19 @@ module vdp_vram_interface (
 	input		[31:0]	vram_rdata,
 	input				vram_rdata_en,
 	input				pre_vram_refresh,
-	output				vram_refresh
+	output				vram_refresh,
+	//	MSXimus: routing de respuestas por TAG con ECO (sustituye al selector
+	//	_d1 de fase fija). El original asume la latencia EXACTA del ip_sdram
+	//	(8 ciclos, medida); nuestro shim a SDRAM compartida sirve pantalla/
+	//	sprites desde prefetch (rapido) y CPU/comandos con latencia variable,
+	//	fuera de orden. El shim DEVUELVE vram_rtag junto a cada rdata_en.
+	output		[4:0]	vram_tag,		//	{consumidor[2:0], byte_sel[1:0]}
+	input		[4:0]	vram_rtag,
+	//	MSXimus v3d: control de flujo del shim — retiene los slots de
+	//	CPU/COMANDO cuando las colas del backend van calientes (las rafagas
+	//	de escritura de HMMV desbordaban la cola: rectangulos rallados).
+	//	Los slots de pantalla/sprites NO se tocan.
+	input				vram_stall
 );
 	localparam			c_idle		= 3'd0;
 	localparam			c_bg		= 3'd1;
@@ -241,7 +253,12 @@ module vdp_vram_interface (
 					2'd3:	ff_vram_wdata_mask	<= 4'b0111;
 					endcase
 				end
-				else if( command_vram_valid && (is_access_timming_a || is_access_timming_b) ) begin
+				//	MSXimus v3d: !vram_stall tambien AQUI — el ready solo
+				//	informa a la cache de comandos; la ACEPTACION real ocurre
+				//	en este bloque y sin el gate el interface emitia el pulso
+				//	al bus igualmente (25 escrituras/us contra una cola de 4:
+				//	drops masivos = rectangulos rallados en HW).
+				else if( command_vram_valid && !vram_stall && (is_access_timming_a || is_access_timming_b) ) begin
 					ff_vram_address		<= w_command_vram_address;
 					ff_vram_valid		<= 1'b1;
 					ff_vram_write		<= command_vram_write;
@@ -252,8 +269,14 @@ module vdp_vram_interface (
 		end
 	end
 
+	//	MSXimus v3d: backpressure del shim SOLO al motor de COMANDOS — el
+	//	unico capaz de desbordar la cola de escrituras (rafagas HMMV). El
+	//	CPU escribe a ritmo Z80 (~us, la cola lo absorbe) y gatear su ready
+	//	bloqueaba tambien la maquinaria de REGISTROS: los R#32-46 del
+	//	comando llegaban A MEDIAS (geometria corrupta, banda gigante).
 	assign cpu_vram_ready		= is_access_timming_b ? ~w_vram_refresh : 1'b0;
-	assign command_vram_ready	= w_vram_refresh      ? 1'b0 :
+	assign command_vram_ready	= vram_stall          ? 1'b0 :
+	                         	  w_vram_refresh      ? 1'b0 :
 	                         	  is_access_timming_a ? ~(screen_mode_vram_valid | sprite_vram_valid) :
 	                         	  is_access_timming_b ? ~cpu_vram_valid : 1'b0;
 
@@ -270,7 +293,8 @@ module vdp_vram_interface (
 		endcase
 	endfunction
 
-	assign w_rdata8 = func_rdata_sel( ff_vram_byte_sel, vram_rdata );
+	//	MSXimus: byte_sel del ECO de la respuesta (no del snapshot de fase fija)
+	assign w_rdata8 = func_rdata_sel( vram_rtag[1:0], vram_rdata );
 
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
@@ -293,7 +317,8 @@ module vdp_vram_interface (
 			ff_command_vram_rdata_en	<= 1'b0;
 		end
 		else if( vram_rdata_en ) begin
-			case( ff_vram_rdata_sel_d1 )
+			//	MSXimus: enruta por el TAG ecoado por el shim
+			case( vram_rtag[4:2] )
 			c_bg:		begin ff_screen_mode_vram_rdata		<= vram_rdata; end
 			c_sprite:	begin ff_sprite_vram_rdata			<= vram_rdata;	ff_sprite_vram_rdata8 <= w_rdata8;	end
 			c_cpu:		begin ff_cpu_vram_rdata				<= w_rdata8;	ff_cpu_vram_rdata_en <= 1'b1;		end
@@ -314,6 +339,8 @@ module vdp_vram_interface (
 	assign command_vram_rdata		= ff_command_vram_rdata;
 	assign command_vram_rdata_en	= ff_command_vram_rdata_en;
 
+	//	MSXimus: tag que acompana a la peticion (valido durante vram_valid)
+	assign vram_tag					= { ff_vram_rdata_sel, ff_vram_address[1:0] };
 	assign vram_address				= ff_vram_address[17:2];
 	assign vram_valid				= ff_vram_valid;
 	assign vram_write				= ff_vram_write;

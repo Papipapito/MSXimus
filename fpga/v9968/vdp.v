@@ -79,6 +79,11 @@ module vdp (
 	input		[31:0]	vram_rdata,
 	input				vram_rdata_en,
 	output				vram_refresh,
+	//	MSXimus: tag de peticion + eco de respuesta (ver vdp_vram_interface)
+	output		[4:0]	vram_tag,
+	input		[4:0]	vram_rtag,
+	//	MSXimus v3d: backpressure del shim a los slots de CPU/comando
+	input				vram_stall,
 
 	// video output
 	output				display_hs,
@@ -472,7 +477,10 @@ module vdp (
 		.vram_rdata									( vram_rdata								),
 		.vram_rdata_en								( vram_rdata_en								),
 		.pre_vram_refresh							( w_pre_vram_refresh						),
-		.vram_refresh								( vram_refresh								)
+		.vram_refresh								( vram_refresh								),
+		.vram_tag									( vram_tag									),
+		.vram_rtag									( vram_rtag									),
+		.vram_stall									( vram_stall								)
 	);
 
 	// --------------------------------------------------------------------

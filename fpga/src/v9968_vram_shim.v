@@ -48,6 +48,12 @@ module v9968_vram_shim #(
     input  wire [15:0] bk_rword,         // palabra 16b (addr[0] ignorado)
     input  wire        bk_done_t,        // toggle
 
+    // ---- control de flujo (v3d): retiene los slots de CPU/COMANDO en el
+    // interface cuando las colas van calientes — las escrituras de HMMV
+    // desbordaban wq (4 plazas, backend byte-a-byte ~1.6us/palabra) y los
+    // rectangulos salian RALLADOS. bg/sprite NO se frenan (ventana/cache).
+    output wire        vram_stall,
+
     // ---- diagnostico ----
     output wire [7:0]  diag
 );
@@ -131,11 +137,17 @@ reg [1:0]  wq_wp, wq_rp;
 wire       wq_empty = (wq_wp == wq_rp);
 wire       wq_full  = (wq_wp + 2'd1 == wq_rp);
 
-// cola de lecturas no-bg (4 plazas: {tag,addr})
-reg [20:0] rq [0:3];                     // {tag[4:0], addr[17:2]}
-reg [1:0]  rq_wp, rq_rp;
+// cola de lecturas al backend (v3c: 8 plazas con RESERVA anti-drop — las
+// lecturas de CPU/COMANDO no pueden perderse JAMAS: un drop deja al motor
+// de comandos esperando su rdata_en para siempre = el cuelgue de SC5 en HW,
+// y a la CPU con el buffer de prefetch rancio = el rastro del cursor.
+// bg/sprite (tolerantes, se autocuran) solo encolan si quedan >=3 libres.)
+reg [20:0] rq [0:7];                     // {tag[4:0], addr[17:2]}
+reg [2:0]  rq_wp, rq_rp;
+wire [2:0] rq_used  = rq_wp - rq_rp;
 wire       rq_empty = (rq_wp == rq_rp);
-wire       rq_full  = (rq_wp + 2'd1 == rq_rp);
+wire       rq_full  = (rq_used == 3'd7);
+wire       rq_room_soft = (rq_used <= 3'd4);   // hueco para bg/sprite
 
 // ============================================================================
 // TUBERIA DE RESPUESTA A 8 CICLOS para bg: shift-register de 8 etapas con
@@ -149,6 +161,11 @@ integer pi;
 // miss de bg: contador (diagnostico — un miss = 1 palabra negra 1 frame)
 reg [7:0] bg_miss;
 assign diag = bg_miss;
+
+// control de flujo: con wq medio-lleno o rq caliente, el interface retiene
+// los slots de CPU/COMANDO (ready=0) hasta que el backend drene
+wire [1:0] wq_used = wq_wp - wq_rp;
+assign vram_stall = (wq_used >= 2'd2) || (rq_used >= 3'd6);
 
 // ============================================================================
 // backend: una op en vuelo; prioridad escrituras > lecturas no-bg > prefetch
@@ -280,10 +297,19 @@ always @(posedge clk_vdp or negedge rst_n) begin
             if (scq_v && scq_tag == spr_addr1[15:12])
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};
             else begin
-                // MISS doble (ventana+cache): backend tardio + fill de cache
-                if (!rq_full) begin
+                // MISS de cache: backend + fill al volver. bg/sprite encolan
+                // con reserva (drop tolerable, se autocuran); CPU/COMANDO
+                // encolan SIEMPRE (con 8 plazas, 1-en-vuelo cada uno y la
+                // reserva de bg/sprite, nunca encuentran lleno).
+                if (spr_tag1[4:2] == C_BG || spr_tag1[4:2] == C_SPRITE) begin
+                    if (rq_room_soft) begin
+                        rq[rq_wp] <= {spr_tag1, spr_addr1};
+                        rq_wp <= rq_wp + 3'd1;
+                    end
+                end
+                else if (!rq_full) begin
                     rq[rq_wp] <= {spr_tag1, spr_addr1};
-                    rq_wp <= rq_wp + 2'd1;
+                    rq_wp <= rq_wp + 3'd1;
                 end
                 if (spr_tag1[4:2] == C_BG) begin
                     // bg: cuenta el miss y arranca el stream OBL (bitmap)
@@ -340,19 +366,15 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     spr_tag1  <= vram_tag;
                 end
             end
-            else if (vram_tag[4:2] == C_SPRITE) begin
-                // lookup de sprite: la BSRAM ya esta leyendo este indice;
-                // la etapa 1 (spr_p1) decide hit/miss el ciclo que viene
+            else begin
+                // sprite / CPU / comando: lookup en la CACHE (v3c: la CPU
+                // lee con PRE-FETCH del interface y el BIOS hace SETRD+IN
+                // en ~2us — el backend a ~1us llegaba TARDE y el buffer
+                // devolvia el dato ANTERIOR = el rastro del cursor en HW.
+                // Con NT/PGT residentes, el hit responde en 8 ciclos.)
                 spr_p1    <= 1'b1;
                 spr_addr1 <= vram_address;
                 spr_tag1  <= vram_tag;
-            end
-            else begin
-                // cpu / comando: backend con eco
-                if (!rq_full) begin
-                    rq[rq_wp] <= {vram_tag, vram_address};
-                    rq_wp <= rq_wp + 2'd1;
-                end
             end
         end
 
@@ -389,14 +411,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                             pw_tagA[cur_addrw[5:0]] <= cur_addrw[15:6];
                             pw_v[cur_addrw[5:0]]    <= 1'b1;
                         end
-                        // ...y a la CACHE si es sprite o bg (v3: las tablas
-                        // de los modos de patrones quedan residentes) — via
-                        // fill_pend (write-site BSRAM unico, update prioriza)
-                        if (cur_tag[4:2] == C_SPRITE || cur_tag[4:2] == C_BG) begin
-                            fill_pend <= 1'b1;
-                            fill_addr <= cur_addrw;
-                            fill_word <= {bk_rword, cur_word[15:0]};
-                        end
+                        // ...y a la CACHE (v3c: TODO consumidor de lectura
+                        // rellena — bg/sprite/CPU/comando; localidad del
+                        // cursor y de los VPEEKs) — via fill_pend
+                        fill_pend <= 1'b1;
+                        fill_addr <= cur_addrw;
+                        fill_word <= {bk_rword, cur_word[15:0]};
                     end
                     word_pend <= 1'b0;
                 end
@@ -444,7 +464,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 cur_kind  <= 2'd1;
                 cur_tag   <= rq[rq_rp][20:16];
                 cur_addrw <= rq[rq_rp][15:0];
-                rq_rp     <= rq_rp + 2'd1;
+                rq_rp     <= rq_rp + 3'd1;
                 cur_half  <= 1'b0; word_pend <= 1'b1;
                 bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b0;
                 bk_addr <= VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00};

@@ -31,6 +31,7 @@ wire  [4:0]  vram_tag;
 wire  [31:0] vram_rdata;
 wire         vram_rdata_en;
 wire  [4:0]  vram_rtag;
+wire         vram_stall;
 wire         display_hs, display_vs, display_en;
 wire  [7:0]  display_r, display_g, display_b;
 
@@ -45,6 +46,7 @@ vdp u_vdp (
     .vram_wdata_mask(vram_wdata_mask),
     .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en),
     .vram_tag(vram_tag), .vram_rtag(vram_rtag),
+    .vram_stall(vram_stall),
     .vram_refresh(vram_refresh),
     .display_hs(display_hs), .display_vs(display_vs), .display_en(display_en),
     .display_r(display_r), .display_g(display_g), .display_b(display_b),
@@ -67,6 +69,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .vram_wdata_mask(vram_wdata_mask), .vram_tag(vram_tag),
     .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en),
     .vram_rtag(vram_rtag),
+    .vram_stall(vram_stall),
     .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr), .bk_wdata(bk_wdata),
     .bk_rword(bk_rword), .bk_done_t(bk_done_t),
     .diag(shim_diag)
@@ -131,6 +134,28 @@ begin
     bus_wr(3'd1, {2'b01, a[13:8]});
 end
 endtask
+// puntero de LECTURA (bit6=0) — dispara el pre-fetch del interface
+task vram_rdptr(input [13:0] a);
+begin
+    bus_wr(3'd1, a[7:0]);
+    bus_wr(3'd1, {2'b00, a[13:8]});
+end
+endtask
+// lectura del puerto 0 con cadencia BIOS (SETRD + IN en ~2us): el caso del
+// RASTRO DEL CURSOR en HW — si el pre-fetch no ha llegado, sale dato viejo
+task vram_rd(output [7:0] d);
+begin
+    @(posedge clk);
+    bus_address <= 3'd0; bus_ioreq <= 1; bus_write <= 0; bus_valid <= 1;
+    @(posedge clk);
+    while (!bus_ready) @(posedge clk);
+    bus_ioreq <= 0; bus_valid <= 0;
+    // el dato de la IN es el buffer prefetcheado: bus_rdata_en lo entrega
+    while (!bus_rdata_en) @(posedge clk);
+    d = bus_rdata;
+    repeat (150) @(posedge clk);   // hueco Z80 entre INs
+end
+endtask
 
 integer vs_count = 0;
 logic vs_d = 0, hs_d = 0;
@@ -188,6 +213,37 @@ initial begin
     for (i = 0; i < 32; i = i + 1) vram_b({i[3:0] == 4'd0 ? 4'hF : i[3:0], 4'h4});
     $display("VRAM SC1 cargada en vs=%0d", vs_count);
     wait (dump_state == 3);
+
+    // ---- verificacion de LECTURAS CPU (el caso del rastro del cursor) ----
+    begin : rdcheck
+        reg [7:0] rb;
+        integer rerr;
+        rerr = 0;
+        // NT en 0x1800: 32 bytes esperados (i*7+3)&0xFF
+        vram_rdptr(14'h1800);
+        repeat (150) @(posedge clk);      // margen SETRD->1a IN estilo BIOS
+        for (i = 0; i < 32; i = i + 1) begin
+            vram_rd(rb);
+            if (rb !== (((i * 7) + 3) & 8'hFF)) begin
+                rerr = rerr + 1;
+                if (rerr <= 8) $display("RD ERR NT[%0d]: got=%02x exp=%02x",
+                                        i, rb, ((i * 7) + 3) & 8'hFF);
+            end
+        end
+        // PGT en 0x0000: 16 bytes esperados c^(r*37) (c=0..1, r=0..7)
+        vram_rdptr(14'h0000);
+        repeat (150) @(posedge clk);
+        for (i = 0; i < 16; i = i + 1) begin
+            vram_rd(rb);
+            if (rb !== (((i / 8) ^ ((i % 8) * 37)) & 8'hFF)) begin
+                rerr = rerr + 1;
+                if (rerr <= 8) $display("RD ERR PGT[%0d]: got=%02x exp=%02x",
+                                        i, rb, ((i / 8) ^ ((i % 8) * 37)) & 8'hFF);
+            end
+        end
+        if (rerr == 0) $display("*** LECTURAS CPU: 48/48 OK (cursor curado) ***");
+        else           $display("*** LECTURAS CPU: %0d ERRORES ***", rerr);
+    end
     #1000;
     $finish;
 end

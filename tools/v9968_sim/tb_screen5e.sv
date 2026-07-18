@@ -30,6 +30,7 @@ wire  [4:0]  vram_tag;
 wire  [31:0] vram_rdata;
 wire         vram_rdata_en;
 wire  [4:0]  vram_rtag;
+wire         vram_stall;
 wire         display_hs, display_vs, display_en;
 wire  [7:0]  display_r, display_g, display_b;
 
@@ -44,6 +45,7 @@ vdp u_vdp (
     .vram_wdata_mask(vram_wdata_mask),
     .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en),
     .vram_tag(vram_tag), .vram_rtag(vram_rtag),
+    .vram_stall(vram_stall),
     .vram_refresh(vram_refresh),
     .display_hs(display_hs), .display_vs(display_vs), .display_en(display_en),
     .display_r(display_r), .display_g(display_g), .display_b(display_b),
@@ -66,6 +68,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .vram_wdata_mask(vram_wdata_mask), .vram_tag(vram_tag),
     .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en),
     .vram_rtag(vram_rtag),
+    .vram_stall(vram_stall),
     .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr), .bk_wdata(bk_wdata),
     .bk_rword(bk_rword), .bk_done_t(bk_done_t),
     .diag(shim_diag)

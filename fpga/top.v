@@ -1616,6 +1616,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire [3:0]  v68_vram_mask;
     wire [4:0]  v68_vram_tag, v68_vram_rtag;
     wire        v68_vram_rdata_en;
+    wire        v68_vram_stall;
     wire        v68_hs, v68_vs, v68_de;
     wire [7:0]  v68_r8, v68_g8, v68_b8;
     vdp u_v9968 (
@@ -1629,6 +1630,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         .vram_wdata_mask(v68_vram_mask),
         .vram_rdata(v68_vram_rdata), .vram_rdata_en(v68_vram_rdata_en),
         .vram_tag(v68_vram_tag), .vram_rtag(v68_vram_rtag),
+        .vram_stall(v68_vram_stall),
         .vram_refresh(v68_vram_refresh),
         .display_hs(v68_hs), .display_vs(v68_vs), .display_en(v68_de),
         .display_r(v68_r8), .display_g(v68_g8), .display_b(v68_b8),
@@ -1651,6 +1653,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         .vram_rtag(v68_vram_rtag),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
         .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .vram_stall(v68_vram_stall),
         .diag()
     );
     v9968_sdram_bridge u_v68bridge (
