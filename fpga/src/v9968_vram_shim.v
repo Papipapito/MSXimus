@@ -62,13 +62,26 @@ localparam C_BG     = 3'd1;
 localparam C_SPRITE = 3'd2;
 
 // ============================================================================
-// VENTANA DE PREFETCH de pantalla: 64 palabras de 32 bits, direct-mapped
-// (indice addr[7:2] -> 6 bits, tag addr[17:8]). Una linea SC5 = 32 palabras,
-// SC7/8 = 64: la ventana cubre la linea en curso + lookahead.
+// VENTANA DE PREFETCH de pantalla (v4: EN BSRAM — leccion _119: los conos
+// asincronos fabric de pw_data/pw_tagA eran los peores caminos de TODA la
+// matriz de rutados, hasta -2.8ns): 64 x {tag10, data32} direct-mapped
+// (indice addr[7:2], tag addr[17:8]). Una linea SC5 = 32 palabras. El
+// lookup pasa a la MISMA etapa 1 que la cache (hit -> pipe[1], total 8
+// ciclos EXACTOS igual). Solo pw_v (64 FF) vive en fabric.
+// Puerto de lectura unico muxeado: ciclo 0 = lookup del fetch/write-check;
+// ciclo 2 = chequeo OBL (obl_w registrado; sin colision: vram_valid van
+// separados >=8 ciclos).
 // ============================================================================
-reg [31:0] pw_data [0:63];
-reg [9:0]  pw_tagA [0:63];               // addr[17:8]
-reg [63:0] pw_v;
+reg [41:0] pw_mem [0:63];                // {tag[9:0], data[31:0]} (BSRAM)
+reg [63:0] pw_v;                         // valid en fabric
+reg [41:0] pwq;                          // lectura sincrona registrada
+reg        pwq_v;                        // valid del indice leido
+
+// escritura de la ventana (solo el backend): registros de fill
+reg        pww_en;
+reg [5:0]  pww_idx;
+reg [9:0]  pww_tag;
+reg [31:0] pww_data;
 
 // ============================================================================
 // CACHE DE TABLAS (v3): 4096 palabras de 32b (16KB) direct-mapped, indice
@@ -115,8 +128,10 @@ reg [15:0] wrk_addr1;
 reg [31:0] wrk_data1;
 reg [3:0]  wrk_mask1;                    // DQM (0 = escribir byte)
 
-// OBL diferido (hit de ventana en ciclo 0 -> chequeo+encolado en ciclo 1)
+// OBL en dos fases (v4): obl_pend lanza la lectura BSRAM de la ventana
+// (ciclo 2 del fetch), obl_chk consume pwq y encola (ciclo 3)
 reg        obl_pend;
+reg        obl_chk;
 reg [15:0] obl_w;
 
 // escritura muxeada de la cache (1 solo write-site por array): el FILL
@@ -227,6 +242,13 @@ always @(posedge clk_vdp) begin
     scq_tag <= sc_tag[vram_address[13:2]];
 end
 
+// ---- BSRAM de la VENTANA (v4): 1R muxeado + 1W del backend ----
+wire [5:0] pw_ridx = obl_pend ? obl_w[5:0] : vram_address[7:2];
+always @(posedge clk_vdp) begin
+    if (pww_en) pw_mem[pww_idx] <= {pww_tag, pww_data};
+    pwq <= pw_mem[pw_ridx];
+end
+
 wire [21:0] sd_base = VRAM_BASE + {4'd0, cur_addrw, 2'b00};
 wire [15:0] nxt_w   = vram_address[17:2] + 16'd1;   // palabra siguiente (OBL)
 // primer byte habilitado que queda en la mascara de la escritura en curso
@@ -246,9 +268,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
         bg_miss <= 0;
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
-        obl_pend <= 0; obl_w <= 0;
+        obl_pend <= 0; obl_chk <= 0; obl_w <= 0;
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0;
-        scq_v <= 0;
+        scq_v <= 0; pwq_v <= 0;
+        pww_en <= 0; pww_idx <= 0; pww_tag <= 0; pww_data <= 0;
         for (pi = 0; pi < 7; pi = pi + 1) pipe[pi] <= 38'd0;
     end
     else begin
@@ -256,7 +279,9 @@ always @(posedge clk_vdp or negedge rst_n) begin
         done_d <= bk_done_t;
         spr_p1 <= 1'b0;
         wrk_p1 <= 1'b0;
-        scq_v  <= sc_v[vram_address[13:2]];   // valid junto a las BSRAM
+        pww_en <= 1'b0;
+        scq_v  <= sc_v[vram_address[13:2]];   // valids junto a las BSRAM
+        pwq_v  <= pw_v[pw_ridx];
         if (fill_now) begin
             fill_pend <= 1'b0;
             sc_v[fill_addr[11:0]] <= 1'b1;
@@ -280,21 +305,35 @@ always @(posedge clk_vdp or negedge rst_n) begin
         for (pi = 6; pi > 0; pi = pi - 1) pipe[pi] <= pipe[pi-1];
         pipe[0] <= 38'd0;
 
-        // ---------- OBL diferido: chequeo de ventana + encolado (ciclo 1) ----
+        // ---------- write-check de la VENTANA (v4, etapa 1): invalidacion
+        // por coherencia si el tag leido de la BSRAM casa ----
+        if (wrk_p1 && pwq_v && pwq[41:32] == wrk_addr1[15:6])
+            pw_v[wrk_addr1[5:0]] <= 1'b0;
+
+        // ---------- OBL en dos fases (v4): la lectura BSRAM de obl_w se
+        // lanza mientras obl_pend esta alto; obl_chk consume pwq/pwq_v ----
         obl_pend <= 1'b0;
-        if (obl_pend && !pfq_full &&
-            !(pw_v[obl_w[5:0]] && pw_tagA[obl_w[5:0]] == obl_w[15:6])) begin
+        obl_chk  <= obl_pend;
+        if (obl_chk && !pfq_full &&
+            !(pwq_v && pwq[41:32] == obl_w[15:6])) begin
             pfq[pfq_wp] <= obl_w;
             pfq_wp <= pfq_wp + 2'd1;
         end
 
-        // ---------- etapa 1 del lookup en cache (dato BSRAM ya en scq_*) ----
-        // Sirve a SPRITES y al FONDO con miss de ventana (v3). HIT: inyecta
-        // en pipe[1] -> emerge en el MISMO ciclo 8 que un hit de ventana
-        // (fetch en T, pipe[1] en T+1, pipe[6] en T+6, rdata_en en T+7).
-        // Sin colision de etapas: los vram_valid van separados >=8 ciclos.
+        // ---------- etapa 1 UNIFICADA del lookup (v4): VENTANA + CACHE ----
+        // Todo fetch (bg/sprite/CPU/comando) llega aqui con las lecturas
+        // BSRAM ya en pwq/scq. Prioridad: ventana (solo bg, streaming) ->
+        // cache (tablas residentes) -> backend. HIT -> pipe[1]: emerge a
+        // 8 ciclos EXACTOS (fetch T, pipe[1] T+1, pipe[6] T+6, en T+7).
         if (spr_p1) begin
-            if (scq_v && scq_tag == spr_addr1[15:12])
+            if (spr_tag1[4:2] == C_BG && pwq_v &&
+                pwq[41:32] == spr_addr1[15:6]) begin
+                // HIT de VENTANA: dato + OBL (fase 2)
+                pipe[1] <= {1'b1, spr_tag1, pwq[31:0]};
+                obl_pend <= 1'b1;
+                obl_w    <= spr_addr1 + 16'd1;
+            end
+            else if (scq_v && scq_tag == spr_addr1[15:12])
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};
             else begin
                 // MISS de cache: backend + fill al volver. bg/sprite encolan
@@ -332,39 +371,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     wq[wq_wp] <= {~vram_wdata_mask, vram_wdata, vram_address};
                     wq_wp <= wq_wp + 2'd1;
                 end
-                // escritura invalida la palabra en ventana (coherencia)
-                if (pw_v[vram_address[7:2]] &&
-                    pw_tagA[vram_address[7:2]] == vram_address[17:8])
-                    pw_v[vram_address[7:2]] <= 1'b0;
-                // cache de sprites: arranca el WRITE-CHECK (etapa 1 compara
-                // el tag BSRAM y aplica el update byte a byte si casa)
+                // write-check (etapa 1): compara los tags BSRAM y aplica el
+                // update de cache byte a byte / la invalidacion de ventana
                 wrk_p1    <= 1'b1;
                 wrk_addr1 <= vram_address;
                 wrk_data1 <= vram_wdata;
                 wrk_mask1 <= vram_wdata_mask;
-            end
-            else if (vram_tag[4:2] == C_BG) begin
-                if (pw_v[vram_address[7:2]] &&
-                    pw_tagA[vram_address[7:2]] == vram_address[17:8]) begin
-                    // HIT: agenda respuesta a 8 ciclos
-                    pipe[0] <= {1'b1, vram_tag, pw_data[vram_address[7:2]]};
-                    // OBL DIFERIDO al ciclo 1 (timing _118: sumador + chequeo
-                    // de ventana 64:1 + escritura pfq en el ciclo 0 era el
-                    // peor camino, -1.044; desde registro cierra). El fetch
-                    // siguiente llega a >=8 ciclos: un ciclo de retardo del
-                    // prefetch es invisible.
-                    obl_pend <= 1'b1;
-                    obl_w    <= nxt_w;
-                end
-                else begin
-                    // MISS de ventana (v3): prueba la CACHE — en modos de
-                    // patrones (SCREEN 0/1/2/3) las tablas NT/PGT/CT viven
-                    // residentes ahi y responden a 8 ciclos igualmente. La
-                    // etapa 1 (spr_p1) decide; el miss doble va al backend.
-                    spr_p1    <= 1'b1;
-                    spr_addr1 <= vram_address;
-                    spr_tag1  <= vram_tag;
-                end
             end
             else begin
                 // sprite / CPU / comando: lookup en la CACHE (v3c: la CPU
@@ -397,9 +409,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 else begin
                     // palabra completa
                     if (cur_kind == 2'd0) begin
-                        pw_data[cur_addrw[5:0]] <= {bk_rword, cur_word[15:0]};
-                        pw_tagA[cur_addrw[5:0]] <= cur_addrw[15:6];
-                        pw_v[cur_addrw[5:0]]    <= 1'b1;
+                        // fill de ventana via registros pww (write-site BSRAM)
+                        pww_en   <= 1'b1;
+                        pww_idx  <= cur_addrw[5:0];
+                        pww_tag  <= cur_addrw[15:6];
+                        pww_data <= {bk_rword, cur_word[15:0]};
+                        pw_v[cur_addrw[5:0]] <= 1'b1;
                     end
                     else begin
                         late_v    <= 1'b1;
@@ -407,9 +422,11 @@ always @(posedge clk_vdp or negedge rst_n) begin
                         late_data <= {bk_rword, cur_word[15:0]};
                         // y de paso a la ventana si es bg
                         if (cur_tag[4:2] == C_BG) begin
-                            pw_data[cur_addrw[5:0]] <= {bk_rword, cur_word[15:0]};
-                            pw_tagA[cur_addrw[5:0]] <= cur_addrw[15:6];
-                            pw_v[cur_addrw[5:0]]    <= 1'b1;
+                            pww_en   <= 1'b1;
+                            pww_idx  <= cur_addrw[5:0];
+                            pww_tag  <= cur_addrw[15:6];
+                            pww_data <= {bk_rword, cur_word[15:0]};
+                            pw_v[cur_addrw[5:0]] <= 1'b1;
                         end
                         // ...y a la CACHE (v3c: TODO consumidor de lectura
                         // rellena — bg/sprite/CPU/comando; localidad del
