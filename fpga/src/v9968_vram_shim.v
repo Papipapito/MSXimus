@@ -85,14 +85,14 @@ localparam C_SPRITE = 3'd2;
 // ciclo 2 = chequeo OBL (obl_w registrado; sin colision: vram_valid van
 // separados >=8 ciclos).
 // ============================================================================
-reg [41:0] pw_mem [0:127];               // {tag[9:0], data[31:0]} (BSRAM)
-reg [127:0] pw_v;                        // valid en fabric
+reg [41:0] pw_mem [0:255];               // {tag[9:0], data[31:0]} (BSRAM)
+reg [255:0] pw_v;                        // valid en fabric
 reg [41:0] pwq;                          // lectura sincrona registrada
 reg        pwq_v;                        // valid del indice leido
 
 // escritura de la ventana (solo el backend): registros de fill
 reg        pww_en;
-reg [6:0]  pww_idx;
+reg [7:0]  pww_idx;
 reg [9:0]  pww_tag;
 reg [31:0] pww_data;
 
@@ -227,7 +227,7 @@ reg        done_d;
 reg        done2_d;                      // _120: toggle-shadow del canal B
 reg        got_lo, got_hi;               // _120: mitades recibidas (lecturas)
 reg        pwv_set_p;                    // _120: set de pw_v retrasado 1 ciclo
-reg [6:0]  pwv_set_i;                    //       (alineado con el dato negedge)
+reg [7:0]  pwv_set_i;                    //       (alineado con el dato negedge)
 reg  [1:0] cur_kind;                     // 0=pf, 1=rq, 2=wq
 reg        cur_half;                     // mitad baja(0)/alta(1) de la palabra
 reg [15:0] cur_addrw;                    // addr[17:2] de la palabra en curso
@@ -255,8 +255,11 @@ reg [31:0] late_data;
 // prefetch OBL de la linea siguiente PELEABAN por el mismo slot con 64
 // (linea N+1 pisa exactamente los indices de la N): misses sistematicos
 // en el arranque de lineas alternas. Con 128, lineas adyacentes conviven.
-function [6:0] w_idx(input [15:0] v);
-    w_idx = v[6:0] ^ {v[14], 6'b0};
+// _122: ventana a 256 palabras (8 medias-lineas SC7/8 por mitad) — el
+// re-fetch de frontera aun pillaba el realineo de indices cada 4 lineas
+// (~500 misses/s residuales en placa = guiones transitorios visibles).
+function [7:0] w_idx(input [15:0] v);
+    w_idx = v[7:0] ^ {v[14], 7'b0};
 endfunction
 function [11:0] c_idx(input [15:0] v);
     c_idx = v[11:0] ^ {v[14], 11'b0};
@@ -323,14 +326,14 @@ end
 // estables ~5.8ns a cada lado de su flanco: hold y setup por
 // construccion. pww_en/pww_idx no cambian (sus caminos no violaban).
 reg [41:0] pww_word_n;
-reg  [6:0] pww_idx_n;
+reg  [7:0] pww_idx_n;
 reg        pww_en_n;
 always @(negedge clk_vdp) begin
     pww_word_n <= {pww_tag, pww_data};
     pww_idx_n  <= pww_idx;
     pww_en_n   <= pww_en;
 end
-wire [6:0] pw_ridx = obl_pend ? w_idx(obl_w) : w_idx(vram_address);
+wire [7:0] pw_ridx = obl_pend ? w_idx(obl_w) : w_idx(vram_address);
 always @(posedge clk_vdp) begin
     if (pww_en_n) pw_mem[pww_idx_n] <= pww_word_n;
     pwq <= pw_mem[pw_ridx];
@@ -344,7 +347,7 @@ wire [1:0]  nxt_byte = cur_mask[0] ? 2'd0 : cur_mask[1] ? 2'd1
 
 always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
-        pw_v <= 128'd0; scv_swp <= 13'd0; pfq_wp <= 0; pfq_rp <= 0;
+        pw_v <= 256'd0; scv_swp <= 13'd0; pfq_wp <= 0; pfq_rp <= 0;
         wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0;
         bsy <= 0; done_d <= 0; done2_d <= 0; got_lo <= 0; got_hi <= 0;
         pwv_set_p <= 0; pwv_set_i <= 0;
@@ -432,9 +435,16 @@ always @(posedge clk_vdp or negedge rst_n) begin
             if (spr_tag1[4:2] == C_BG && pwq_v &&
                 pwq[41:32] == spr_addr1[15:6]) begin
                 // HIT de VENTANA: dato + OBL (fase 2)
+                // _122: prefetch a +2 (antes +1) — un miss/frame EXACTO
+                // (59/s medidos por COM11 en SC5) dibujaba la "linea
+                // barredora": el batido del refresh periodico (3519.4 por
+                // frame) rompia el plazo de UN fill por frame en posicion
+                // precesante. Con +2 el plazo se DOBLA (~3us en SC5) con
+                // el mismo caudal; la cadena la siembra el miss (+1 directo
+                // y +2 via OBL, sin huecos ni duplicados).
                 pipe[1] <= {1'b1, spr_tag1, pwq[31:0]};
                 obl_pend <= 1'b1;
-                obl_w    <= spr_addr1 + 16'd1;
+                obl_w    <= spr_addr1 + 16'd2;
             end
             else if (scq_v && scq_tag == spr_addr1[15:12])
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};
@@ -454,13 +464,18 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     rq_wp <= rq_wp + 4'd1;
                 end
                 if (spr_tag1[4:2] == C_BG) begin
-                    // bg: cuenta el miss y arranca el stream OBL (bitmap)
+                    // bg: cuenta el miss y arranca el stream OBL (bitmap).
+                    // _122: siembra COMPLETA de la cadena +2 — el +1 va
+                    // directo a pfq y el +2 via OBL (fase 2, un ciclo
+                    // despues: sin colision en el puerto de pfq).
                     bg_miss <= bg_miss + 8'd1;
                     c_miss  <= c_miss + 32'd1;
                     if (!pfq_full) begin
                         pfq[pfq_wp] <= spr_addr1 + 16'd1;
                         pfq_wp <= pfq_wp + 3'd1;
                     end
+                    obl_pend <= 1'b1;
+                    obl_w    <= spr_addr1 + 16'd2;
                 end
             end
         end

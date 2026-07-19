@@ -355,17 +355,43 @@ module memory_ctrl #(
     // invariante MG2 quedan INTACTOS por construccion.
     reg SdrWav = 0;
     reg wv_inflight = 0;
-    wire wav_take = (enable_sdram == 0 && wv_req == 1 && wv_inflight == 0);
-    // V9968: wv2 solo toma el hueco si la wave NO lo quiere este turno
     reg SdrWv2 = 0;
     reg wv2_inflight = 0;
-    wire wv2_take = (enable_sdram == 0 && wv2_req == 1 && wv2_inflight == 0
-                     && wav_take == 0);
-    // V9968 _120: wv3 toma el hueco solo si ni wave ni wv2 lo quieren
     reg SdrWv3 = 0;
     reg wv3_inflight = 0;
-    wire wv3_take = (enable_sdram == 0 && wv3_req == 1 && wv3_inflight == 0
-                     && wav_take == 0 && wv2_take == 0);
+    // _122: PRE-COMPUTO de la familia wave en la FASE 7 de la media VDP —
+    // la cadena wv_req -> takes -> mux de prioridad -> SdrAdr (fila) a
+    // 108MHz era la familia REINCIDENTE del placement (hasta -2.0 en 3 de
+    // 4 tiradas). Es LEGAL adelantarla: los req son NIVELES (los drops por
+    // done de la media CPU anterior cruzan el CDC en las fases 1-3 de la
+    // media VDP y estan asentados en la 7; una subida que llegue justo en
+    // la 7 espera media extra = +148ns esporadicos, absorbidos por el
+    // slack del prefetch +2). enable_sdram queda FUERA del pre-computo y
+    // se aplica FRESCO en la fase 0 (coherente entre concesion y fila:
+    // sin raza con FSM-A). Los nombres *_take se conservan: el resto del
+    // FSM (concesiones, columnas, DQM, dato, done) NO cambia.
+    reg        pre_wav = 0, pre_wv2 = 0, pre_wv3 = 0;
+    reg [12:0] pre_row = 0;
+    reg [1:0]  pre_ba = 0;
+    always @ ( posedge clk_108m ) begin
+        if( ff_sdr_seq == 3'b111 && video_dlclk == 1 ) begin
+            pre_wav <= (wv_req == 1 && wv_inflight == 0);
+            pre_wv2 <= (wv2_req == 1 && wv2_inflight == 0)
+                       && !(wv_req == 1 && wv_inflight == 0);
+            pre_wv3 <= (wv3_req == 1 && wv3_inflight == 0)
+                       && !(wv_req == 1 && wv_inflight == 0)
+                       && !(wv2_req == 1 && wv2_inflight == 0);
+            pre_row <= (wv_req == 1 && wv_inflight == 0)   ? { 1'b1, 2'b00, wv_addr[21:12] } :
+                       (wv2_req == 1 && wv2_inflight == 0) ? { 1'b1, 2'b00, wv2_addr[21:12] } :
+                                                             { 1'b1, 2'b00, wv3_addr[21:12] };
+            pre_ba  <= (wv_req == 1 && wv_inflight == 0)   ? wv_addr[11:10] :
+                       (wv2_req == 1 && wv2_inflight == 0) ? wv2_addr[11:10] :
+                                                             wv3_addr[11:10];
+        end
+    end
+    wire wav_take = (enable_sdram == 0 && pre_wav == 1);
+    wire wv2_take = (enable_sdram == 0 && pre_wv2 == 1);
+    wire wv3_take = (enable_sdram == 0 && pre_wv3 == 1);
     always @ ( posedge clk_108m ) begin
         if( ff_sdr_seq == 3'b000 ) begin
             SdrWav <= (SdrSta[2] == 1) && (video_dlclk == 0) && wav_take
@@ -476,22 +502,13 @@ module memory_ctrl #(
                 end
                 else begin                                                           //-- set [row address]
                     if( video_dlclk == 0 ) begin
-                        if( wav_take ) begin
-                            //-- _104: wave = filas 4096+ (bit12 de fila a 1),
-                            //-- INALCANZABLES por los mapeos CPU/VDP (fila
-                            //-- {2'b00,...} siempre): aislamiento fisico.
-                            SdrAdr <= { 1'b1, 2'b00, wv_addr[21:12] };
-                            SdrBa  <= wv_addr[11:10];
-                        end
-                        else if( wv2_take ) begin
-                            //-- V9968: misma ventana aislada de filas 4096+
-                            SdrAdr <= { 1'b1, 2'b00, wv2_addr[21:12] };
-                            SdrBa  <= wv2_addr[11:10];
-                        end
-                        else if( wv3_take ) begin
-                            //-- V9968 _120: canal B, misma ventana aislada
-                            SdrAdr <= { 1'b1, 2'b00, wv3_addr[21:12] };
-                            SdrBa  <= wv3_addr[11:10];
+                        if( wav_take || wv2_take || wv3_take ) begin
+                            //-- _104/_122: familia wave = filas 4096+ (bit12
+                            //-- de fila a 1), aisladas de CPU/VDP. La fila ya
+                            //-- viene PRE-COMPUTADA de la fase 7 (pre_row):
+                            //-- aqui solo queda el AND con enable_sdram.
+                            SdrAdr <= pre_row;
+                            SdrBa  <= pre_ba;
                         end
                         else begin
                             SdrAdr <= { 2'b00, sdram_addr[12:2] };   //-- cpu read/write (fila = mismos bits que el original)

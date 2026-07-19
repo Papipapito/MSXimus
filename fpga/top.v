@@ -270,14 +270,30 @@ end
 `endif
 
     // ================================================================
-    //  VENTILADOR (Console 60K, FAN_EN=AB12): SIEMPRE ENCENDIDO.
-    //  HW 2026-07-19: con el disipador bastante caliente el termometro RO
-    //  (fan_ctrl/ro_osc, commit c64068c) NO disparo — umbral K_ON alto o
-    //  pendiente del anillo menor que la estimada; Albert pidio dejarlo
-    //  fijo. Los modulos quedan en el repo para recalibrar algun dia con
-    //  dbg_cnt por el debug UART.
+    //  VENTILADOR por temperatura, TOMA 2 (_122): en HW la toma 1 no
+    //  disparo con el disipador caliente (umbral +30C demasiado alto o
+    //  pendiente del anillo menor que la estimada). Albert pide disparo
+    //  ~40C: umbral RELATIVO bajado a ~+7-10C sobre el arranque
+    //  (K_ON=10/1024 ~1%, K_OFF=5/1024) — con el die tibio deberia
+    //  arrancar solo. Fail-safe intacto (anillo muerto -> ON).
     // ================================================================
-    assign fan_en_o = 1'b1;
+    wire        fan_ro_en, fan_ro_rst;
+    wire [19:0] fan_ro_cnt;
+    wire [19:0] fan_dbg_cnt;
+    fan_ctrl #(.K_ON(10'd10), .K_OFF(10'd5)) u_fanctrl (
+        .clk        (clk_27m),
+        .reset_n    (clock_locked),
+        .ro_en      (fan_ro_en),
+        .ro_cnt_rst (fan_ro_rst),
+        .ro_cnt     (fan_ro_cnt),
+        .fan_en     (fan_en_o),
+        .dbg_cnt    (fan_dbg_cnt)
+    );
+    ro_osc u_roosc (
+        .ro_en   (fan_ro_en),
+        .cnt_rst (fan_ro_rst),
+        .cnt_out (fan_ro_cnt)
+    );
 
     // ================================================================
     //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
@@ -4145,14 +4161,16 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // strobes + a UART, costing area/routing at 91% CLS for a dev-only feature.
     // Re-add temporarily if bus timing needs probing over the USB-C UART.
 `ifdef ENABLE_V9968_VDP
-    // _121diag: telemetria del shim V9968 por el USB-UART (COM11, 115200):
-    // "D <miss> <complA> <complB>" cada 250ms — discrimina inanicion del
-    // arbitro vs corrupcion CDC vs display en los glitches HW de SC6+.
+    // _121diag: telemetria del shim V9968 (ASCII 115200): "D <miss>
+    // <complA> <complB>" cada 200ms. Sale por E22 (dbg_pmod1[4], donde
+    // vive el CH340 de COM11) — ver el mux junto a los assigns de PMOD.
+    wire usb_uart_tx_int;
     dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
         .clk(clk_54m), .rst_n(bus_reset_n),
         .cnt_a(v68dbg_miss), .cnt_b(v68dbg_bka), .cnt_c(v68dbg_bkb),
-        .tx(usb_uart_tx)
+        .tx(usb_uart_tx_int)
     );
+    assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
 `else
     assign usb_uart_tx = 1'b1;      // UART idle
 `endif
@@ -4283,7 +4301,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // _111b: la telemetria GANA el pin E22. (La rama ENABLE_WIFI que sacaba
     // aqui el espejo de la UART del WiFi era un resto de diagnostico _77 y
     // le robaba el pin a la telemetria: el lector no veia NADA.)
+`ifdef ENABLE_V9968_VDP
+    // _121diag: E22 (el CH340 de COM11) pasa a llevar la telemetria del
+    // SHIM (dbg_uart ASCII 115200) — la del motor wave (_111) cede el pin
+    // en las builds V9968 de diagnostico; usb_uart_tx no llega al PC.
+    assign dbg_pmod1[4] = usb_uart_tx_int;
+`else
     assign dbg_pmod1[4] = opl4_dbg_tx;   // _111: telemetria del motor wave
+`endif
 `endif
     // dbg_pmod1[5]/D22 eliminado: pasa a uart_pmod_rx (input) para el modo PMOD test
 
