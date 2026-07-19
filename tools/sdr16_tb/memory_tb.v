@@ -66,6 +66,12 @@ module memory_tb;
     reg  [7:0]  wv2_wdata = 0;
     wire [15:0] wv2_dout;
     wire        wv2_done;
+    // V9968 _120: canal B (wv3)
+    reg         wv3_req = 0, wv3_we = 0;
+    reg  [21:0] wv3_addr = 0;
+    reg  [7:0]  wv3_wdata = 0;
+    wire [15:0] wv3_dout;
+    wire        wv3_done;
 
     wire        sd_clk, sd_cke, sd_cs_n, sd_cas_n, sd_ras_n, sd_wen_n;
     wire [15:0] sd_dq;
@@ -102,6 +108,12 @@ module memory_tb;
         .wv2_wdata   (wv2_wdata),
         .wv2_dout    (wv2_dout),
         .wv2_done    (wv2_done),
+        .wv3_req     (wv3_req),
+        .wv3_we      (wv3_we),
+        .wv3_addr    (wv3_addr),
+        .wv3_wdata   (wv3_wdata),
+        .wv3_dout    (wv3_dout),
+        .wv3_done    (wv3_done),
         .O_sdram_clk   (sd_clk),
         .O_sdram_cke   (sd_cke),
         .O_sdram_cs_n  (sd_cs_n),
@@ -237,7 +249,19 @@ module memory_tb;
             @(posedge clk108); @(posedge clk108);
         end
     endtask
+    task wv3_op(input wr, input [21:0] a, input [7:0] wd, output [15:0] rd);
+        begin
+            @(posedge clk108);
+            wv3_we = wr; wv3_addr = a; wv3_wdata = wd; wv3_req = 1;
+            @(posedge wv3_done);
+            @(posedge clk108);
+            rd = wv3_dout;
+            wv3_req = 0;
+            @(posedge clk108); @(posedge clk108);
+        end
+    endtask
     reg [15:0] wv2_rd;
+    reg [15:0] wv3_rd;
     task wv_read_check16(input [21:0] a, input [15:0] exp, input [255:0] msg);
         begin wv_op(0, a, 8'h00, wv_rd); check16(wv_rd, exp, msg); end
     endtask
@@ -265,8 +289,10 @@ module memory_tb;
 
     // ---------------- watchdog ----------------
     initial begin
-        #6_000_000;   // 6 ms de sim
+        #20_000_000;   // 20 ms de sim (_120: W5 cuatro bandas anadido)
         $display("TIMEOUT: el testbench no ha terminado");
+        $display("dbg: wv3_req=%b wv3_done=%b wv3_inflight=%b SdrWv3=%b wv2_req=%b wv_req=%b",
+                 wv3_req, wv3_done, dut.wv3_inflight, dut.SdrWv3, wv2_req, wv_req);
         $finish;
     end
 
@@ -612,6 +638,59 @@ module memory_tb;
             end
         end
         $display("W4 tres bandas OK (150 wave + 300 wv2 + %0d CPU)", 2*NRAND);
+
+        // ---- V9968 _120 W5: CUATRO BANDAS — wave + wv2 + wv3 + CPU ----
+        // wv3 es el canal B del shim (lecturas de mitad alta en paralelo);
+        // aqui se ejercita con escrituras+lecturas propias en la ventana
+        // aislada para validar el arbitro wave>wv2>wv3 sin perdidas.
+        fork
+            begin : w5_wave
+                integer li;
+                for (li = 0; li < 100; li = li + 1)
+                    wv_write(22'h100000 + li[21:0], li[7:0] ^ 8'h6B);
+            end
+            begin : w5_wv2
+                integer lj;
+                for (lj = 0; lj < 200; lj = lj + 1)
+                    wv2_op(1, 22'h280000 + lj[21:0], lj[7:0] ^ 8'hD4, wv2_rd);
+            end
+            begin : w5_wv3
+                integer lk;
+                for (lk = 0; lk < 200; lk = lk + 1)
+                    wv3_op(1, 22'h2C0000 + lk[21:0], lk[7:0] ^ 8'h77, wv3_rd);
+            end
+            begin : w5_cpu
+                for (ri = 0; ri < NRAND; ri = ri + 1) begin
+                    ra = rnd_addr[ri];
+                    cpu_write(ra, ra[7:0] ^ 8'h4E);
+                    exp_mem[ra] = ra[7:0] ^ 8'h4E;
+                end
+                for (ri = 0; ri < NRAND; ri = ri + 1) begin
+                    ra = rnd_addr[ri];
+                    cpu_op(0, ra, 8'h00, rd_);
+                    check8(rd_, exp_mem[ra], "W5 CPU bajo trafico 3 canales");
+                end
+            end
+        join
+        begin : w5_verify
+            integer lm;
+            for (lm = 0; lm < 200; lm = lm + 1) begin
+                wv2_op(0, 22'h280000 + lm[21:0], 8'h00, wv2_rd);
+                check8(lm[0] ? wv2_rd[15:8] : wv2_rd[7:0], lm[7:0] ^ 8'hD4,
+                       "W5 wv2 integra");
+            end
+            for (lm = 0; lm < 200; lm = lm + 1) begin
+                wv3_op(0, 22'h2C0000 + lm[21:0], 8'h00, wv3_rd);
+                check8(lm[0] ? wv3_rd[15:8] : wv3_rd[7:0], lm[7:0] ^ 8'h77,
+                       "W5 wv3 integra");
+            end
+            for (lm = 0; lm < 100; lm = lm + 1) begin
+                wv_op(0, 22'h100000 + lm[21:0], 8'h00, wv_rd);
+                check8(lm[0] ? wv_rd[15:8] : wv_rd[7:0], lm[7:0] ^ 8'h6B,
+                       "W5 wave integra");
+            end
+        end
+        $display("W5 cuatro bandas OK (100 wave + 200 wv2 + 200 wv3 + %0d CPU)", 2*NRAND);
 
         if (errors == 0)
             $display("*** ALL TESTS PASS ***");
