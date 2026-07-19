@@ -63,7 +63,12 @@ module v9968_vram_shim #(
     output wire        vram_stall,
 
     // ---- diagnostico ----
-    output wire [7:0]  diag
+    output wire [7:0]  diag,
+    // _121diag: contadores de telemetria (taps de solo lectura, cuasi-
+    // estaticos — se muestrean desde dbg_uart en otro dominio)
+    output wire [31:0] dbg_miss,
+    output wire [31:0] dbg_bka,
+    output wire [31:0] dbg_bkb
 );
 
 localparam C_BG     = 3'd1;
@@ -196,6 +201,10 @@ integer pi;
 // miss de bg: contador (diagnostico — un miss = 1 palabra negra 1 frame)
 reg [7:0] bg_miss;
 assign diag = bg_miss;
+reg [31:0] c_miss, c_bka, c_bkb;         // _121diag
+assign dbg_miss = c_miss;
+assign dbg_bka  = c_bka;
+assign dbg_bkb  = c_bkb;
 
 // control de flujo: con wq medio-lleno o rq caliente, el interface retiene
 // los slots de CPU/COMANDO (ready=0) hasta que el backend drene
@@ -342,6 +351,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         bk_req <= 0; bk_we <= 0; bk_addr <= 0; bk_wdata <= 0;
         vram_rdata <= 0; vram_rdata_en <= 0; vram_rtag <= 0;
         bg_miss <= 0;
+        c_miss <= 0; c_bka <= 0; c_bkb <= 0;
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
@@ -355,6 +365,8 @@ always @(posedge clk_vdp or negedge rst_n) begin
         bk2_req <= 1'b0;
         done_d  <= bk_done_t;
         done2_d <= bk2_done_t;
+        if (bk_done_t  != done_d)  c_bka <= c_bka + 32'd1;
+        if (bk2_done_t != done2_d) c_bkb <= c_bkb + 32'd1;
         spr_p1 <= 1'b0;
         wrk_p1 <= 1'b0;
         pww_en <= 1'b0;
@@ -439,6 +451,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 if (spr_tag1[4:2] == C_BG) begin
                     // bg: cuenta el miss y arranca el stream OBL (bitmap)
                     bg_miss <= bg_miss + 8'd1;
+                    c_miss  <= c_miss + 32'd1;
                     if (!pfq_full) begin
                         pfq[pfq_wp] <= spr_addr1 + 16'd1;
                         pfq_wp <= pfq_wp + 3'd1;

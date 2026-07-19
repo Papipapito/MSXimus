@@ -97,6 +97,7 @@ add_file src/scc_glue.v
 add_file src/scc_wave2v.v
 add_file src/memory.v
 add_file src/fan_ctrl.v
+add_file src/dbg_uart.v
 add_file src/ro_osc.v
 add_file src/ocm/kanji.v
 add_file src/ocm/rtc.v

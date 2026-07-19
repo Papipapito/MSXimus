@@ -97,12 +97,30 @@ always @(posedge clk_host or negedge rst_n) begin
         if (wr_strobe) begin
             case (addr_r[1:0])
                 2'b00: sel_reg_b0 <= din_r;
-                2'b01: shadow_b0[sel_reg_b0] <= din_r;
                 2'b10: sel_reg_b1 <= din_r;
-                2'b11: shadow_b1[sel_reg_b1] <= din_r;
+                default: ;
             endcase
         end
     end
+end
+
+// _121diag: media etapa NEGEDGE en las escrituras de las shadow — misma
+// clase de hold que pww->pw_mem en el shim (registro->AD de BSRAM
+// demasiado corto, -0.02): dato/indice/enable se recapturan a contraflanco
+// y la BSRAM los ve estables medio ciclo a cada lado. La escritura aterriza
+// 1 ciclo despues: irrelevante (las lecturas de shadow van a ritmo de CPU).
+reg       shw_we0_n, shw_we1_n;
+reg [7:0] shw_idx0_n, shw_idx1_n, shw_dat_n;
+always @(negedge clk_host) begin
+    shw_we0_n  <= wr_strobe && (addr_r[1:0] == 2'b01);
+    shw_we1_n  <= wr_strobe && (addr_r[1:0] == 2'b11);
+    shw_idx0_n <= sel_reg_b0;
+    shw_idx1_n <= sel_reg_b1;
+    shw_dat_n  <= din_r;
+end
+always @(posedge clk_host) begin
+    if (shw_we0_n) shadow_b0[shw_idx0_n] <= shw_dat_n;
+    if (shw_we1_n) shadow_b1[shw_idx1_n] <= shw_dat_n;
 end
 
 // mux de lectura: status del core en C4/C6, registro shadow en C5/C7.

@@ -1658,6 +1658,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // _120: DOS canales — las lecturas de palabra piden las dos mitades en
     // paralelo (bk por wv2, bk2 por wv3): los modos de 256B/linea (SC7/8/12)
     // consumen 1 palabra/730ns y un canal solo daba ~800ns.
+    wire [31:0] v68dbg_miss, v68dbg_bka, v68dbg_bkb;   // _121diag → COM11
     wire        v68bk_req, v68bk_we, v68bk_done_t;
     wire [21:0] v68bk_addr;
     wire [7:0]  v68bk_wdata;
@@ -1677,7 +1678,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .bk2_req(v68bk2_req), .bk2_addr(v68bk2_addr),
         .bk2_rword(v68bk2_rword), .bk2_done_t(v68bk2_done_t),
         .vram_stall(v68_vram_stall),
-        .diag()
+        .diag(),
+        .dbg_miss(v68dbg_miss), .dbg_bka(v68dbg_bka), .dbg_bkb(v68dbg_bkb)
     );
     v9968_sdram_bridge u_v68bridge (
         .clk_vdp(clk_86), .rst_n(rst86_n),
@@ -4142,7 +4144,18 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // timing_debug debug1 removed for production: it registered high-fanout bus
     // strobes + a UART, costing area/routing at 91% CLS for a dev-only feature.
     // Re-add temporarily if bus timing needs probing over the USB-C UART.
+`ifdef ENABLE_V9968_VDP
+    // _121diag: telemetria del shim V9968 por el USB-UART (COM11, 115200):
+    // "D <miss> <complA> <complB>" cada 250ms — discrimina inanicion del
+    // arbitro vs corrupcion CDC vs display en los glitches HW de SC6+.
+    dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
+        .clk(clk_54m), .rst_n(bus_reset_n),
+        .cnt_a(v68dbg_miss), .cnt_b(v68dbg_bka), .cnt_c(v68dbg_bkb),
+        .tx(usb_uart_tx)
+    );
+`else
     assign usb_uart_tx = 1'b1;      // UART idle
+`endif
 
     // ===== STANDALONE MERGE: discrete status LEDs (active low) — from MSXnano =====
     // LED[5] TURBO: solid = turbo ON (~4.13MHz); blink (~1.8Hz) = real-MSX speed (also "alive"). LED[4] SD busy;
