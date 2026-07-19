@@ -187,7 +187,12 @@ reg [3:0]  rq_wp, rq_rp;
 wire [3:0] rq_used  = rq_wp - rq_rp;
 wire       rq_empty = (rq_wp == rq_rp);
 wire       rq_full  = (rq_used == 4'd15);
-wire       rq_room_soft = (rq_used <= 4'd4);   // hueco para bg/sprite
+wire       rq_room_soft = (rq_used <= 4'd12);  // hueco para bg/sprite (_121:
+                                               // al ensanchar rq a 16 la
+                                               // reserva quedo en 4 = cola
+                                               // efectiva de 4 -> 265K
+                                               // drops/s en SC8; CPU/cmd
+                                               // conservan 3 plazas)
 
 // ============================================================================
 // TUBERIA DE RESPUESTA A 8 CICLOS para bg: shift-register de 8 etapas con

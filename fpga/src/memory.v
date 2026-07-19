@@ -208,6 +208,7 @@ module memory_ctrl #(
     // de escritura VDP continua, imposible con escrituras reales) FUERZA el
     // refresh aunque vram_write siga activo. Ver comentario del slot abajo.
     reg [5:0] rfsh_skip_cnt = 6'd0;
+    reg [4:0] rfsh_gap = 5'd0;      //-- _121: limitador de tasa del refresh
     reg [4:0]  RstSeq = 0;
     // SDRAM control signals
     reg  [2:0] SdrSta = 3'b000;
@@ -295,7 +296,7 @@ module memory_ctrl #(
             //--  end case;
                 SdrSta <= { 1'b0, RstSeq[1:0] };
             end
-            else if( bus_rfsh_n == 0 && video_dlclk == 1 && (vram_write == 0 || rfsh_skip_cnt[5] == 1) ) begin
+            else if( bus_rfsh_n == 0 && video_dlclk == 1 && rfsh_gap[4] == 1 && (vram_write == 0 || rfsh_skip_cnt[5] == 1) ) begin
                 //-- refresh roba el slot VDP SOLO si el VDP va a LEER (display/
                 //-- sprite, recuperable al siguiente frame). Si va a ESCRIBIR
                 //-- (comando del blitter HMMV/HMMM o acceso CPU por puerto), NO:
@@ -310,14 +311,28 @@ module memory_ctrl #(
                 //-- refresh tras 32 saltos (~4us): cadencia minima garantizada
                 //-- (2x mejor que los 7.8us/fila del W9825) y las escrituras
                 //-- reales (pulsos) siguen protegidas como pedia MG2.
+                //-- _121: LIMITADOR DE TASA (fix de los glitches SC6+ de HW
+                //-- _119/_120): el refresh cabalgaba en CADA RFSH del Z80
+                //-- (~1.35M/s) y ademas ocupa DOS medias (la media CPU
+                //-- siguiente relee SdrSta rancio y re-emite REF) = ~45% de
+                //-- TODOS los turnos quemados en refrescos 23x redundantes —
+                //-- los canales wv2/wv3 del V9968 morian de hambre (techo
+                //-- 858K palabras/s vs 1.007M que pide SCREEN 8; telemetria
+                //-- COM11 + sim de condiciones-de-placa lo reprodujeron).
+                //-- rfsh_gap acepta un refresh cada >=16 medias VDP (~4.7us,
+                //-- margen sobre los 7.8us/fila del W9825; ~210K/s). El
+                //-- guardian MG2/SCREEN3 (rfsh_skip_cnt) queda INTACTO.
                 SdrSta <= 3'b010;                                                //-- refresh
                 rfsh_skip_cnt <= 6'd0;
+                rfsh_gap <= 5'd0;
             end
             else begin
                 //--  Normal memory access mode
                 SdrSta[2] <= 1;                                               //-- read/write cpu/vdp
                 if ( bus_rfsh_n == 0 && video_dlclk == 1 && rfsh_skip_cnt[5] == 0 )
                     rfsh_skip_cnt <= rfsh_skip_cnt + 6'd1;   //-- oportunidad saltada
+                if ( video_dlclk == 1 && rfsh_gap[4] == 0 )
+                    rfsh_gap <= rfsh_gap + 5'd1;             //-- _121: ventana entre refrescos
             end
         end
         else if( ff_sdr_seq == 3'b001 && SdrSta[2] == 1 && RstSeq[4:3] == 2'b11 )begin

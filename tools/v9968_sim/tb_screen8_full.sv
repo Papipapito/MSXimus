@@ -135,6 +135,14 @@ reg  [7:0]  vram_din = 0;
 reg         vdpc_write = 0;
 reg  [16:0] vdpc_addr = 0;
 reg         bus_rfsh_n = 1;
+// _121b: RFSH del Z80 real (M1 ~1.25us, bajo ~560ns = ~45%% de ocupacion)
+initial begin
+    #100000;
+    forever begin
+        bus_rfsh_n = 1; #690;
+        bus_rfsh_n = 0; #560;
+    end
+end
 wire [7:0]  ram_dout;
 wire [15:0] vdpc_dout;
 wire        ram_busy;
@@ -197,6 +205,78 @@ memory_ctrl dut (
     .O_sdram_dqm   (sd_dqm)
 );
 
+// _121b: trafico CPU estilo Z80 (fetch continuo ~1M/s) — protocolo
+// req->busy sube->req abajo (patron cpu_op del memory_tb)
+reg [22:0] z80_a = 23'h4000;
+initial begin
+    #150000;
+    forever begin
+        @(negedge clk54);
+        ram_addr  = z80_a;
+        ram_write = 0;
+        ram_req   = 1;
+        @(posedge ram_busy);
+        @(negedge clk54);
+        ram_req   = 0;
+        @(negedge ram_busy);
+        z80_a = z80_a + 23'd1;
+        repeat (2) @(negedge clk54);   // ~1 op/us a 54MHz/2... ajustado abajo
+    end
+end
+
+// 3) contadores de ocupacion de TURNOS (fase 0 de cada media CPU)
+integer t_total = 0, t_rfsh = 0, t_cpu = 0, t_wav = 0, t_wv2 = 0, t_wv3 = 0, t_idle = 0;
+always @(posedge clk108) begin
+    if (dut.ff_sdr_seq == 3'b000 && video_dlclk == 0 && dut.RstSeq == 5'b11111) begin
+        t_total <= t_total + 1;
+        if (dut.SdrSta[2:0] == 3'b010) t_rfsh <= t_rfsh + 1;
+        else if (dut.SdrWav) t_wav <= t_wav + 1;
+        else if (dut.SdrWv2) t_wv2 <= t_wv2 + 1;
+        else if (dut.SdrWv3) t_wv3 <= t_wv3 + 1;
+        else if (dut.enable_sdram) t_cpu <= t_cpu + 1;
+        else t_idle <= t_idle + 1;
+    end
+end
+// _121c: sonda de LATENCIA por tramo del canal A (donde se van los ns):
+//   t_req  = pulso bk_req del shim (86)
+//   t_wreq = subida de wv2_req en el 108 (tras el CDC)
+//   t_gnt  = concesion (SdrWv2 sube)
+//   t_done = wv2_done
+//   t_bkd  = bk_done_t de vuelta en el 86
+integer lat_n = 0;
+realtime t_req, t_wreq, t_gnt, t_done;
+reg wv2_req_d = 0, sdrwv2_d = 0, bkdone_d = 0;
+always @(posedge clk86) begin
+    if (bk_req) t_req = $realtime;
+    if (bk_done_t != bkdone_d) begin
+        bkdone_d <= bk_done_t;
+        if (lat_n < 30 && dump_state == 1) begin
+            lat_n <= lat_n + 1;
+            $display("LAT req->wreq=%0.0f wreq->gnt=%0.0f gnt->done=%0.0f done->bk=%0.0f TOTAL=%0.0f",
+                     t_wreq-t_req, t_gnt-t_wreq, t_done-t_gnt,
+                     $realtime-t_done, $realtime-t_req);
+        end
+    end
+end
+always @(posedge clk108) begin
+    wv2_req_d <= wv2_req;
+    sdrwv2_d  <= dut.SdrWv2;
+    if (wv2_req && !wv2_req_d) t_wreq = $realtime;
+    if (dut.SdrWv2 && !sdrwv2_d) t_gnt = $realtime;
+    if (wv2_done) t_done = $realtime;
+end
+
+integer rep_n = 0;
+always @(posedge clk86) begin
+    if (display_vs && !vs_d && vs_count > 2) begin
+        rep_n <= rep_n + 1;
+        if (rep_n[0] == 0)
+            $display("TURNOS total=%0d rfsh=%0d cpu=%0d idle=%0d | bkA=%0d bkB=%0d miss=%0d pfqdrop=%0d rqdrop=%0d",
+                     t_total, t_rfsh, t_cpu, t_idle,
+                     u_shim.c_bka, u_shim.c_bkb, u_shim.c_miss, c_pfqdrop, c_rqdrop);
+    end
+end
+
 w9825_model sdram (
     .clk   (sd_clk),
     .cke   (sd_cke),
@@ -254,15 +334,33 @@ end
 
 // ---------------- sondas por linea ----------------
 integer ln_miss = 0, ln_num = 0;
+integer c_pfqdrop = 0, c_rqdrop = 0;
+always @(posedge clk86) begin
+    if (u_shim.obl_do && u_shim.pfq_full) c_pfqdrop <= c_pfqdrop + 1;
+    if (dbg_bg1 && !dbg_whit && !dbg_chit && !u_shim.rq_room_soft) c_rqdrop <= c_rqdrop + 1;
+end
 wire dbg_bg1  = u_shim.spr_p1 && (u_shim.spr_tag1[4:2] == 3'd1);
 wire dbg_whit = dbg_bg1 && u_shim.pwq_v && (u_shim.pwq[41:32] == u_shim.spr_addr1[15:6]);
 wire dbg_chit = dbg_bg1 && !dbg_whit && u_shim.scq_v && (u_shim.scq_tag == u_shim.spr_addr1[15:12]);
 always @(posedge clk86) begin
     if (dump_state == 1) begin
-        if (dbg_bg1 && !dbg_whit && !dbg_chit) begin
+        if (dbg_bg1 && !dbg_whit && !dbg_chit) begin : misscause
+            reg in_pfq, in_rq, infl;
+            reg [15:0] wtag_have;
+            integer qi;
             ln_miss <= ln_miss + 1;
+            in_pfq = 0; in_rq = 0;
+            for (qi = 0; qi < 8; qi = qi + 1)
+                if (u_shim.pfq_wp != u_shim.pfq_rp &&
+                    u_shim.pfq[qi] == u_shim.spr_addr1) in_pfq = 1;
+            for (qi = 0; qi < 16; qi = qi + 1)
+                if (u_shim.rq[qi][15:0] == u_shim.spr_addr1) in_rq = 1;
+            infl = u_shim.bsy && (u_shim.cur_addrw == u_shim.spr_addr1);
             if (ln_miss < 3)
-                $display("MISS ln=%0d addr=%04x", ln_num, u_shim.spr_addr1);
+                $display("MISS ln=%0d addr=%04x pfq=%b rq=%b infl=%b wv=%b wtag=%03x pfqn=%0d",
+                         ln_num, u_shim.spr_addr1, in_pfq, in_rq, infl,
+                         u_shim.pwq_v, u_shim.pwq[41:32],
+                         (u_shim.pfq_wp - u_shim.pfq_rp) & 3'd7);
         end
         if (display_hs && !hs_d) begin
             ln_miss <= 0; ln_num <= ln_num + 1;
