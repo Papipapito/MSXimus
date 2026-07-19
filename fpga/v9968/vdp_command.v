@@ -314,6 +314,24 @@ module vdp_command (
 	//	Address
 	// --------------------------------------------------------------------
 	assign w_sy					= (ff_command == c_lrmm && ff_xhr) ? { ff_sy[20], ff_sy[20:1] }: ff_sy;
+
+	//	[MSXimus _120f] Comparadores de ventana LRMM con el mux DESPUES del
+	//	resultado (transformacion algebraica bit-exacta). El decode de
+	//	ff_command entraba ANTES de la cadena de comparacion con signo de
+	//	w_sy (15 niveles hasta ff_source, violaba setup a 85.9MHz); las dos
+	//	variantes (normal y >>1) se comparan en paralelo y el decode solo
+	//	elige el bit final. syn_keep evita que la sintesis las re-fusione.
+	wire		w_lrmm_xhr	= (ff_command == c_lrmm && ff_xhr);
+	wire		w_wsy_lt_n /* synthesis syn_keep = 1 */;
+	wire		w_wsy_lt_s /* synthesis syn_keep = 1 */;
+	wire		w_wsy_gt_n /* synthesis syn_keep = 1 */;
+	wire		w_wsy_gt_s /* synthesis syn_keep = 1 */;
+	assign w_wsy_lt_n	= ( $signed(ff_sy[20:8])                < $signed({ 2'd0, reg_wsy }) );
+	assign w_wsy_lt_s	= ( $signed({ ff_sy[20], ff_sy[20:9] }) < $signed({ 2'd0, reg_wsy }) );
+	assign w_wsy_gt_n	= ( $signed(ff_sy[20:8])                > $signed({ 2'd0, reg_wey }) );
+	assign w_wsy_gt_s	= ( $signed({ ff_sy[20], ff_sy[20:9] }) > $signed({ 2'd0, reg_wey }) );
+	wire		w_wsy_lt	= w_lrmm_xhr ? w_wsy_lt_s : w_wsy_lt_n;
+	wire		w_wsy_gt	= w_lrmm_xhr ? w_wsy_gt_s : w_wsy_gt_n;
 	assign w_address_s_pre		= (ff_screen_mode_clone[c_g4] || ff_fg4) ? { w_sy[18:8], ff_sx[15: 9] }:	// SCREEN5, 128byte/line, 2pixel/byte, 256line * 8page
 	                  			  (ff_screen_mode_clone[c_g5]          ) ? { w_sy[18:8], ff_sx[16:10] }:	// SCREEN6, 128byte/line, 4pixel/byte, 256line * 8page
 	                  			  (ff_screen_mode_clone[c_g6]          ) ? { w_sy[17:8], ff_sx[16: 9] }:	// SCREEN7, 256byte/line, 2pixel/byte, 256line * 4page
@@ -1649,8 +1667,8 @@ module vdp_command (
 			end
 			c_state_lrmm_wait_source: begin
 				//	Copy source pixel value
-				if( $signed(ff_sx[19:8]) < $signed({ 3'd0, reg_wsx }) || $signed(w_sy[20:8]) < $signed({ 2'd0, reg_wsy }) || 
-					$signed(ff_sx[19:8]) > $signed({ 3'd0, reg_wex }) || $signed(w_sy[20:8]) > $signed({ 2'd0, reg_wey }) ) begin
+				if( $signed(ff_sx[19:8]) < $signed({ 3'd0, reg_wsx }) || w_wsy_lt ||
+					$signed(ff_sx[19:8]) > $signed({ 3'd0, reg_wex }) || w_wsy_gt ) begin
 					//	Replace color in outside of window
 					ff_source				<= ff_color;
 				end

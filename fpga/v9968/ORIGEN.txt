@@ -3,5 +3,27 @@ Revision fijada: 5978d18 (2026-07-08)
 Licencia: BSD-like no comercial de HRA! (cabeceras de cada fichero) —
 redistribucion con avisos intactos; publicacion gratuita OK, venta NO.
 Ficheros parcheados para el MSXimus (marcados "MSXimus:" en el codigo):
-  - vdp_vram_interface.v  (routing de respuestas por TAG FIFO, latencia libre)
+  - vdp_vram_interface.v  (routing de respuestas por TAG con ECO, latencia libre)
+  - vdp.v                 (plumbing de vram_tag/vram_rtag al top del core)
 El resto, INTACTO. Regen/diff contra upstream: proyectosAI/msx/V9968_Cartridge
+
+[PARCHE _120 2026-07-18] TIMING (bit-exacto, sin cambio semantico): la resta
+del scroll horizontal para los sprites (screen_pos_x - horizontal_offset_l,
+antes combinacional en vdp_timing_control_sprite.v:158) se traslada al SSG al
+otro lado de un registro nuevo ff_screen_pos_x_sprite (syn_preserve, mismo
+patron que los clones del autor). Usa reg_horizontal_offset_l (el valor que
+ff_horizontal_offset_l tendra el proximo flanco) -> identico ciclo a ciclo
+incluso en el cambio de R#27. Motivo: era el peor camino de TODA la matriz de
+rutados del MSXimus (registro -> resta 10b -> decode de fases del selector de
+planos, hasta -1.9ns con CLS al 84%). Ficheros: vdp_timing_control_ssg.v,
+vdp_timing_control.v, vdp_timing_control_sprite.v (puerto screen_pos_x_ofs;
+el puerto horizontal_offset_l queda sin uso, conectado).
+
+PARCHE 3 (_120f, 2026-07-19) - vdp_command.v: comparadores de ventana LRMM
+  El cono ff_command -> decode(==c_lrmm) -> mux w_sy -> comparacion con signo
+  13b -> ff_source tenia 15 niveles y violaba setup a 85.9MHz (el decode
+  entraba ANTES de la cadena de comparadores). Transformacion algebraica
+  bit-exacta: las dos variantes de la comparacion (ff_sy normal y >>1
+  aritmetico) se calculan en paralelo (w_wsy_lt_n/lt_s/gt_n/gt_s, syn_keep)
+  y el decode solo elige el bit final (w_wsy_lt/gt). Mismo resultado ciclo a
+  ciclo; el camino desde ff_command pasa de 15 niveles a ~3.

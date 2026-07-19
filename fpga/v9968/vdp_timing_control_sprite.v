@@ -60,6 +60,9 @@ module vdp_timing_control_sprite (
 	input				clk,					//	42.95454MHz
 
 	input		[13:0]	screen_pos_x,
+	//	MSXimus _120: posicion con la resta del scroll YA hecha en el SSG
+	//	(bit-exacta con la combinacional que vivia aqui; ver el SSG)
+	input		[13:0]	screen_pos_x_ofs,
 	input		[9:0]	screen_pos_y,
 	input		[7:0]	pixel_pos_y,
 	input				screen_v_active,
@@ -155,8 +158,10 @@ module vdp_timing_control_sprite (
 			reg_screen_mode == c_mode_g5 ||
 			reg_screen_mode == c_mode_g6 ||
 			reg_screen_mode == c_mode_g7 );
-	assign w_screen_pos_x[13:4]	= screen_pos_x[13:4] - { 7'd0, horizontal_offset_l };
-	assign w_screen_pos_x[ 3:0]	= screen_pos_x[ 3:0];
+	//	MSXimus _120: la resta del scroll se hace en el SSG al otro lado de
+	//	un registro (era el peor camino de la matriz de rutados: registro ->
+	//	resta 10b -> decode de fases del selector, hasta -1.9ns con CLS 84%)
+	assign w_screen_pos_x		= screen_pos_x_ofs;
 
 	// --------------------------------------------------------------------
 	//	Active period

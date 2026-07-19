@@ -132,6 +132,7 @@ module vdp_timing_control (
 );
 	wire		[13:0]	w_screen_pos_x;			//	signed   (Coordinates not affected by scroll register)
 	wire		[13:0]	w_screen_pos_x_clone;	//	signed   (Coordinates not affected by scroll register)
+	wire		[13:0]	w_screen_pos_x_sprite;	//	MSXimus _120: pre-restado con el scroll (para u_sprite)
 	wire		[ 9:0]	w_screen_pos_y;			//	signed   (Coordinates not affected by scroll register)
 	wire		[ 8:0]	w_pixel_pos_x;			//	unsigned (Coordinates affected by scroll register)
 	wire		[ 7:0]	w_pixel_pos_y;			//	unsigned (Coordinates affected by scroll register)
@@ -164,6 +165,7 @@ module vdp_timing_control (
 		.v_count									( v_count									),
 		.screen_pos_x								( w_screen_pos_x							),
 		.screen_pos_x_clone							( w_screen_pos_x_clone						),
+		.screen_pos_x_sprite						( w_screen_pos_x_sprite						),
 		.screen_pos_y								( w_screen_pos_y							),
 		.pixel_pos_x								( w_pixel_pos_x								),
 		.pixel_pos_y								( w_pixel_pos_y								),
@@ -238,6 +240,7 @@ module vdp_timing_control (
 		.reset_n									( reset_n									),
 		.clk										( clk										),
 		.screen_pos_x								( w_screen_pos_x_clone						),
+		.screen_pos_x_ofs							( w_screen_pos_x_sprite						),
 		.screen_pos_y								( w_screen_pos_y							),
 		.pixel_pos_y								( w_pixel_pos_y								),
 		.screen_v_active							( w_screen_v_active							),

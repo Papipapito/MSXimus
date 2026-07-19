@@ -64,6 +64,7 @@ module vdp_timing_control_ssg (
 
 	output		[13:0]	screen_pos_x,			//	signed   (Coordinates not affected by scroll register)
 	output		[13:0]	screen_pos_x_clone,		//	signed   (Coordinates not affected by scroll register)
+	output		[13:0]	screen_pos_x_sprite,	//	MSXimus _120: con la resta del scroll YA hecha (para u_sprite)
 	output		[ 9:0]	screen_pos_y,			//	signed   (Coordinates not affected by scroll register)
 	output		[ 8:0]	pixel_pos_x,			//	unsigned (Coordinates affected by scroll register)
 	output		[ 7:0]	pixel_pos_y,			//	unsigned (Coordinates affected by scroll register)
@@ -123,6 +124,7 @@ module vdp_timing_control_ssg (
 	wire		[ 7:0]	w_pixel_pos_y;
 	reg			[13:0]	ff_screen_pos_x;			/* synthesis syn_preserve = 1 */
 	reg			[13:0]	ff_screen_pos_x_clone;		/* synthesis syn_preserve = 1 */
+	reg			[13:0]	ff_screen_pos_x_sprite;		/* synthesis syn_preserve = 1 */
 	reg			[ 9:0]	ff_screen_pos_y;
 	reg			[ 8:0]	ff_pixel_pos_x;
 	reg			[ 7:0]	ff_pixel_pos_y;
@@ -413,6 +415,13 @@ module vdp_timing_control_ssg (
 	always @( posedge clk ) begin
 		ff_screen_pos_x			<= w_screen_pos_x;
 		ff_screen_pos_x_clone	<= w_screen_pos_x;
+		//	MSXimus _120 (timing): la resta del scroll para los SPRITES se
+		//	hace AQUI, al otro lado del registro — bit-exacta ciclo a ciclo
+		//	con la combinacional que vivia en vdp_timing_control_sprite
+		//	(usar reg_horizontal_offset_l = el valor que ff_horizontal_
+		//	offset_l tendra el proximo flanco, tambien en el cambio de R#27).
+		//	Era el peor camino de TODA la matriz de rutados con CLS al 84%.
+		ff_screen_pos_x_sprite	<= { w_screen_pos_x[13:4] - { 7'd0, reg_horizontal_offset_l }, w_screen_pos_x[3:0] };
 		ff_screen_pos_y			<= w_screen_pos_y;
 		ff_pixel_pos_x			<= w_pixel_pos_x[8:0];
 		ff_pixel_pos_y			<= w_pixel_pos_y;
@@ -423,6 +432,7 @@ module vdp_timing_control_ssg (
 	assign v_count				= ff_v_count_clone;
 	assign screen_pos_x			= ff_screen_pos_x;
 	assign screen_pos_x_clone	= ff_screen_pos_x_clone;
+	assign screen_pos_x_sprite	= ff_screen_pos_x_sprite;
 	assign screen_pos_y			= ff_screen_pos_y;
 	assign pixel_pos_x			= ff_pixel_pos_x[8:0];
 	assign pixel_pos_y			= ff_pixel_pos_y;
