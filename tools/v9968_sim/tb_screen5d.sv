@@ -56,6 +56,10 @@ wire [7:0]  bk_wdata;
 logic [15:0] bk_rword = 0;
 logic        bk_done_t = 0;
 wire [7:0]  shim_diag;
+wire        bk2_req;
+wire [21:0] bk2_addr;
+logic [15:0] bk2_rword = 0;
+logic        bk2_done_t = 0;
 
 v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .clk_vdp(clk), .rst_n(reset_n),
@@ -67,6 +71,8 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .vram_stall(vram_stall),
     .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr), .bk_wdata(bk_wdata),
     .bk_rword(bk_rword), .bk_done_t(bk_done_t),
+    .bk2_req(bk2_req), .bk2_addr(bk2_addr),
+    .bk2_rword(bk2_rword), .bk2_done_t(bk2_done_t),
     .diag(shim_diag)
 );
 
@@ -96,6 +102,27 @@ always @(posedge clk) begin
         end
     end
 end
+
+// ---- canal B del backend (_120): SOLO lecturas, misma latencia ----
+logic        m2_pend = 0;
+logic [21:0] m2_addr;
+integer      m2_cnt, m2_lat;
+always @(posedge clk) begin
+    if (bk2_req && !m2_pend) begin
+        m2_pend <= 1; m2_addr <= bk2_addr;
+        m2_cnt <= 0; m2_lat <= 26 + ({$random} % 18);
+    end
+    else if (m2_pend) begin
+        m2_cnt <= m2_cnt + 1;
+        if (m2_cnt == m2_lat) begin
+            bk2_rword[7:0]  <= sdram[{m2_addr[21:1],1'b0}];
+            bk2_rword[15:8] <= sdram[{m2_addr[21:1],1'b1}];
+            bk2_done_t <= ~bk2_done_t;
+            m2_pend <= 0;
+        end
+    end
+end
+
 
 task bus_wr(input [2:0] a, input [7:0] d);
 begin

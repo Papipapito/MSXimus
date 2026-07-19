@@ -1,17 +1,15 @@
 // ============================================================================
-// tb_screen1.sv — v3: SCREEN 1 (modo de PATRONES) con la pila completa
-// (core parcheado + shim v3 + backend SDRAM lenta). Reproduce el caso de las
-// fotos HW _117 (texto triturado con bitmap OK): el fetch bg salta
-// NT->PGT->CT y la ventana lineal fallaba todo; el v3 lo sirve de la cache.
-//
-// Estimulo: PGT = patron pseudo-aleatorio por caracter (char c, fila r =
-// c^(r*37)), NT = caracter unico por celda ((fila*32+col)&0xFF), CT = colores
-// variados. CHECKS: (1) volcado de DOS frames consecutivos -> deben ser
-// IDENTICOS (la basura del HW "se movia"); (2) PNG para inspeccion visual.
+// tb_screen8.sv — HW _119: SCREEN 8 (G7, VRAM ENTRELAZADA) con el shim y la
+// SDRAM lenta. En SC7/8/12 el interface transforma TODAS las direcciones con
+// {a[17], a[0], a[16:1]} (dos streams alternando mitades de VRAM): la
+// hipotesis del glitch masivo es que ambos streams COLISIONAN en los indices
+// de la ventana y la cache del shim (thrash total). Se compara contra
+// tb_screen8r (VRAM perfecta): dumps identicos = shim correcto.
+// Parametro de mando: +definir NADA — el TB es identico al 8r salvo la pila.
 // ============================================================================
 `timescale 1ns/1ps
 
-module tb_screen1;
+module tb_screen6;
 
 localparam real CLK_HALF = 5.8207;
 logic reset_n = 0;
@@ -81,6 +79,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .diag(shim_diag)
 );
 
+// ---- SDRAM compartida modelada (300-500ns aleatoria) ----
 logic [7:0] sdram [0:4194303];
 logic        m_pend = 0, m_we;
 logic [21:0] m_addr;
@@ -128,6 +127,7 @@ always @(posedge clk) begin
 end
 
 
+// ---- bus ----
 task bus_wr(input [2:0] a, input [7:0] d);
 begin
     @(posedge clk);
@@ -142,47 +142,6 @@ endtask
 task vdp_reg(input [5:0] r, input [7:0] d);
 begin bus_wr(3'd1, d); bus_wr(3'd1, {2'b10, r}); end
 endtask
-task vdp_pal(input [3:0] idx, input [2:0] r, input [2:0] g, input [2:0] b);
-begin
-    vdp_reg(6'd16, {4'd0, idx});
-    bus_wr(3'd2, {1'b0, r, 1'b0, b});
-    bus_wr(3'd2, {5'd0, g});
-end
-endtask
-task vram_b(input [7:0] d);
-begin
-    bus_wr(3'd0, d);
-    repeat (150) @(posedge clk);
-end
-endtask
-task vram_ptr(input [13:0] a);   // puntero de escritura (R#14=0)
-begin
-    bus_wr(3'd1, a[7:0]);
-    bus_wr(3'd1, {2'b01, a[13:8]});
-end
-endtask
-// puntero de LECTURA (bit6=0) — dispara el pre-fetch del interface
-task vram_rdptr(input [13:0] a);
-begin
-    bus_wr(3'd1, a[7:0]);
-    bus_wr(3'd1, {2'b00, a[13:8]});
-end
-endtask
-// lectura del puerto 0 con cadencia BIOS (SETRD + IN en ~2us): el caso del
-// RASTRO DEL CURSOR en HW — si el pre-fetch no ha llegado, sale dato viejo
-task vram_rd(output [7:0] d);
-begin
-    @(posedge clk);
-    bus_address <= 3'd0; bus_ioreq <= 1; bus_write <= 0; bus_valid <= 1;
-    @(posedge clk);
-    while (!bus_ready) @(posedge clk);
-    bus_ioreq <= 0; bus_valid <= 0;
-    // el dato de la IN es el buffer prefetcheado: bus_rdata_en lo entrega
-    while (!bus_rdata_en) @(posedge clk);
-    d = bus_rdata;
-    repeat (150) @(posedge clk);   // hueco Z80 entre INs
-end
-endtask
 
 integer vs_count = 0;
 logic vs_d = 0, hs_d = 0;
@@ -193,91 +152,54 @@ always @(posedge clk) begin
     hs_d <= display_hs;
     if (display_vs && !vs_d) begin
         vs_count <= vs_count + 1;
-        case (dump_state)
-            1: begin $fclose(fd); fd = $fopen("s1_frame_b.txt", "w"); dump_state <= 2; end
-            2: begin $fclose(fd); dump_state <= 3;
-                     $display("DOS FRAMES VOLCADOS (bg_miss=%0d)", shim_diag); end
-            0: if (vs_count == 8) begin fd = $fopen("s1_frame_a.txt", "w"); dump_state <= 1; end
-        endcase
+        if (dump_state == 1) begin
+            $fclose(fd);
+            dump_state <= 2;
+            $display("FRAME VOLCADO (bg_miss acumulado=%0d)", shim_diag);
+        end
+        else if (dump_state == 0 && vs_count == 7) begin
+            fd = $fopen("s6_frame.txt", "w");
+            dump_state <= 1;
+        end
     end
-    if ((dump_state == 1 || dump_state == 2) && fd != 0) begin
+    if (dump_state == 1 && fd != 0) begin
         if (display_hs && !hs_d) $fdisplay(fd, "L");
         if (display_en) $fdisplay(fd, "%02x%02x%02x", display_r, display_g, display_b);
     end
 end
 
-integer c, r, i;
+integer x, y;
 initial begin
     repeat (50) @(posedge clk);
     reset_n = 1;
     wait (vs_count >= 1);
-    // paleta: 16 colores variados (indices TMS estandar-ish)
-    vdp_pal(4'd0,  3'd0, 3'd0, 3'd0);
-    vdp_pal(4'd1,  3'd0, 3'd0, 3'd0);
-    vdp_pal(4'd4,  3'd1, 3'd1, 3'd7);   // azul
-    vdp_pal(4'd15, 3'd7, 3'd7, 3'd7);   // blanco
-    vdp_pal(4'd8,  3'd7, 3'd0, 3'd0);
-    vdp_pal(4'd2,  3'd0, 3'd6, 3'd0);
-    // SCREEN 1: NT=0x1800 (R#2=06), CT=0x2000 (R#3=80), PGT=0x0000 (R#4=00)
-    vdp_reg(6'd0,  8'h00);
-    vdp_reg(6'd1,  8'h40);              // display on, sprites 8x8 off-ish
-    vdp_reg(6'd2,  8'h06);
-    vdp_reg(6'd3,  8'h80);
-    vdp_reg(6'd4,  8'h00);
-    vdp_reg(6'd8,  8'h2A);              // VR=1 (+SPD=1: sin sprites aqui)
+    // SCREEN 8 = G7: R#0 = 0x0E, sin paleta (RGB332 directo)
+    vdp_reg(6'd0,  8'h08);
+    vdp_reg(6'd1,  8'h40);
+    vdp_reg(6'd2,  8'h1F);
+    vdp_reg(6'd8,  8'h2A);
     vdp_reg(6'd20, 8'h01);
-    vdp_reg(6'd7,  8'hF4);              // texto blanco / fondo azul
+    vdp_reg(6'd7,  8'h0F);
     vdp_reg(6'd14, 8'h00);
-    // PGT: 256 chars x 8 bytes — patron unico por (char, fila)
-    vram_ptr(14'h0000);
-    for (c = 0; c < 256; c = c + 1)
-        for (r = 0; r < 8; r = r + 1) vram_b(c[7:0] ^ (r[7:0] * 8'd37));
-    // NT: 32x24 celdas, caracter = (i*7+3)&0xFF (recorre todos)
-    vram_ptr(14'h1800);
-    for (i = 0; i < 768; i = i + 1) vram_b(((i * 7) + 3) & 8'hFF);
-    // CT: 32 entradas de color (fg/bg por grupo de 8 chars)
-    vram_ptr(14'h2000);
-    for (i = 0; i < 32; i = i + 1) vram_b({i[3:0] == 4'd0 ? 4'hF : i[3:0], 4'h4});
-    $display("VRAM SC1 cargada en vs=%0d", vs_count);
-    wait (dump_state == 3);
-
-    // ---- verificacion de LECTURAS CPU (el caso del rastro del cursor) ----
-    begin : rdcheck
-        reg [7:0] rb;
-        integer rerr;
-        rerr = 0;
-        // NT en 0x1800: 32 bytes esperados (i*7+3)&0xFF
-        vram_rdptr(14'h1800);
-        repeat (150) @(posedge clk);      // margen SETRD->1a IN estilo BIOS
-        for (i = 0; i < 32; i = i + 1) begin
-            vram_rd(rb);
-            if (rb !== (((i * 7) + 3) & 8'hFF)) begin
-                rerr = rerr + 1;
-                if (rerr <= 8) $display("RD ERR NT[%0d]: got=%02x exp=%02x",
-                                        i, rb, ((i * 7) + 3) & 8'hFF);
-            end
+    bus_wr(3'd1, 8'h00);
+    bus_wr(3'd1, 8'h40);
+    // 64 lineas x 256 bytes, color = x ^ y (el resto de VRAM queda a 0 en
+    // ambos TBs — la comparacion sigue siendo valida en todo el frame)
+    for (y = 0; y < 64; y = y + 1)
+        for (x = 0; x < 256; x = x + 1) begin
+            bus_wr(3'd0, x[7:0] ^ y[7:0]);
+            repeat (40) @(posedge clk);
         end
-        // PGT en 0x0000: 16 bytes esperados c^(r*37) (c=0..1, r=0..7)
-        vram_rdptr(14'h0000);
-        repeat (150) @(posedge clk);
-        for (i = 0; i < 16; i = i + 1) begin
-            vram_rd(rb);
-            if (rb !== (((i / 8) ^ ((i % 8) * 37)) & 8'hFF)) begin
-                rerr = rerr + 1;
-                if (rerr <= 8) $display("RD ERR PGT[%0d]: got=%02x exp=%02x",
-                                        i, rb, ((i / 8) ^ ((i % 8) * 37)) & 8'hFF);
-            end
-        end
-        if (rerr == 0) $display("*** LECTURAS CPU: 48/48 OK (cursor curado) ***");
-        else           $display("*** LECTURAS CPU: %0d ERRORES ***", rerr);
-    end
+    $display("VRAM cargada en vs=%0d", vs_count);
+    wait (dump_state == 2);
     #1000;
+    $display("*** SCREEN6 CON SHIM: COMPLETO (vs=%0d, bg_miss=%0d) ***", vs_count, shim_diag);
     $finish;
 end
 
 initial begin
-    #300000000;
-    $display("TIMEOUT vs=%0d dump=%0d", vs_count, dump_state);
+    #700000000;
+    $display("TIMEOUT vs=%0d dump=%0d bg_miss=%0d", vs_count, dump_state, shim_diag);
     $finish;
 end
 

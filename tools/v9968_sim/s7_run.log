@@ -1,0 +1,4 @@
+VRAM cargada en vs=1
+FRAME VOLCADO (bg_miss acumulado=207)
+*** SCREEN7 CON SHIM: COMPLETO (vs=9, bg_miss=207) ***
+tb_screen7.sv:197: $finish called at 150026919441 (1ps)

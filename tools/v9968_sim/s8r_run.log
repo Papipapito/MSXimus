@@ -1,0 +1,4 @@
+VRAM cargada en vs=1
+FRAME VOLCADO (referencia)
+*** SCREEN8 REFERENCIA: COMPLETO (vs=9) ***
+tb_screen8r.sv:160: $finish called at 150026919441 (1ps)

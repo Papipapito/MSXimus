@@ -270,27 +270,14 @@ end
 `endif
 
     // ================================================================
-    //  VENTILADOR por temperatura (Console 60K, FAN_EN=AB12)
-    //  Reset SOLO por lock del PLL (power-on): el reset MSX del boton NO
-    //  debe rearmar la baseline termica (se tomaria con el die caliente).
+    //  VENTILADOR (Console 60K, FAN_EN=AB12): SIEMPRE ENCENDIDO.
+    //  HW 2026-07-19: con el disipador bastante caliente el termometro RO
+    //  (fan_ctrl/ro_osc, commit c64068c) NO disparo — umbral K_ON alto o
+    //  pendiente del anillo menor que la estimada; Albert pidio dejarlo
+    //  fijo. Los modulos quedan en el repo para recalibrar algun dia con
+    //  dbg_cnt por el debug UART.
     // ================================================================
-    wire        fan_ro_en, fan_ro_rst;
-    wire [19:0] fan_ro_cnt;
-    wire [19:0] fan_dbg_cnt;
-    fan_ctrl u_fanctrl (
-        .clk        (clk_27m),
-        .reset_n    (clock_locked),
-        .ro_en      (fan_ro_en),
-        .ro_cnt_rst (fan_ro_rst),
-        .ro_cnt     (fan_ro_cnt),
-        .fan_en     (fan_en_o),
-        .dbg_cnt    (fan_dbg_cnt)
-    );
-    ro_osc u_roosc (
-        .ro_en   (fan_ro_en),
-        .cnt_rst (fan_ro_rst),
-        .cnt_out (fan_ro_cnt)
-    );
+    assign fan_en_o = 1'b1;
 
     // ================================================================
     //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
@@ -1667,11 +1654,17 @@ assign keyboard_addr = ppi_port_c[3:0];
         .pulse4(), .pulse5(), .pulse6(), .pulse7()
     );
 
-    // ---- shim VRAM (contrato 8 ciclos) + bridge CDC 85.9<->108 ----
+    // ---- shim VRAM (contrato 8 ciclos) + bridges CDC 85.9<->108 ----
+    // _120: DOS canales — las lecturas de palabra piden las dos mitades en
+    // paralelo (bk por wv2, bk2 por wv3): los modos de 256B/linea (SC7/8/12)
+    // consumen 1 palabra/730ns y un canal solo daba ~800ns.
     wire        v68bk_req, v68bk_we, v68bk_done_t;
     wire [21:0] v68bk_addr;
     wire [7:0]  v68bk_wdata;
     wire [15:0] v68bk_rword;
+    wire        v68bk2_req, v68bk2_done_t;
+    wire [21:0] v68bk2_addr;
+    wire [15:0] v68bk2_rword;
     v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_v68shim (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .vram_address(v68_vram_address), .vram_write(v68_vram_write),
@@ -1681,6 +1674,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .vram_rtag(v68_vram_rtag),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
         .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .bk2_req(v68bk2_req), .bk2_addr(v68bk2_addr),
+        .bk2_rword(v68bk2_rword), .bk2_done_t(v68bk2_done_t),
         .vram_stall(v68_vram_stall),
         .diag()
     );
@@ -1691,6 +1686,14 @@ assign keyboard_addr = ppi_port_c[3:0];
         .clk_108m(clk_108m),
         .wv2_req(wv2_req), .wv2_we(wv2_we), .wv2_addr(wv2_addr),
         .wv2_wdata(wv2_wdata), .wv2_dout(wv2_dout), .wv2_done(wv2_done)
+    );
+    v9968_sdram_bridge u_v68bridge2 (
+        .clk_vdp(clk_86), .rst_n(rst86_n),
+        .bk_req(v68bk2_req), .bk_we(1'b0), .bk_addr(v68bk2_addr),
+        .bk_wdata(8'd0), .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
+        .clk_108m(clk_108m),
+        .wv2_req(wv3_req), .wv2_we(wv3_we), .wv2_addr(wv3_addr),
+        .wv2_wdata(wv3_wdata), .wv2_dout(wv3_dout), .wv2_done(wv3_done)
     );
 
     // ---- puente de video 800px -> HDMI 720p (back-end TMDS intacto) ----
@@ -1928,11 +1931,20 @@ wire        wv2_req, wv2_we, wv2_done;
 wire [21:0] wv2_addr;
 wire [7:0]  wv2_wdata;
 wire [15:0] wv2_dout;
+// V9968 _120: puerto wv3 (canal B del shim, solo lecturas — mitad alta)
+wire        wv3_req, wv3_we, wv3_done;
+wire [21:0] wv3_addr;
+wire [7:0]  wv3_wdata;
+wire [15:0] wv3_dout;
 `ifndef ENABLE_V9968_VDP
 assign wv2_req   = 1'b0;
 assign wv2_we    = 1'b0;
 assign wv2_addr  = 22'd0;
 assign wv2_wdata = 8'd0;
+assign wv3_req   = 1'b0;
+assign wv3_we    = 1'b0;
+assign wv3_addr  = 22'd0;
+assign wv3_wdata = 8'd0;
 `endif
 
 memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
@@ -1970,6 +1982,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .wv2_wdata(wv2_wdata),
     .wv2_dout(wv2_dout),
     .wv2_done(wv2_done),
+
+    // V9968 _120: puerto wv3 (canal B, prioridad wave>wv2>wv3)
+    .wv3_req(wv3_req),
+    .wv3_we(wv3_we),
+    .wv3_addr(wv3_addr),
+    .wv3_wdata(wv3_wdata),
+    .wv3_dout(wv3_dout),
+    .wv3_done(wv3_done),
 
     .O_sdram_clk(O_sdram_clk),
     .O_sdram_cke(O_sdram_cke),
