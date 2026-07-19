@@ -132,6 +132,7 @@ reg [3:0]  wrk_mask1;                    // DQM (0 = escribir byte)
 // (ciclo 2 del fetch), obl_chk consume pwq y encola (ciclo 3)
 reg        obl_pend;
 reg        obl_chk;
+reg        obl_do;                       // _121b: fase 3 (comparador registrado)
 reg [15:0] obl_w;
 
 // escritura muxeada de la cache (1 solo write-site por array): el FILL
@@ -208,7 +209,12 @@ reg [31:0] late_data;
 // UPDATE (write-check con tag-match, byte a byte por mascara DQM) tiene
 // prioridad; el FILL espera en fill_pend al primer ciclo libre.
 wire wrk_hit  = wrk_p1 && scq_v && (scq_tag == wrk_addr1[15:12]);
-wire fill_now = fill_pend && !wrk_hit;
+// _121b (timing): el fill cede el puerto si hay write-check EN VUELO
+// (wrk_p1, un FF), sin esperar al comparador de tags que lee de la BSRAM
+// (sc_tag DO -> wrk_hit -> CE de los 4096 sc_v era la familia critica).
+// Efecto: con write y fill simultaneos el fill espera 1 ciclo aunque el
+// write no fuera a usar el puerto — bookkeeping, fuera del camino de 8.
+wire fill_now = fill_pend && !wrk_p1;
 wire [11:0] scw_idx = wrk_hit ? wrk_addr1[11:0] : fill_addr[11:0];
 wire scw_we0 = (wrk_hit && !wrk_mask1[0]) || fill_now;
 wire scw_we1 = (wrk_hit && !wrk_mask1[1]) || fill_now;
@@ -243,9 +249,25 @@ always @(posedge clk_vdp) begin
 end
 
 // ---- BSRAM de la VENTANA (v4): 1R muxeado + 1W del backend ----
+// _120c: el camino fisico pww_data->DI de la BSRAM era tan corto que
+// violaba HOLD (-0.05ns por skew del arbol de reloj al macro), y todo
+// buffer de paso (XOR+syn_keep, LUT1 explicitas) fue barrido por el
+// optimizador. Fix estructural: recapturar el dato en FLANCO NEGATIVO.
+// pww_tag/pww_data son registros estables el ciclo entero, la media
+// etapa los recaptura a mitad de ciclo y la BSRAM (posedge) los ve
+// estables ~5.8ns a cada lado de su flanco: hold y setup por
+// construccion. pww_en/pww_idx no cambian (sus caminos no violaban).
+reg [41:0] pww_word_n;
+reg  [5:0] pww_idx_n;
+reg        pww_en_n;
+always @(negedge clk_vdp) begin
+    pww_word_n <= {pww_tag, pww_data};
+    pww_idx_n  <= pww_idx;
+    pww_en_n   <= pww_en;
+end
 wire [5:0] pw_ridx = obl_pend ? obl_w[5:0] : vram_address[7:2];
 always @(posedge clk_vdp) begin
-    if (pww_en) pw_mem[pww_idx] <= {pww_tag, pww_data};
+    if (pww_en_n) pw_mem[pww_idx_n] <= pww_word_n;
     pwq <= pw_mem[pw_ridx];
 end
 
@@ -268,7 +290,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         bg_miss <= 0;
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
-        obl_pend <= 0; obl_chk <= 0; obl_w <= 0;
+        obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0;
         scq_v <= 0; pwq_v <= 0;
         pww_en <= 0; pww_idx <= 0; pww_tag <= 0; pww_data <= 0;
@@ -310,12 +332,15 @@ always @(posedge clk_vdp or negedge rst_n) begin
         if (wrk_p1 && pwq_v && pwq[41:32] == wrk_addr1[15:6])
             pw_v[wrk_addr1[5:0]] <= 1'b0;
 
-        // ---------- OBL en dos fases (v4): la lectura BSRAM de obl_w se
-        // lanza mientras obl_pend esta alto; obl_chk consume pwq/pwq_v ----
+        // ---------- OBL en TRES fases (_121b): la lectura BSRAM de obl_w se
+        // lanza con obl_pend; obl_chk REGISTRA el resultado del comparador
+        // (pwq venia del DO de pw_mem y escribir pfq en el mismo ciclo era
+        // la familia critica pw_mem DO -> pfq WRE); obl_do encola. El OBL es
+        // prefetch especulativo: +1 ciclo de latencia es inofensivo. ----
         obl_pend <= 1'b0;
         obl_chk  <= obl_pend;
-        if (obl_chk && !pfq_full &&
-            !(pwq_v && pwq[41:32] == obl_w[15:6])) begin
+        obl_do   <= obl_chk && !(pwq_v && pwq[41:32] == obl_w[15:6]);
+        if (obl_do && !pfq_full) begin
             pfq[pfq_wp] <= obl_w;
             pfq_wp <= pfq_wp + 2'd1;
         end
