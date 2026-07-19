@@ -335,3 +335,8 @@ IO_LOC "ddr_dqs[1]" V9,V8;
 IO_PORT "ddr_dqs[1]" IO_TYPE=SSTL15D_I PULL_MODE=NONE DRIVE=8 SINGLE_RESISTOR=OFF BANK_VCCIO=1.5;
 IO_LOC "ddr_dqs[0]" Y3,AA3;
 IO_PORT "ddr_dqs[0]" IO_TYPE=SSTL15D_I PULL_MODE=NONE DRIVE=8 SINGLE_RESISTOR=OFF BANK_VCCIO=1.5;
+
+// Ventilador (Console 60K): FAN_EN en AB12 (Bank 9 a 1.5V), 1 = 5V al
+// conector SH1.0. PULL_MODE=DOWN = apagado durante la configuracion.
+IO_LOC  "fan_en_o" AB12;
+IO_PORT "fan_en_o" IO_TYPE=LVCMOS15 PULL_MODE=DOWN DRIVE=4 BANK_VCCIO=1.5;

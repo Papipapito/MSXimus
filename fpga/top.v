@@ -137,7 +137,12 @@ module top
     output wire [1:0]  ddr_dm,
     inout  wire [15:0] ddr_dq,
     inout  wire [1:0]  ddr_dqs,
-    inout  wire [1:0]  ddr_dqs_n
+    inout  wire [1:0]  ddr_dqs_n,
+
+    // Ventilador de la Console 60K (FAN_EN, pin AB12 Bank9 1.5V): la placa
+    // conmuta los 5V del conector SH1.0 con 1 = ON. Gobernado por fan_ctrl
+    // (termometro de anillo de latches, ver fan_ctrl.v / ro_osc.v).
+    output wire        fan_en_o
 
     //output wire SLTSL3
 
@@ -263,6 +268,29 @@ end
 `else
     assign jtagseln = clock_locked & ~bl616_jtagsel;
 `endif
+
+    // ================================================================
+    //  VENTILADOR por temperatura (Console 60K, FAN_EN=AB12)
+    //  Reset SOLO por lock del PLL (power-on): el reset MSX del boton NO
+    //  debe rearmar la baseline termica (se tomaria con el die caliente).
+    // ================================================================
+    wire        fan_ro_en, fan_ro_rst;
+    wire [19:0] fan_ro_cnt;
+    wire [19:0] fan_dbg_cnt;
+    fan_ctrl u_fanctrl (
+        .clk        (clk_27m),
+        .reset_n    (clock_locked),
+        .ro_en      (fan_ro_en),
+        .ro_cnt_rst (fan_ro_rst),
+        .ro_cnt     (fan_ro_cnt),
+        .fan_en     (fan_en_o),
+        .dbg_cnt    (fan_dbg_cnt)
+    );
+    ro_osc u_roosc (
+        .ro_en   (fan_ro_en),
+        .cnt_rst (fan_ro_rst),
+        .cnt_out (fan_ro_cnt)
+    );
 
     // ================================================================
     //  DEBUG BRING-UP 60K — latidos de reloj y estado vital por PMODs
