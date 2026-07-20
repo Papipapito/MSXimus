@@ -22,8 +22,15 @@ logic clk = 0;
 always #(CLK_HALF) clk = ~clk;
 
 // ---------------- bus compartido (escrituras a ambas pilas) ----------------
+// _126: ioreq/valid POR PILA — el protocolo real (leccion tb_cpu_bulk) exige
+// valid = PULSO de 1 ciclo cuando SU ready esta alto, y los ready de A y B
+// no tienen por que coincidir en fase (el viejo `while !(A_ready&&B_ready)`
+// con valid mantenido colgaba en cuanto cualquier cambio del shim movia la
+// fase de A: el cuelgue "TIMEOUT GLOBAL vs=54" con todo en reposo).
 logic [2:0]  bus_address = 0;
-logic        bus_ioreq = 0, bus_write = 0, bus_valid = 0;
+logic        bus_write = 0;
+logic        A_ioreq = 0, A_valid = 0;
+logic        B_ioreq = 0, B_valid = 0;
 logic [7:0]  bus_wdata = 0;
 
 // ---------------- PILA A: shim + backend realista ----------------
@@ -43,8 +50,8 @@ wire  [7:0]  A_r, A_g, A_b;
 
 vdp u_vdpA (
     .reset_n(reset_n), .clk(clk), .initial_busy(1'b0),
-    .bus_address(bus_address), .bus_ioreq(bus_ioreq), .bus_write(bus_write),
-    .bus_valid(bus_valid), .bus_ready(A_ready),
+    .bus_address(bus_address), .bus_ioreq(A_ioreq), .bus_write(bus_write),
+    .bus_valid(A_valid), .bus_ready(A_ready),
     .bus_wdata(bus_wdata), .bus_rdata(A_rdata), .bus_rdata_en(A_rdata_en),
     .int_n(A_int_n),
     .vram_address(A_vaddr), .vram_write(A_vwrite),
@@ -145,8 +152,8 @@ wire  [7:0]  B_r, B_g, B_b;
 
 vdp u_vdpB (
     .reset_n(reset_n), .clk(clk), .initial_busy(1'b0),
-    .bus_address(bus_address), .bus_ioreq(bus_ioreq), .bus_write(bus_write),
-    .bus_valid(bus_valid), .bus_ready(B_ready),
+    .bus_address(bus_address), .bus_ioreq(B_ioreq), .bus_write(bus_write),
+    .bus_valid(B_valid), .bus_ready(B_ready),
     .bus_wdata(bus_wdata), .bus_rdata(B_rdata), .bus_rdata_en(B_rdata_en),
     .int_n(B_int_n),
     .vram_address(B_vaddr), .vram_write(B_vwrite),
@@ -213,28 +220,84 @@ initial begin
     end
 end
 
-// ---------------- tareas de bus (esperan a AMBAS pilas) ----------------
+// ---------------- tareas de bus (protocolo REAL, por pila) ----------------
+// negedge + valid en PULSO de 1 ciclo cuando el ready de ESA pila esta alto
+// (patron probado de tb_cpu_bulk/tb_sc8cmd_full); A y B en secuencia.
+integer op_n = 0;
+task op_A(input [2:0] a, input wr, input [7:0] d);
+    integer guard;
+begin
+    op_n = op_n + 1;
+    guard = 0;
+    @(negedge clk);
+    bus_address = a; bus_wdata = d; bus_write = wr;
+    A_ioreq = 1; A_valid = 0;
+    @(negedge clk);
+    while (!A_ready) begin
+        @(negedge clk);
+        guard = guard + 1;
+        if (guard == 100000)
+            $display("ATASCO op_A #%0d port=%0d wr=%b d=%02x t=%0t", op_n, a, wr, d, $time);
+    end
+    A_valid = 1;
+    @(negedge clk);
+    A_valid = 0; A_ioreq = 0;
+    repeat (2) @(negedge clk);
+end
+endtask
+task op_B(input [2:0] a, input wr, input [7:0] d);
+    integer guard;
+begin
+    op_n = op_n + 1;
+    guard = 0;
+    @(negedge clk);
+    bus_address = a; bus_wdata = d; bus_write = wr;
+    B_ioreq = 1; B_valid = 0;
+    @(negedge clk);
+    while (!B_ready) begin
+        @(negedge clk);
+        guard = guard + 1;
+        if (guard == 100000)
+            $display("ATASCO op_B #%0d port=%0d wr=%b d=%02x t=%0t", op_n, a, wr, d, $time);
+    end
+    B_valid = 1;
+    @(negedge clk);
+    B_valid = 0; B_ioreq = 0;
+    repeat (2) @(negedge clk);
+end
+endtask
 task bus_wr(input [2:0] a, input [7:0] d);
 begin
-    @(posedge clk);
-    bus_address <= a; bus_wdata <= d;
-    bus_ioreq <= 1; bus_write <= 1; bus_valid <= 1;
-    @(posedge clk);
-    while (!(A_ready && B_ready)) @(posedge clk);
-    bus_ioreq <= 0; bus_write <= 0; bus_valid <= 0;
-    repeat (20) @(posedge clk);
+    op_A(a, 1'b1, d);
+    op_B(a, 1'b1, d);
+    bus_write = 0;
 end
 endtask
 task bus_rd_A(input [2:0] a, output [7:0] d);
+    integer guard;
 begin
-    @(posedge clk);
-    bus_address <= a; bus_ioreq <= 1; bus_write <= 0; bus_valid <= 1;
-    @(posedge clk);
-    while (!(A_ready && B_ready)) @(posedge clk);
-    bus_ioreq <= 0; bus_valid <= 0;
-    while (!A_rdata_en) @(posedge clk);
+    // OJO: NO reutilizar op_A — su repeat(2) final se COME el pulso de
+    // rdata_en (llega ~2 ciclos tras el valid); hay que esperar el dato
+    // INMEDIATAMENTE tras soltar valid (patron tb_sc8cmd_full).
+    op_n = op_n + 1;
+    @(negedge clk);
+    bus_address = a; bus_write = 0;
+    A_ioreq = 1; A_valid = 0;
+    @(negedge clk);
+    while (!A_ready) @(negedge clk);
+    A_valid = 1;
+    @(negedge clk);
+    A_valid = 0; A_ioreq = 0;
+    guard = 0;
+    while (!A_rdata_en) begin
+        @(negedge clk);
+        guard = guard + 1;
+        if (guard == 100000)
+            $display("ATASCO rdata_en_A #%0d port=%0d t=%0t", op_n, a, $time);
+    end
     d = A_rdata;
-    repeat (20) @(posedge clk);
+    op_B(a, 1'b0, 8'h00);       // B en lockstep (mismos efectos de lectura)
+    repeat (2) @(negedge clk);
 end
 endtask
 task vdp_reg(input [5:0] r, input [7:0] d);
@@ -366,6 +429,17 @@ end
 initial begin
     #900000000;
     $display("TIMEOUT GLOBAL vs=%0d", vsA);
+    // radiografia del shim A en el momento del cuelgue
+    $display("SHIM: wq_used=%0d rq_used=%0d pfq w/r=%0d/%0d wq_vld=%b",
+             u_shim.wq_used, u_shim.rq_used, u_shim.pfq_wp, u_shim.pfq_rp,
+             u_shim.wq_vld);
+    $display("SHIM: bsy=%b cur_kind=%0d word_pend=%b late_v=%b rq_dirty=%b stall=%b",
+             u_shim.bsy, u_shim.cur_kind, u_shim.word_pend, u_shim.late_v,
+             u_shim.rq_dirty, u_shim.vram_stall);
+    $display("SHIM: obl_pend=%b obl_chk=%b obl_do=%b pfB_pend=%b fill_pend=%b",
+             u_shim.obl_pend, u_shim.obl_chk, u_shim.obl_do, u_shim.pfB_pend,
+             u_shim.fill_pend);
+    $display("MOTOR A: state=%0d | A_ready=%b B_ready=%b op_n=%0d", u_vdpA.u_command.ff_state, A_ready, B_ready, op_n);
     $finish;
 end
 

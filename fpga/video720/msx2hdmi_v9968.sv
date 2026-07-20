@@ -463,12 +463,25 @@ module msx2hdmi_v9968 (
         end
     end
 
-    reg [15:0] audio_sample_word [1:0], audio_sample_word0 [1:0];
+    // _126 (bug #14, bajones de volumen): el "cruce 2FF" era un 2FF sobre un
+    // BUS de 16 bits — protege la metaestabilidad de cada bit pero NO la
+    // coherencia del conjunto: una captura a caballo de un cambio del
+    // mezclador (27MHz async; p.ej. 0x0001->0xFFFF en un cruce por cero)
+    // produce un valor RASGADO = pico fuerte. Picos frecuentes activan el
+    // limitador/AGC del televisor -> "bajones y subidas de volumen" en
+    // TODAS las fuentes (SCC/OPL4 FM/wave: es el camino comun), y la tasa
+    // depende del jitter relativo de PLLs -> variable por build/placement.
+    // FILTRO DE ESTABILIDAD: 3 capturas a clk_pixel; la muestra solo se
+    // acepta cuando las dos ultimas (ya asentadas) coinciden. El mezclador
+    // cambia cada ~280ns y aqui se muestrea cada 13.5ns: como mucho se
+    // retrasa una muestra 27ns — inaudible; el rasgado desaparece.
+    reg [15:0] aud_c0 [1:0], aud_c1 [1:0], aud_c2 [1:0];
+    reg [15:0] audio_sample_word [1:0];
     always @(posedge clk_pixel) begin
-        audio_sample_word0[0] <= audio_l;
-        audio_sample_word[0]  <= audio_sample_word0[0];
-        audio_sample_word0[1] <= audio_r;
-        audio_sample_word[1]  <= audio_sample_word0[1];
+        aud_c0[0] <= audio_l;      aud_c1[0] <= aud_c0[0];   aud_c2[0] <= aud_c1[0];
+        aud_c0[1] <= audio_r;      aud_c1[1] <= aud_c0[1];   aud_c2[1] <= aud_c1[1];
+        if (aud_c1[0] == aud_c2[0]) audio_sample_word[0] <= aud_c2[0];
+        if (aud_c1[1] == aud_c2[1]) audio_sample_word[1] <= aud_c2[1];
     end
 
     // ========================================================================
