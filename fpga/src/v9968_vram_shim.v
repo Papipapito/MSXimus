@@ -408,7 +408,7 @@ end
 // SC8) no deja NINGUN ciclo libre, el OBL no resiembra la ventana y la
 // linea siguiente nace fria (radiografia del TB sc8cmd_full: 16k misses
 // con pfq=0 rq=0 y wv=1 = rectangulos despedazados de la foto 4297).
-// Fix estructural: BSRAM ESPEJO pw_memB solo-OBL con el MISMO write-site
+// Fix estructural: ESPEJO de TAGs pw_tagB solo-OBL con el MISMO write-site
 // (cada array queda 1W+1R limpio) — el OBL lee SIEMPRE al ciclo siguiente
 // y el fetch/write-check conserva pw_mem en exclusiva. Cero contencion en
 // ambos sentidos, 256x42b extra de BSRAM.
@@ -418,11 +418,16 @@ always @(posedge clk_vdp) begin
     if (pww_en_n) pw_mem[pww_idx_n] <= pww_word_n;
     pwq <= pw_mem[pw_ridx];
 end
-reg [41:0] pw_memB [0:255];              // espejo (BSRAM) — lector: solo OBL
-reg [41:0] pwqB;
+// _126e: el espejo solo necesita el TAG (el obl_do compara pwqB[41:32] y
+// el valid; el dato nunca se lee) — 256x10 en LUTRAM distribuida en vez
+// de una BSRAM entera: las columnas BSRAM son escasas y el macro extra
+// desplazaba el placement del motor de comandos (8 dados seguidos
+// violando conos ff_command/ff_ny_b que en la _125 cerraban).
+reg [9:0]  pw_tagB [0:255];              // espejo de TAGs — lector: solo OBL
+reg [9:0]  pwqB_tag;
 always @(posedge clk_vdp) begin
-    if (pww_en_n) pw_memB[pww_idx_n] <= pww_word_n;
-    pwqB <= pw_memB[w_idx(obl_w)];
+    if (pww_en_n) pw_tagB[pww_idx_n] <= pww_word_n[41:32];
+    pwqB_tag <= pw_tagB[w_idx(obl_w)];
 end
 reg        pwqB_v;
 
@@ -505,7 +510,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         if (wrk_p1 && pwq_v && pwq[41:32] == wrk_addr1[15:6])
             pw_v[w_idx(wrk_addr1)] <= 1'b0;
 
-        // ---------- OBL en TRES fases (_121b) — _126: con el ESPEJO pw_memB
+        // ---------- OBL en TRES fases (_121b) — _126: con el ESPEJO pw_tagB
         // el OBL ya no cede puerto: dispara SIEMPRE al ciclo siguiente del
         // hit (obl_pend se consume solo). La direccion sigue viajando en
         // sombras (obl_w_c/_d) para que un hit nuevo pise obl_w sin
@@ -513,7 +518,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         obl_pend <= 1'b0;                       // consumido (el hit lo re-arma)
         obl_chk  <= obl_read_now;
         obl_w_c  <= obl_w;
-        obl_do   <= obl_chk && !(pwqB_v && pwqB[41:32] == obl_w_c[15:6]);
+        obl_do   <= obl_chk && !(pwqB_v && pwqB_tag == obl_w_c[15:6]);
         obl_w_d  <= obl_w_c;
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
                                          // suben (asignacion posterior gana)
