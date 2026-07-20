@@ -27,3 +27,51 @@ PARCHE 3 (_120f, 2026-07-19) - vdp_command.v: comparadores de ventana LRMM
   aritmetico) se calculan en paralelo (w_wsy_lt_n/lt_s/gt_n/gt_s, syn_keep)
   y el decode solo elige el bit final (w_wsy_lt/gt). Mismo resultado ciclo a
   ciclo; el camino desde ff_command pasa de 15 niveles a ~3.
+
+============================================================================
+[MIGRACION th9958 — PLAN, 2026-07-21] Directiva de Albert: pasar al arbol
+th9958 de hra1129/TangCartMSX (clon en proyectosAI/msx/TangCartMSX, ruta
+RTL/tangnano20k_vdp_cartridge_rev2_step1/src/th9958) y re-aplicar nuestros
+parches. Los 21 .v tienen los MISMOS nombres. Rama: th9958.
+
+Ficheros SIN deriva upstream (se quedan igual): color_palette (¡ojo
+BLKANDNBLK!), command_cache, select_visible_planes, paletas, upscan, ssg2.
+
+TOMAR UPSTREAM LIMPIO (sin parche local segun este ORIGEN):
+  - vdp_sprite_makeup_pixel.v      (deriva 154 — evolucion HRA)
+  - vdp_sprite_info_collect.v      (20)
+  - vdp_timing_control_screen_mode.v (6)
+  - vdp_video_out.v                (2, solo comentario DVI->LCD)
+
+RE-APLICAR NUESTROS PARCHES SOBRE UPSTREAM:
+  - vdp_vram_interface.v: deriva upstream CERO -> COPIAR EL NUESTRO tal
+    cual (tag+eco). Trivial.
+  - vdp.v: puertos vram_tag/vram_rtag/vram_stall (plumbing) sobre el
+    upstream. OJO: upstream ELIMINO reg_ext_palette_mode (estaba en el
+    base 5978d18) — investigar a donde movio HRA la palette extendida
+    antes de re-cablear.
+  - vdp_cpu_interface.v: VR-carry (el gate !ff_vram_type del acarreo
+    SIGUE en el th9958 -> nuestro fix sigue haciendo falta) + mascara PAL
+    (ff_50hz_mode <= 1'b0). ESTRUCTURA NUEVA: ff_v9958_mode->ff_fakeID,
+    nuevos ff_ext_command_mode/ff_vram256k_mode (bits de control movidos,
+    el acarreo ahora gated por ff_vram256k_mode), status pointer 4'd10.
+    Releer el registro de control antes de tocar.
+  - vdp_command.v: syn_maxfan de ff_command + ff_screen_mode(_clone)
+    (_125b) + espejo ff_ny_b (_124d — REGENERAR desde el always de ff_ny
+    del upstream, que cambio: LRMM ya no esta en sy_active y la ventana
+    LRMM compara w_sy post-incremento SIN la variante >>1 de xhr) +
+    comparadores _120f SOLO si el timing vuelve a quejarse (el codigo
+    base de esa zona cambio de forma).
+  - vdp_timing_control_ssg.v: clones ff_v_count/_clone y
+    ff_screen_pos_x/_clone/_sprite (syn_preserve) + resta del scroll _120
+    (ff_screen_pos_x_sprite con reg_horizontal_offset_l) sobre el
+    upstream. OJO upstream arreglo vsync (3FE + set en 211/191) y el
+    blink (w_10frame == 4'd9): TOMAR su semantica.
+  - vdp_timing_control.v: plumbing de los puertos clone/sprite.
+  - vdp_timing_control_sprite.v: puerto screen_pos_x_ofs (_120).
+
+VERIFICACION: bateria run_battery.sh (sc8cmd_full + sc5line + bulk) —
+regenerar referencias si el upstream cambia semantica visible; luego los
+testbenches PROPIOS de HRA del arbol th9958 (test_command_cache,
+test_vdp_timing_control*, test_vdp2/3) como red extra. DEVCON.COM del
+arbol para el examen final en HW.
