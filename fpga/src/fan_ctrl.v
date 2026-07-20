@@ -31,7 +31,17 @@ module fan_ctrl #(
     // nunca: HW _119/_122/_123). Con cuentas absolutas calibradas de la
     // telemetria real, el umbral es reproducible en esta placa.
     parameter [19:0] TH_ON  = 20'd0,  // ON  cuando meas < TH_ON  (0 = relativo)
-    parameter [19:0] TH_OFF = 20'd0   // OFF cuando meas > TH_OFF
+    parameter [19:0] TH_OFF = 20'd0,  // OFF cuando meas > TH_OFF
+    // _125: LECCION de HW _124 — los umbrales ABSOLUTOS no sobreviven a un
+    // rebuild (la frecuencia del anillo depende del placement/rutado: _123
+    // frio=386K con WIN 2^17, _124 leia 840K con WIN 2^18 = +8% de anillo,
+    // el umbral quedo inalcanzable). Vuelta al modo RELATIVO con la K real
+    // medida (el punto "ya deberia arrancar" de Albert = -0.26% del frio
+    // => K_ON=2/1024 dispara a -0.195%) + GARANTIA POR TIEMPO: si tras
+    // FORCE_ON_SEC segundos el termometro no ha disparado (die templado por
+    // reflasheo en caliente, baseline envenenada, o pendiente rara), el
+    // ventilador se enciende FIJO. El termometro adelanta; el reloj asegura.
+    parameter [31:0] FORCE_ON_SEC = 32'd0   // 0 = sin garantia por tiempo
 )(
     input  wire        clk,          // 27MHz
     input  wire        reset_n,
@@ -62,6 +72,8 @@ module fan_ctrl #(
     reg [19:0] meas;
     reg [29:0] prod_on, prod_off; // base_max * K (registrado, sin prisa)
     reg [19:0] th_on, th_off;
+    reg [31:0] up_sec;            // _125: segundos de encendido (1 medida/s)
+    reg        forced_on;         // _125: garantia por tiempo disparada
 
     always @(posedge clk) begin
         if (!reset_n) begin
@@ -77,6 +89,8 @@ module fan_ctrl #(
             prod_off   <= 30'd0;
             th_on      <= 20'd0;
             th_off     <= 20'd0;
+            up_sec     <= 32'd0;
+            forced_on  <= 1'b0;
         end
         else begin
             case (state)
@@ -122,13 +136,17 @@ module fan_ctrl #(
                     th_off   <= base_max - prod_off[29:10];
                     if (cnt >= 32'd7) begin
                         dbg_cnt <= meas;
-                        if (meas == 20'd0) begin
-                            fan_en <= 1'b1;                  // anillo muerto: fail-safe
+                        up_sec  <= up_sec + 32'd1;           // 1 medida ~ 1s
+                        if (FORCE_ON_SEC != 32'd0 && up_sec >= FORCE_ON_SEC)
+                            forced_on <= 1'b1;               // garantia por tiempo
+                        if (forced_on || meas == 20'd0) begin
+                            fan_en <= 1'b1;                  // garantia / anillo muerto
                         end
                         else begin
                             if (meas > base_max) base_max <= meas;
                             if (TH_ON != 20'd0) begin
-                                // _124: modo absoluto calibrado
+                                // modo absoluto (solo calibraciones puntuales:
+                                // NO sobrevive a un rebuild, ver cabecera)
                                 if      (meas < TH_ON)  fan_en <= 1'b1;
                                 else if (meas > TH_OFF) fan_en <= 1'b0;
                             end

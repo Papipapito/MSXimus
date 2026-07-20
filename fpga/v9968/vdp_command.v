@@ -158,8 +158,11 @@ module vdp_command (
 	reg			[7:0]	ff_source;
 	wire		[7:0]	w_destination;
 	wire		[7:0]	w_lop_pixel;
-	reg			[9:0]	ff_screen_mode;				/* synthesis syn_preserve = 1 */
-	reg			[9:0]	ff_screen_mode_clone;		/* synthesis syn_preserve = 1 */
+	//	_125b (MSXimus): maxfan ADEMAS de los clones de HRA — la familia
+	//	ff_screen_mode -> next_state/cache_vram_address fue la ultima migaja
+	//	(-0.09) de la campana de timing.
+	reg			[9:0]	ff_screen_mode;				/* synthesis syn_preserve = 1 syn_maxfan = 8 */
+	reg			[9:0]	ff_screen_mode_clone;		/* synthesis syn_preserve = 1 syn_maxfan = 8 */
 
 	reg			[1:0]	ff_xsel;
 	reg			[11:0]	reg_sx;
@@ -201,7 +204,10 @@ module vdp_command (
 	reg					ff_xhr;
 	reg					ff_fg4;
 	reg			[3:0]	ff_logical_opration;
-	reg			[3:0]	ff_command;
+	//	_125b (MSXimus): ff_command abanica al case gigante del motor
+	//	(state/next_state/wait_counter) y su familia rota con la de ISet
+	//	del T80 en la loteria de placement — syn_maxfan la replica.
+	reg			[3:0]	ff_command /* synthesis syn_maxfan = 8 */;
 	reg					ff_start;
 
 	reg			[17:0]	ff_cache_vram_address;

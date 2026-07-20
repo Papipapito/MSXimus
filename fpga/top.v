@@ -291,7 +291,13 @@ end
     wire        fan_ro_en, fan_ro_rst;
     wire [19:0] fan_ro_cnt;
     wire [19:0] fan_dbg_cnt;
-    fan_ctrl #(.WIN_CYC(32'd262144), .TH_ON(20'd771600), .TH_OFF(20'd772300)) u_fanctrl (
+    //  TOMA 5 (_125): los umbrales ABSOLUTOS de la toma 4 murieron al
+    //  rebuild (el anillo de la _124 corria un 8% mas rapido que el de la
+    //  _123: la frecuencia depende del placement). Modo RELATIVO con la K
+    //  real medida (K_ON=2/1024 = -0.195%, el punto de Albert era -0.26%)
+    //  + garantia por tiempo: fan FIJO a los 6 min si no ha disparado.
+    fan_ctrl #(.WIN_CYC(32'd262144), .K_ON(10'd2), .K_OFF(10'd1),
+               .FORCE_ON_SEC(32'd360)) u_fanctrl (
         .clk        (clk_27m),
         .reset_n    (clock_locked),
         .ro_en      (fan_ro_en),
@@ -1633,7 +1639,11 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire clk_86, pll86_lock;
     pll_86 pll86_vdp ( .clkout0(clk_86), .lock(pll86_lock), .clkin(clk27_video) );
 
-    reg [3:0] rst86_sync = 4'd0;
+    // _125b: syn_maxfan — rst86_n abanica a TODO el dominio clk_86 (shim +
+    // core V9968) y su ultima etapa aparecio como migaja de -0.063 en el
+    // roll P235 (rst86_sync[3] -> CEs de pfq). La replica de la herramienta
+    // (identica por construccion) acorta las redes del arbol de reset.
+    (* syn_maxfan = 16 *) reg [3:0] rst86_sync = 4'd0;
     always @(posedge clk_86) rst86_sync <= {rst86_sync[2:0], bus_reset_n & pll86_lock};
     wire rst86_n = rst86_sync[3];
 
@@ -1945,6 +1955,13 @@ assign keyboard_addr = ppi_port_c[3:0];
 
     assign ram_write = (~flash_idle) ? rom_write : (any_ram_wr & ~bus_wr_n);
 
+    // _125c: se EVALUO registrar any_ram_req (el cono T80 ISet/IStatus ->
+    // mux A -> mapper -> aceptacion, ~13 niveles, familia final de timing de
+    // la campana _125) y el A/B de la W-suite lo RECHAZO: la correccion pasa
+    // (W1-W5 OK) pero T10 sostenido cae a la MITAD (296ns vs 148 — el drop
+    // retrasado del req hace perder una ventana entre lecturas back-to-back)
+    // y T9b pierde 13% de lecturas en 1T @5.369. El turbo manda: la familia
+    // se contiene con syn_maxfan (ISet/IStatus en t80.vhd) + sembrado.
     assign ram_req   = (~flash_idle) ? rom_write : any_ram_req;
 
     assign ram_din = (~flash_idle) ? { rom_dout, rom_dout }  : { cpu_dout, cpu_dout };

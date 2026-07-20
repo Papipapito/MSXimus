@@ -145,6 +145,13 @@ architecture rtl of T80 is
     signal TmpAddr          : std_logic_vector(15 downto 0);    -- Temporary address register
     signal IR               : std_logic_vector(7 downto 0);     -- Instruction register
     signal ISet             : std_logic_vector(1 downto 0);     -- Instruction set selector
+    -- MSXimus _125: ISet alimenta el mux de direccion (RegAddrC/A_i) y su
+    -- cono llega hasta mem1/ram_busy (~13 niveles + rutas largas con CLS
+    -- ~83%): familia de timing reincidente en 9/10 tiradas. syn_maxfan
+    -- fuerza a GowinSynthesis a REPLICAR el registro (identico por
+    -- construccion, sin espejo a mano) y acorta las redes.
+    attribute syn_maxfan : integer;
+    attribute syn_maxfan of ISet : signal is 4;
     signal RegBusA_r        : std_logic_vector(15 downto 0);
 
     signal ID16             : signed(15 downto 0);
@@ -161,6 +168,10 @@ architecture rtl of T80 is
     signal NMI_s            : std_logic;
     signal INT_s            : std_logic;
     signal IStatus          : std_logic_vector(1 downto 0);
+    -- _125b: al replicar ISet el cuello salto a su hermano IStatus (mismo
+    -- mux de direccion RegAddrC/A_i). Misma medicina (declarado ANTES del
+    -- atributo, exigencia VHDL).
+    attribute syn_maxfan of IStatus : signal is 4;
 
     signal DI_Reg           : std_logic_vector(7 downto 0);
     signal T_Res            : std_logic;

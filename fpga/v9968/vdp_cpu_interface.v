@@ -448,7 +448,13 @@ module vdp_cpu_interface (
 			if( ff_vram_address_noinc ) begin
 				ff_vram_address_noinc	<= 1'b0;
 			end
-			else if( (ff_screen_mode[4:3] == 2'b00) || !ff_vram_type ) begin
+			//	_125 (MSXimus): VR=0 (R#8 bit3) NO bloquea el acarreo del
+			//	contador al banco — en silicio real y openMSX VR solo elige
+			//	el tipo de DRAM para el refresh. Con el gate, un stream de
+			//	escritura >16KB (soft_vdp_test2 de HRA escribe R#8=0x02)
+			//	envolvia en el banco 0: "media pantalla" en HW _124. El
+			//	wrap de 14 bits queda SOLO para los modos TMS9918.
+			else if( ff_screen_mode[4:3] == 2'b00 ) begin
 				ff_vram_address[13:0]	<= w_next_vram_address[13:0];
 			end
 			else if( !ff_v9958_mode ) begin
@@ -460,10 +466,9 @@ module vdp_cpu_interface (
 		end
 		else if( ff_register_write && ff_register_num == 6'd14 ) begin
 			//	R#14 = [N/A][N/A][N/A][N/A][A17][A16][A15][A14]
-			if( !ff_vram_type ) begin
-				ff_vram_address[17:14]	<= 4'd0;
-			end
-			else if( !ff_v9958_mode ) begin
+			//	_125 (MSXimus): VR=0 tampoco fuerza aqui el banco a 0
+			//	(misma justificacion que arriba).
+			if( !ff_v9958_mode ) begin
 				ff_vram_address[17:14]	<= ff_1st_byte[3:0];
 			end
 			else begin
@@ -591,7 +596,12 @@ module vdp_cpu_interface (
 				end
 			6'd9:	//	R#9 = [LN][N/A][N/A][N/A][IL][EO][NT][N/A]
 				begin
-					ff_50hz_mode <= ff_1st_byte[1];
+					//	_125 (MSXimus v1): NTSC-only — el puente HDMI es
+					//	60Hz/525 fijo; con NT=1 el core cambiaba a 625
+					//	lineas y la imagen quedaba negra/descompuesta
+					//	(PAL TEST de HRA, HW _124). El bit se IGNORA:
+					//	software PAL se ve a 60Hz. PAL real = pendiente.
+					ff_50hz_mode <= 1'b0;
 					ff_interleaving_mode <= ff_1st_byte[2];
 					ff_interlace_mode <= ff_1st_byte[3];
 					ff_212lines_mode <= ff_1st_byte[7];
