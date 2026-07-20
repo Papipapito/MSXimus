@@ -276,11 +276,16 @@ end
     //  ~40C: umbral RELATIVO bajado a ~+7-10C sobre el arranque
     //  (K_ON=10/1024 ~1%, K_OFF=5/1024) — con el die tibio deberia
     //  arrancar solo. Fail-safe intacto (anillo muerto -> ON).
+    //  TOMA 3 (_123): en HW _122 TAMPOCO disparo con el disipador bien
+    //  caliente — la pendiente real del anillo es aun menor. Umbral a
+    //  K_ON=5/1024 (~0.5%) y, sobre todo, dbg_cnt del termometro SALE
+    //  por el COM11 (4a palabra de la telemetria) para calibrar de una
+    //  vez con lecturas reales frio/caliente en vez de seguir adivinando.
     // ================================================================
     wire        fan_ro_en, fan_ro_rst;
     wire [19:0] fan_ro_cnt;
     wire [19:0] fan_dbg_cnt;
-    fan_ctrl #(.K_ON(10'd10), .K_OFF(10'd5)) u_fanctrl (
+    fan_ctrl #(.K_ON(10'd5), .K_OFF(10'd2)) u_fanctrl (
         .clk        (clk_27m),
         .reset_n    (clock_locked),
         .ro_en      (fan_ro_en),
@@ -4168,6 +4173,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
         .clk(clk_54m), .rst_n(bus_reset_n),
         .cnt_a(v68dbg_miss), .cnt_b(v68dbg_bka), .cnt_c(v68dbg_bkb),
+        .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)

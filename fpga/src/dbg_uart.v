@@ -6,7 +6,9 @@
 // (valores cuasi-estaticos muestreados; el cruce de dominios se tolera por
 // snapshot — un LSB rasgado en una muestra no importa para telemetria).
 //
-// Formato: "D <hex32> <hex32> <hex32>\n"  cada ~250ms a 115200-8N1.
+// Formato: "D <hex32> <hex32> <hex32> <hex32>\n"  cada ~250ms a 115200-8N1.
+// (_123: 4a palabra = {fan_en, 11'b0, dbg_cnt del termometro RO} para
+//  CALIBRAR el ventilador con datos reales — en HW _119 y _122 no disparo.)
 //
 // Parte del MSXimus. Copyright (C) 2026 Papipapito. GPL-3.0-or-later.
 // ============================================================================
@@ -20,6 +22,7 @@ module dbg_uart #(
     input  wire [31:0] cnt_a,           // p.ej. misses del shim
     input  wire [31:0] cnt_b,           // p.ej. completaciones canal A/B
     input  wire [31:0] cnt_c,           // p.ej. drops/otros
+    input  wire [31:0] cnt_d,           // _123: {fan_en, 11'b0, ro dbg_cnt}
     output reg         tx
 );
 
@@ -27,10 +30,10 @@ module dbg_uart #(
     localparam integer TICKS = (CLK_HZ / 1000) * PERIOD_MS;
 
     // snapshot de los contadores (cuasi-estaticos)
-    reg [31:0] s_a, s_b, s_c;
+    reg [31:0] s_a, s_b, s_c, s_d;
 
-    // mensaje: "D aaaaaaaa bbbbbbbb cccccccc\r\n" = 30 chars
-    localparam MSG_LEN = 30;
+    // mensaje: "D aaaaaaaa bbbbbbbb cccccccc dddddddd\r\n" = 39 chars
+    localparam MSG_LEN = 39;
     reg [7:0] msg [0:MSG_LEN-1];
 
     function [7:0] hexc(input [3:0] v);
@@ -46,7 +49,9 @@ module dbg_uart #(
             for (i = 0; i < 8; i = i + 1) msg[11+i] = hexc(s_b[28-4*i +: 4]);
             msg[19] = " ";
             for (i = 0; i < 8; i = i + 1) msg[20+i] = hexc(s_c[28-4*i +: 4]);
-            msg[28] = 8'h0D; msg[29] = 8'h0A;
+            msg[28] = " ";
+            for (i = 0; i < 8; i = i + 1) msg[29+i] = hexc(s_d[28-4*i +: 4]);
+            msg[37] = 8'h0D; msg[38] = 8'h0A;
         end
     endtask
 
@@ -54,7 +59,7 @@ module dbg_uart #(
     reg [9:0]  baud_cnt;
     reg [3:0]  bit_idx;         // 0=start, 1-8=datos, 9=stop
     reg [7:0]  cur_byte;
-    reg [4:0]  msg_idx;
+    reg [5:0]  msg_idx;         // _123: 39 chars ya no caben en 5 bits
     reg        sending;
 
     always @(posedge clk) begin
@@ -62,7 +67,7 @@ module dbg_uart #(
             tx <= 1'b1;
             period_cnt <= 0; baud_cnt <= 0; bit_idx <= 0;
             msg_idx <= 0; sending <= 0; cur_byte <= 0;
-            s_a <= 0; s_b <= 0; s_c <= 0;
+            s_a <= 0; s_b <= 0; s_c <= 0; s_d <= 0;
         end
         else begin
             if (!sending) begin
@@ -70,7 +75,7 @@ module dbg_uart #(
                 period_cnt <= period_cnt + 1;
                 if (period_cnt >= TICKS) begin
                     period_cnt <= 0;
-                    s_a <= cnt_a; s_b <= cnt_b; s_c <= cnt_c;
+                    s_a <= cnt_a; s_b <= cnt_b; s_c <= cnt_c; s_d <= cnt_d;
                     build_msg;
                     msg_idx <= 0; bit_idx <= 0; baud_cnt <= 0;
                     sending <= 1;

@@ -156,6 +156,20 @@ reg        obl_pend;
 reg        obl_chk;
 reg        obl_do;                       // _121b: fase 3 (comparador registrado)
 reg [15:0] obl_w;
+reg [15:0] obl_w_c, obl_w_d;             // _123: la direccion VIAJA con la
+                                         // tuberia (un hit nuevo pisaba obl_w
+                                         // con la fase 3 aun en vuelo: se
+                                         // perdia una direccion y se duplicaba
+                                         // otra = agujero en la cadena)
+reg        pfB_pend;                     // _123b: semilla del fetch (miss +1 o
+reg [15:0] pfB_wr;                       // rescate) REGISTRADA — el push desde
+                                         // el ciclo del compare colgaba pfq del
+                                         // DO del BSRAM (la familia critica
+                                         // pw_mem DO -> pfq de _121b, resucito
+                                         // a -25.8 en el roll r2 del park v1).
+                                         // +1 ciclo en prefetch especulativo =
+                                         // gratis, y en pares consecutivos el
+                                         // esquema pipelinea sin perdidas.
 
 // escritura muxeada de la cache (1 solo write-site por array): el FILL
 // (completacion rq de sprite) espera en fill_* si el ciclo lo usa un update
@@ -193,6 +207,15 @@ wire       rq_room_soft = (rq_used <= 4'd12);  // hueco para bg/sprite (_121:
                                                // efectiva de 4 -> 265K
                                                // drops/s en SC8; CPU/cmd
                                                // conservan 3 plazas)
+// _123: APARCAMIENTO con reintento para bg/sprite — el TB de placa cazo la
+// correlacion 1:1 drop->miss (S3 t=51930893000 addr=403b == MISS ln=64
+// addr=403b): con rq transitoriamente caliente (CPU+sprites+drenaje frenado
+// por el refresh) la reserva DESCARTABA el miss de bg = un guion en pantalla
+// una vez por batido (la "linea barredora" de HW _121/_122). Ahora se aparca
+// en 1 plaza y se reencola al abrirse hueco (drena en <1us; si llegara otro
+// mientras, gana el nuevo — el viejo ya perdio a su consumidor igualmente).
+reg        bgp_v;
+reg [20:0] bgp_e;                              // {tag[4:0], addr[15:0]}
 
 // ============================================================================
 // TUBERIA DE RESPUESTA A 8 CICLOS para bg: shift-register de 8 etapas con
@@ -333,7 +356,16 @@ always @(negedge clk_vdp) begin
     pww_idx_n  <= pww_idx;
     pww_en_n   <= pww_en;
 end
-wire [7:0] pw_ridx = obl_pend ? w_idx(obl_w) : w_idx(vram_address);
+// _123: el OBL CEDE el puerto de lectura a TODO vram_valid entrante. Antes
+// obl_pend ganaba el mux y el fetch/write-check de ese ciclo leia el slot
+// EQUIVOCADO: (a) fetch bg -> compare de tag contra slot ajeno -> MISS
+// ESPURIO con colas vacias (la radiografia exacta del TB: wv=1, wtag ajeno,
+// pfq=0 rq=0) = el guion de la "linea barredora", precesando porque el
+// tráfico de comandos/CPU se desliza con el refresh; (b) escritura VDP ->
+// write-check contra slot ajeno -> INVALIDACION PERDIDA -> dato rancio
+// servido despues (mas lineas justo con lluvia de escrituras: el blink).
+wire       obl_read_now = obl_pend && !vram_valid;
+wire [7:0] pw_ridx = obl_read_now ? w_idx(obl_w) : w_idx(vram_address);
 always @(posedge clk_vdp) begin
     if (pww_en_n) pw_mem[pww_idx_n] <= pww_word_n;
     pwq <= pw_mem[pw_ridx];
@@ -363,6 +395,9 @@ always @(posedge clk_vdp or negedge rst_n) begin
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
+        obl_w_c <= 0; obl_w_d <= 0;
+        bgp_v <= 0; bgp_e <= 0;
+        pfB_pend <= 0; pfB_wr <= 0;
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0;
         pwq_v <= 0;
         pww_en <= 0; pww_idx <= 0; pww_tag <= 0; pww_data <= 0;
@@ -407,24 +442,36 @@ always @(posedge clk_vdp or negedge rst_n) begin
         else vram_rdata_en <= 1'b0;
         for (pi = 6; pi > 0; pi = pi - 1) pipe[pi] <= pipe[pi-1];
         pipe[0] <= 38'd0;
+`ifdef SHIM_DBG_DROPS
+        // S6: SECUESTRO del puerto de lectura de la ventana — obl_pend gana el
+        // mux pw_ridx y el fetch entrante lee el slot EQUIVOCADO -> miss espurio
+        if (obl_pend && vram_valid && !vram_write)
+            $display("DROP S6_hijack_pwridx t=%0t obl_w=%h addr=%h tag=%h",
+                     $time, obl_w, vram_address, vram_tag);
+`endif
 
         // ---------- write-check de la VENTANA (v4, etapa 1): invalidacion
         // por coherencia si el tag leido de la BSRAM casa ----
         if (wrk_p1 && pwq_v && pwq[41:32] == wrk_addr1[15:6])
             pw_v[w_idx(wrk_addr1)] <= 1'b0;
 
-        // ---------- OBL en TRES fases (_121b): la lectura BSRAM de obl_w se
-        // lanza con obl_pend; obl_chk REGISTRA el resultado del comparador
-        // (pwq venia del DO de pw_mem y escribir pfq en el mismo ciclo era
-        // la familia critica pw_mem DO -> pfq WRE); obl_do encola. El OBL es
-        // prefetch especulativo: +1 ciclo de latencia es inofensivo. ----
-        obl_pend <= 1'b0;
-        obl_chk  <= obl_pend;
-        obl_do   <= obl_chk && !(pwq_v && pwq[41:32] == obl_w[15:6]);
-        if (obl_do && !pfq_full) begin
-            pfq[pfq_wp] <= obl_w;
-            pfq_wp <= pfq_wp + 3'd1;
-        end
+        // ---------- OBL en TRES fases (_121b) + CESION DE PUERTO (_123):
+        // obl_pend RETIENE mientras vram_valid le quite el puerto y lee en
+        // el primer ciclo libre; la direccion viaja en sombras (obl_w_c/_d)
+        // para que un hit nuevo pueda pisar obl_w sin corromper la fase en
+        // vuelo. El encolado va al PUSH UNIFICADO del final del ciclo (pfA).
+        // El OBL es prefetch especulativo: +1 ciclo de espera es inofensivo.
+        obl_pend <= obl_pend && vram_valid;     // retiene solo si cedio
+        obl_chk  <= obl_read_now;
+        obl_w_c  <= obl_w;
+        obl_do   <= obl_chk && !(pwq_v && pwq[41:32] == obl_w_c[15:6]);
+        obl_w_d  <= obl_w_c;
+        pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
+                                         // suben (asignacion posterior gana)
+`ifdef SHIM_DBG_DROPS
+        if (obl_read_now && vram_valid)          // imposible por construccion
+            $display("BUG S6_hijack_pwridx t=%0t", $time);
+`endif
 
         // ---------- etapa 1 UNIFICADA del lookup (v4): VENTANA + CACHE ----
         // Todo fetch (bg/sprite/CPU/comando) llega aqui con las lecturas
@@ -435,14 +482,17 @@ always @(posedge clk_vdp or negedge rst_n) begin
             if (spr_tag1[4:2] == C_BG && pwq_v &&
                 pwq[41:32] == spr_addr1[15:6]) begin
                 // HIT de VENTANA: dato + OBL (fase 2)
-                // _122: prefetch a +2 (antes +1) — un miss/frame EXACTO
-                // (59/s medidos por COM11 en SC5) dibujaba la "linea
-                // barredora": el batido del refresh periodico (3519.4 por
-                // frame) rompia el plazo de UN fill por frame en posicion
-                // precesante. Con +2 el plazo se DOBLA (~3us en SC5) con
-                // el mismo caudal; la cadena la siembra el miss (+1 directo
-                // y +2 via OBL, sin huecos ni duplicados).
+                // _122 probo prefetch +2 y ventana 256 contra la "linea
+                // barredora" — NO ERA ESO (59 miss/s intactos en HW): el
+                // culpable era el SECUESTRO del puerto pw_ridx por obl_pend
+                // (ver _123 arriba). El +2 se queda: mas colchon gratis.
                 pipe[1] <= {1'b1, spr_tag1, pwq[31:0]};
+                if (obl_pend) begin
+                    // _123: el OBL anterior cedio el puerto y aun no corrio;
+                    // se rescata su direccion a pfq (via pfB_pend, registrado).
+                    pfB_pend <= 1'b1;
+                    pfB_wr   <= obl_w;
+                end
                 obl_pend <= 1'b1;
                 obl_w    <= spr_addr1 + 16'd2;
             end
@@ -458,6 +508,24 @@ always @(posedge clk_vdp or negedge rst_n) begin
                         rq[rq_wp] <= {spr_tag1, spr_addr1};
                         rq_wp <= rq_wp + 4'd1;
                     end
+                    else begin
+                        // _123: APARCAR en vez de descartar (fix linea barredora).
+                        // PRIORIDAD DE CLASE: bg (visible: un guion en pantalla)
+                        // nunca es desplazado por sprite (se autocura via cache);
+                        // bg nuevo si desplaza a bg viejo (en placa la colision
+                        // real es singular, ~1/frame — el TB la inflaba con su
+                        // patologia SAT=0 de sprites martilleando).
+                        if (spr_tag1[4:2] == C_BG || !bgp_v) begin
+                            bgp_v <= 1'b1;
+                            bgp_e <= {spr_tag1, spr_addr1};
+`ifdef SHIM_DBG_DROPS
+                            if (bgp_v) $display("DROP S3b_park_pisado t=%0t addr=%h tag=%h", $time, spr_addr1, spr_tag1);
+`endif
+                        end
+`ifdef SHIM_DBG_DROPS
+                        else $display("DROP S3c_sprite_cede t=%0t addr=%h", $time, spr_addr1);
+`endif
+                    end
                 end
                 else if (!rq_full) begin
                     rq[rq_wp] <= {spr_tag1, spr_addr1};
@@ -470,15 +538,46 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // despues: sin colision en el puerto de pfq).
                     bg_miss <= bg_miss + 8'd1;
                     c_miss  <= c_miss + 32'd1;
-                    if (!pfq_full) begin
-                        pfq[pfq_wp] <= spr_addr1 + 16'd1;
-                        pfq_wp <= pfq_wp + 3'd1;
-                    end
+                    pfB_pend <= 1'b1;            // semilla +1 (registrada; si
+                    pfB_wr   <= spr_addr1 + 16'd1; // habia OBL retenido cede:
+                                                 // el miss resiembra la cadena)
                     obl_pend <= 1'b1;
                     obl_w    <= spr_addr1 + 16'd2;
                 end
             end
         end
+
+        // ---------- drenaje del aparcamiento bg/sprite (_123) ----------
+        if (bgp_v && rq_room_soft && !spr_p1) begin
+            rq[rq_wp] <= bgp_e;
+            rq_wp <= rq_wp + 4'd1;
+            bgp_v <= 1'b0;
+        end
+
+        // ---------- push UNIFICADO de pfq (_123b): hasta 2 por ciclo, TODO
+        // desde registros (obl_do/obl_w_d y pfB_pend/pfB_wr) — sin la familia
+        // pw_mem DO -> pfq. Antes obl_do y la semilla del miss podian escribir
+        // el MISMO slot en el mismo ciclo (pisada silenciosa). Con hueco para
+        // uno solo gana la semilla (consumidor inminente).
+        if (obl_do && pfB_pend && !pfq_full && (pfq_wp + 3'd2 != pfq_rp)) begin
+            pfq[pfq_wp]        <= obl_w_d;
+            pfq[pfq_wp + 3'd1] <= pfB_wr;
+            pfq_wp <= pfq_wp + 3'd2;
+        end
+        else if (pfB_pend && !pfq_full) begin
+            pfq[pfq_wp] <= pfB_wr;
+            pfq_wp <= pfq_wp + 3'd1;
+        end
+        else if (obl_do && !pfq_full) begin
+            pfq[pfq_wp] <= obl_w_d;
+            pfq_wp <= pfq_wp + 3'd1;
+        end
+`ifdef SHIM_DBG_DROPS
+        if ((obl_do || pfB_pend) && pfq_full)
+            $display("DROP S1_pfq_full t=%0t A=%b:%h B=%b:%h", $time, obl_do, obl_w_d, pfB_pend, pfB_wr);
+        else if (obl_do && pfB_pend && (pfq_wp + 3'd2 == pfq_rp))
+            $display("DROP S1b_room1_pierde_A t=%0t A=%h", $time, obl_w_d);
+`endif
 
         // ---------- aceptar peticion del VDP ----------
         if (vram_valid) begin
@@ -490,6 +589,9 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     wq[wq_wp] <= {~vram_wdata_mask, vram_wdata, vram_address};
                     wq_wp <= wq_wp + 3'd1;
                 end
+`ifdef SHIM_DBG_DROPS
+                else $display("DROP S5_wq_full t=%0t addr=%h", $time, vram_address);
+`endif
                 // write-check (etapa 1): compara los tags BSRAM y aplica el
                 // update de cache byte a byte / la invalidacion de ventana
                 wrk_p1    <= 1'b1;
