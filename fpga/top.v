@@ -281,11 +281,17 @@ end
     //  K_ON=5/1024 (~0.5%) y, sobre todo, dbg_cnt del termometro SALE
     //  por el COM11 (4a palabra de la telemetria) para calibrar de una
     //  vez con lecturas reales frio/caliente en vez de seguir adivinando.
+    //  TOMA 4 (_124): CALIBRADO con la telemetria de HW _123 — pendiente
+    //  real ~6x menor (frio 386400, caliente-que-Albert-quiere-fan
+    //  ~385400, WIN 2^17). Umbrales ABSOLUTOS (inmunes al reflasheo en
+    //  caliente que envenenaba la baseline relativa) con WIN doblada a
+    //  2^18 (menos ruido; cuentas x2: frio ~772800, ON <771600,
+    //  OFF >772300).
     // ================================================================
     wire        fan_ro_en, fan_ro_rst;
     wire [19:0] fan_ro_cnt;
     wire [19:0] fan_dbg_cnt;
-    fan_ctrl #(.K_ON(10'd5), .K_OFF(10'd2)) u_fanctrl (
+    fan_ctrl #(.WIN_CYC(32'd262144), .TH_ON(20'd771600), .TH_OFF(20'd772300)) u_fanctrl (
         .clk        (clk_27m),
         .reset_n    (clock_locked),
         .ro_en      (fan_ro_en),
@@ -1680,6 +1686,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // paralelo (bk por wv2, bk2 por wv3): los modos de 256B/linea (SC7/8/12)
     // consumen 1 palabra/730ns y un canal solo daba ~800ns.
     wire [31:0] v68dbg_miss, v68dbg_bka, v68dbg_bkb;   // _121diag → COM11
+    wire [31:0] v68dbg_park;                           // _124: park del shim
     wire        v68bk_req, v68bk_we, v68bk_done_t;
     wire [21:0] v68bk_addr;
     wire [7:0]  v68bk_wdata;
@@ -1700,7 +1707,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .bk2_rword(v68bk2_rword), .bk2_done_t(v68bk2_done_t),
         .vram_stall(v68_vram_stall),
         .diag(),
-        .dbg_miss(v68dbg_miss), .dbg_bka(v68dbg_bka), .dbg_bkb(v68dbg_bkb)
+        .dbg_miss(v68dbg_miss), .dbg_bka(v68dbg_bka), .dbg_bkb(v68dbg_bkb),
+        .dbg_park(v68dbg_park)
     );
     v9968_sdram_bridge u_v68bridge (
         .clk_vdp(clk_86), .rst_n(rst86_n),
@@ -4174,6 +4182,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .clk(clk_54m), .rst_n(bus_reset_n),
         .cnt_a(v68dbg_miss), .cnt_b(v68dbg_bka), .cnt_c(v68dbg_bkb),
         .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
+        .cnt_e(v68dbg_park),                      // _124: {pisadas, drenajes} del park
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)

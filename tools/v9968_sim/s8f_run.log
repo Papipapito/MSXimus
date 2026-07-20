@@ -1,7 +1,7 @@
 VRAM cargada en vs=1
-MISS ln=63 addr=0023
+MISS ln=63 addr=0022
 MISS ln=63 addr=4026
 LINEA 63: miss=2 drop=0
-FRAME VOLCADO (bg_miss acumulado=12)
-*** SCREEN8 CON SHIM: COMPLETO (vs=9, bg_miss=12) ***
+FRAME VOLCADO (bg_miss acumulado=9)
+*** SCREEN8 CON SHIM: COMPLETO (vs=9, bg_miss=9) ***
 tb_screen8.sv:217: $finish called at 150026919441 (1ps)

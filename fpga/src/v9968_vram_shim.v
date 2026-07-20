@@ -68,6 +68,7 @@ module v9968_vram_shim #(
     // estaticos — se muestrean desde dbg_uart en otro dominio)
     output wire [31:0] dbg_miss,
     output wire [31:0] dbg_bka,
+    output wire [31:0] dbg_park,             // _124: {pisadas[15:0], drenajes[15:0]}
     output wire [31:0] dbg_bkb
 );
 
@@ -214,8 +215,17 @@ wire       rq_room_soft = (rq_used <= 4'd12);  // hueco para bg/sprite (_121:
 // una vez por batido (la "linea barredora" de HW _121/_122). Ahora se aparca
 // en 1 plaza y se reencola al abrirse hueco (drena en <1us; si llegara otro
 // mientras, gana el nuevo — el viejo ya perdio a su consumidor igualmente).
-reg        bgp_v;
-reg [20:0] bgp_e;                              // {tag[4:0], addr[15:0]}
+// _124: el park pasa a FIFO de 4 — en HW _123 el 1 miss/frame SEGUIA (+59/s
+// exactos en COM11): la hipotesis es RAFAGA de misses bg en la misma ventana
+// caliente (bg pisaba a bg en la plaza unica; el TB ya enseno S3b>0). Los
+// contadores salen por COM11 (palabra 5) y responden la pregunta en placa:
+// pisadas~59/s => era esto (y el FIFO de 4 ES el fix); pisadas=0 => el
+// agujero esta mas arriba y toca radiografia de posicion.
+reg [20:0] bgp [0:3];                          // {tag[4:0], addr[15:0]}
+reg [1:0]  bgp_wp, bgp_rp;
+wire       bgp_empty = (bgp_wp == bgp_rp);
+wire       bgp_full  = (bgp_wp + 2'd1 == bgp_rp);
+reg [15:0] c_park, c_pkov;                     // drenajes OK / pisadas (overflow)
 
 // ============================================================================
 // TUBERIA DE RESPUESTA A 8 CICLOS para bg: shift-register de 8 etapas con
@@ -232,6 +242,7 @@ assign diag = bg_miss;
 reg [31:0] c_miss, c_bka, c_bkb;         // _121diag
 assign dbg_miss = c_miss;
 assign dbg_bka  = c_bka;
+assign dbg_park = {c_pkov, c_park};
 assign dbg_bkb  = c_bkb;
 
 // control de flujo: con wq medio-lleno o rq caliente, el interface retiene
@@ -396,7 +407,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
         obl_w_c <= 0; obl_w_d <= 0;
-        bgp_v <= 0; bgp_e <= 0;
+        bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0;
         pfB_pend <= 0; pfB_wr <= 0;
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0;
         pwq_v <= 0;
@@ -509,22 +520,18 @@ always @(posedge clk_vdp or negedge rst_n) begin
                         rq_wp <= rq_wp + 4'd1;
                     end
                     else begin
-                        // _123: APARCAR en vez de descartar (fix linea barredora).
-                        // PRIORIDAD DE CLASE: bg (visible: un guion en pantalla)
-                        // nunca es desplazado por sprite (se autocura via cache);
-                        // bg nuevo si desplaza a bg viejo (en placa la colision
-                        // real es singular, ~1/frame — el TB la inflaba con su
-                        // patologia SAT=0 de sprites martilleando).
-                        if (spr_tag1[4:2] == C_BG || !bgp_v) begin
-                            bgp_v <= 1'b1;
-                            bgp_e <= {spr_tag1, spr_addr1};
+                        // _123/_124: APARCAR en vez de descartar (fix linea
+                        // barredora); FIFO de 4 para las rafagas bg+bg.
+                        if (!bgp_full) begin
+                            bgp[bgp_wp] <= {spr_tag1, spr_addr1};
+                            bgp_wp <= bgp_wp + 2'd1;
+                        end
+                        else begin
+                            c_pkov <= c_pkov + 16'd1;
 `ifdef SHIM_DBG_DROPS
-                            if (bgp_v) $display("DROP S3b_park_pisado t=%0t addr=%h tag=%h", $time, spr_addr1, spr_tag1);
+                            $display("DROP S3b_park_lleno t=%0t addr=%h tag=%h", $time, spr_addr1, spr_tag1);
 `endif
                         end
-`ifdef SHIM_DBG_DROPS
-                        else $display("DROP S3c_sprite_cede t=%0t addr=%h", $time, spr_addr1);
-`endif
                     end
                 end
                 else if (!rq_full) begin
@@ -543,15 +550,27 @@ always @(posedge clk_vdp or negedge rst_n) begin
                                                  // el miss resiembra la cadena)
                     obl_pend <= 1'b1;
                     obl_w    <= spr_addr1 + 16'd2;
+                    // _124: DEGRADACION ELEGANTE — el aparcamiento cura el
+                    // fill posterior pero NO el guion del PRIMER miss (el
+                    // consumidor muestrea a 8 ciclos fijos, pillara lo que
+                    // haya). Si el slot de ventana es valido con tag ajeno,
+                    // servir el dato RANCIO (contenido de ~4 lineas antes,
+                    // casi siempre identico en bitmap) en vez de basura:
+                    // el guion visible se vuelve imperceptible sea cual sea
+                    // la causa del miss. El miss se sigue contando y el
+                    // fill llega igual por detras (autocura real).
+                    if (pwq_v)
+                        pipe[1] <= {1'b1, spr_tag1, pwq[31:0]};
                 end
             end
         end
 
         // ---------- drenaje del aparcamiento bg/sprite (_123) ----------
-        if (bgp_v && rq_room_soft && !spr_p1) begin
-            rq[rq_wp] <= bgp_e;
+        if (!bgp_empty && rq_room_soft && !spr_p1) begin
+            rq[rq_wp] <= bgp[bgp_rp];
             rq_wp <= rq_wp + 4'd1;
-            bgp_v <= 1'b0;
+            bgp_rp <= bgp_rp + 2'd1;
+            c_park <= c_park + 16'd1;
         end
 
         // ---------- push UNIFICADO de pfq (_123b): hasta 2 por ciclo, TODO

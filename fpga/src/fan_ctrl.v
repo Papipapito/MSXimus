@@ -22,7 +22,16 @@ module fan_ctrl #(
     parameter [31:0] WIN_CYC = 32'd131072,  // ventana de cuenta (2^17 = ~4.85ms;
                                             // 20 bits no desbordan ni a 150MHz)
     parameter [9:0] K_ON  = 10'd32,   // caida para ON  (32/1024 = 3.1%)
-    parameter [9:0] K_OFF = 10'd20    // caida para OFF (20/1024 = 2.0%)
+    parameter [9:0] K_OFF = 10'd20,   // caida para OFF (20/1024 = 2.0%)
+    // _124: umbrales ABSOLUTOS de cuenta (TH_ON != 0 los activa y anula el
+    // modo relativo). Motivo: la pendiente REAL medida en placa (COM11,
+    // 2026-07-20) es ~6x menor que la estimada (frio 386400 -> caliente
+    // ~385400 con WIN 2^17 = -0.26%) y ademas la baseline relativa nace
+    // ALTA si se flashea con el die caliente (el ventilador no arrancaba
+    // nunca: HW _119/_122/_123). Con cuentas absolutas calibradas de la
+    // telemetria real, el umbral es reproducible en esta placa.
+    parameter [19:0] TH_ON  = 20'd0,  // ON  cuando meas < TH_ON  (0 = relativo)
+    parameter [19:0] TH_OFF = 20'd0   // OFF cuando meas > TH_OFF
 )(
     input  wire        clk,          // 27MHz
     input  wire        reset_n,
@@ -118,8 +127,15 @@ module fan_ctrl #(
                         end
                         else begin
                             if (meas > base_max) base_max <= meas;
-                            if      (meas < th_on)  fan_en <= 1'b1;
-                            else if (meas > th_off) fan_en <= 1'b0;
+                            if (TH_ON != 20'd0) begin
+                                // _124: modo absoluto calibrado
+                                if      (meas < TH_ON)  fan_en <= 1'b1;
+                                else if (meas > TH_OFF) fan_en <= 1'b0;
+                            end
+                            else begin
+                                if      (meas < th_on)  fan_en <= 1'b1;
+                                else if (meas > th_off) fan_en <= 1'b0;
+                            end
                             // entre umbrales: mantener (histeresis)
                         end
                         state <= S_IDLE;

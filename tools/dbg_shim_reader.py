@@ -29,14 +29,18 @@ while True:
             print(f"(otra linea: {ln[:60]})")
         continue
     try:
-        parts = [int(x, 16) for x in ln.split()[1:5]]
+        parts = [int(x, 16) for x in ln.split()[1:6]]
         miss, bka, bkb = parts[0], parts[1], parts[2]
         fanw = parts[3] if len(parts) > 3 else None
+        park = parts[4] if len(parts) > 4 else None
     except Exception:
         print(f"(malformada: {ln[:60]})")
         continue
     now = time.time()
     fan = "" if fanw is None else f"  fan={'ON ' if fanw >> 31 else 'off'} ro={fanw & 0xFFFFF}"
+    if park is not None:
+        # _124: palabra 5 = {pisadas_park[15:0], drenajes_park[15:0]}
+        fan += f"  pkov={park >> 16} pkok={park & 0xFFFF}"
     if prev is not None:
         dt = now - prev_t
         dm = (miss - prev[0]) & 0xFFFFFFFF

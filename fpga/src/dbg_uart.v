@@ -23,6 +23,7 @@ module dbg_uart #(
     input  wire [31:0] cnt_b,           // p.ej. completaciones canal A/B
     input  wire [31:0] cnt_c,           // p.ej. drops/otros
     input  wire [31:0] cnt_d,           // _123: {fan_en, 11'b0, ro dbg_cnt}
+    input  wire [31:0] cnt_e,           // _124: park {pisadas[15:0], drenajes[15:0]}
     output reg         tx
 );
 
@@ -30,30 +31,40 @@ module dbg_uart #(
     localparam integer TICKS = (CLK_HZ / 1000) * PERIOD_MS;
 
     // snapshot de los contadores (cuasi-estaticos)
-    reg [31:0] s_a, s_b, s_c, s_d;
+    reg [31:0] s_a, s_b, s_c, s_d, s_e;
 
-    // mensaje: "D aaaaaaaa bbbbbbbb cccccccc dddddddd\r\n" = 39 chars
-    localparam MSG_LEN = 39;
-    reg [7:0] msg [0:MSG_LEN-1];
+    // mensaje: "D aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee\r\n" = 48 chars
+    // _124d: el mensaje YA NO se materializa en un array (48x8 FF + un
+    // decodificador one-shot de ~400 LUTs que se disparaba entero en un
+    // ciclo): cada byte se computa AL VUELO desde los snapshots cuando le
+    // toca transmitirse (byte_at, mux de ~4 niveles a 54MHz = gratis).
+    localparam MSG_LEN = 48;
 
     function [7:0] hexc(input [3:0] v);
         hexc = (v < 10) ? ("0" + {4'd0, v}) : ("a" + {4'd0, v} - 8'd10);
     endfunction
 
-    integer i;
-    task build_msg;
+    function [7:0] byte_at(input [5:0] idx);
+        reg [31:0] w;
+        reg [2:0]  nib;
         begin
-            msg[0] = "D"; msg[1] = " ";
-            for (i = 0; i < 8; i = i + 1) msg[2+i]  = hexc(s_a[28-4*i +: 4]);
-            msg[10] = " ";
-            for (i = 0; i < 8; i = i + 1) msg[11+i] = hexc(s_b[28-4*i +: 4]);
-            msg[19] = " ";
-            for (i = 0; i < 8; i = i + 1) msg[20+i] = hexc(s_c[28-4*i +: 4]);
-            msg[28] = " ";
-            for (i = 0; i < 8; i = i + 1) msg[29+i] = hexc(s_d[28-4*i +: 4]);
-            msg[37] = 8'h0D; msg[38] = 8'h0A;
+            if (idx == 6'd0)  byte_at = "D";
+            else if (idx == 6'd1 || idx == 6'd10 || idx == 6'd19 ||
+                     idx == 6'd28 || idx == 6'd37) byte_at = " ";
+            else if (idx == 6'd46) byte_at = 8'h0D;
+            else if (idx == 6'd47) byte_at = 8'h0A;
+            else begin
+                if      (idx <= 6'd9)  begin w = s_a; nib = idx - 6'd2;  end
+                else if (idx <= 6'd18) begin w = s_b; nib = idx - 6'd11; end
+                else if (idx <= 6'd27) begin w = s_c; nib = idx - 6'd20; end
+                else if (idx <= 6'd36) begin w = s_d; nib = idx - 6'd29; end
+                else                   begin w = s_e; nib = idx - 6'd38; end
+                // nibble MSB-first: char nib muestra w[28-4*nib +:4];
+                // (7-nib) = ~nib en 3 bits => desplazamiento {~nib, 2'b00}
+                byte_at = hexc(w[{~nib, 2'b00} +: 4]);
+            end
         end
-    endtask
+    endfunction
 
     reg [31:0] period_cnt;
     reg [9:0]  baud_cnt;
@@ -67,7 +78,7 @@ module dbg_uart #(
             tx <= 1'b1;
             period_cnt <= 0; baud_cnt <= 0; bit_idx <= 0;
             msg_idx <= 0; sending <= 0; cur_byte <= 0;
-            s_a <= 0; s_b <= 0; s_c <= 0; s_d <= 0;
+            s_a <= 0; s_b <= 0; s_c <= 0; s_d <= 0; s_e <= 0;
         end
         else begin
             if (!sending) begin
@@ -75,11 +86,10 @@ module dbg_uart #(
                 period_cnt <= period_cnt + 1;
                 if (period_cnt >= TICKS) begin
                     period_cnt <= 0;
-                    s_a <= cnt_a; s_b <= cnt_b; s_c <= cnt_c; s_d <= cnt_d;
-                    build_msg;
+                    s_a <= cnt_a; s_b <= cnt_b; s_c <= cnt_c; s_d <= cnt_d; s_e <= cnt_e;
                     msg_idx <= 0; bit_idx <= 0; baud_cnt <= 0;
                     sending <= 1;
-                    cur_byte <= 8'h44;   // "D" (se recarga por msg_idx igualmente)
+                    cur_byte <= 8'h44;   // "D" (se recarga por byte_at igualmente)
                 end
             end
             else begin
@@ -87,7 +97,7 @@ module dbg_uart #(
                 if (baud_cnt == 0) begin
                     // emitir el bit actual
                     if (bit_idx == 0) begin
-                        cur_byte <= msg[msg_idx];
+                        cur_byte <= byte_at(msg_idx);
                         tx <= 1'b0;                          // start
                     end
                     else if (bit_idx <= 8) tx <= cur_byte[bit_idx-1];
