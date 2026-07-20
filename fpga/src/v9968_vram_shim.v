@@ -252,12 +252,13 @@ wire [2:0] wq_used = wq_wp - wq_rp;
 assign vram_stall = (wq_used >= 3'd2) || (rq_used >= 4'd6);
 
 // ============================================================================
-// backend: una op en vuelo; prioridad _126: PREFETCH > lecturas-limpias >
-// escrituras (la pantalla manda, como el VDP real — con wq primero un HMMV
-// a chorro mataba de hambre a la ventana: 16k misses/frame = rectangulos
-// SC8 despedazados). La coherencia write->read se preserva POR DIRECCION:
-// rq_dirty retiene el read cuya palabra tiene escritura pendiente, y
-// pf_dirty descarta el fill de un prefetch que adelanto a una escritura.
+// backend: una op en vuelo; prioridad _126: PREFETCH > escrituras >
+// lecturas-demanda (la pantalla manda, como el VDP real — con wq primero
+// un HMMV a chorro mataba de hambre a la ventana: 16k misses/frame =
+// rectangulos SC8 despedazados; medido 73 con pfq primero). wq antes que
+// rq = coherencia write->read global gratis; el unico que salta
+// escrituras es el prefetch y pf_dirty descarta su fill si adelanto a
+// una escritura pendiente del mismo word.
 // Cada palabra-32 = 2 ops de 16 bits (addr byte par: +0 y +2).
 // ============================================================================
 reg        bsy;                          // op en vuelo (palabra o byte)
@@ -303,23 +304,11 @@ wire pf_dirty = (wq_vld[0] && wq[0][15:0] == cur_addrw) ||
                 (wq_vld[6] && wq[6][15:0] == cur_addrw) ||
                 (wq_vld[7] && wq[7][15:0] == cur_addrw);
 
-// _126b: el mismo snoop sobre la CABEZA de rq. Un read cuya palabra tiene
-// escritura pendiente NO puede adelantarla (orden write->read POR
-// DIRECCION — lo unico que de verdad exige la coherencia); si esta sucio,
-// el lanzador hace un DRENAJE DIRIGIDO de wq hasta desbloquearlo. Los
-// reads limpios pasan POR DELANTE de las escrituras: la primera version
-// (_126, rq al final) mataba los comandos con op logica — el read de
-// destino de LINE/LMMV esperaba el stream entero de prefetch (el
-// discriminador SC5 LINE murio por timeout, vs=54).
-wire [15:0] rq_head  = rq[rq_rp][15:0];
-wire rq_dirty = (wq_vld[0] && wq[0][15:0] == rq_head) ||
-                (wq_vld[1] && wq[1][15:0] == rq_head) ||
-                (wq_vld[2] && wq[2][15:0] == rq_head) ||
-                (wq_vld[3] && wq[3][15:0] == rq_head) ||
-                (wq_vld[4] && wq[4][15:0] == rq_head) ||
-                (wq_vld[5] && wq[5][15:0] == rq_head) ||
-                (wq_vld[6] && wq[6][15:0] == rq_head) ||
-                (wq_vld[7] && wq[7][15:0] == rq_head);
+// (_126c probo un snoop rq_dirty sobre la cabeza de rq para dejar pasar
+// reads limpios por delante de las escrituras; el cono rq_rp -> mux 16:1
+// -> 8 comparadores -> CE del lanzador violaba a -1.28ns en el GW5AT-60
+// y el problema que resolvia era un FANTASMA (bug del TB sc5line). Con
+// wq por delante de rq la coherencia write->read sale gratis, sin logica.)
 
 // ---- pliegue del bit de mitad en los INDICES (_120, glitches SC7/8/12
 // de HW _119): con el entrelazado del V9938 ({a[17],a[0],a[16:1]}) el bg
@@ -751,23 +740,19 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bk_addr   <= sd_base | {20'd0, nxt_byte};
                 bk_wdata  <= cur_word[8*nxt_byte +: 8];
             end
-            // _126c: PANTALLA > LECTURAS-LIMPIAS > ESCRITURAS.
+            // _126 (definitivo): PANTALLA > ESCRITURAS > LECTURAS-DEMANDA.
             //  1. pfq (streaming de ventana) — sagrado: el pipe de 8 ciclos
             //     no puede esperar a la SDRAM; cada miss de ventana es
             //     basura visible (16k/frame con wq primero = rectangulos
-            //     SC8 despedazados; y con rq primero el hammer CPU
-            //     re-hambreaba la ventana: 16k otra vez).
-            //  2. rq con cabeza LIMPIA — los reads de demanda (CPU, sprite,
-            //     dest de LINE/LMMV) solo esperan al prefetch, no a las
-            //     escrituras (con rq al final el discriminador SC5 LINE
-            //     moria por timeout: cada read de destino esperaba el
-            //     stream entero).
-            //  3. wq — de fondo, y drenaje DIRIGIDO cuando la cabeza de rq
-            //     tiene escritura pendiente (rq_dirty): la coherencia
-            //     write->read se preserva POR DIRECCION, que es lo unico
-            //     que exige; el ping-pong read-modify-write de las ops
-            //     logicas alterna write/read solo. El hazard del prefetch
-            //     adelantando escrituras lo cubre pf_dirty (descarta fill).
+            //     SC8 despedazados; medido 73 con pfq primero).
+            //  2. wq antes que rq: la coherencia write->read GLOBAL sale
+            //     gratis (un read nunca adelanta a una escritura mas
+            //     vieja). El unico que salta escrituras es el prefetch,
+            //     y su hazard lo cubre pf_dirty descartando el fill.
+            //  3. rq al final: CPU/sprite/dest-de-comando esperan lo que
+            //     haya — wq esta acotada (stall del interface a 2) y pfq
+            //     por el ritmo del display; el peor caso es ~us, igual
+            //     que los slots de CPU del VDP real en linea activa.
             else if (!pfq_empty) begin
                 cur_kind  <= 2'd0;
                 cur_addrw <= pfq[pfq_rp];
@@ -777,17 +762,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bk_addr  <= VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00};
                 bk2_req  <= 1'b1;
                 bk2_addr <= (VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00}) | 22'd2;
-            end
-            else if (!rq_empty && !late_v && !rq_dirty) begin
-                cur_kind  <= 2'd1;
-                cur_tag   <= rq[rq_rp][20:16];
-                cur_addrw <= rq[rq_rp][15:0];
-                rq_rp     <= rq_rp + 4'd1;
-                got_lo <= 1'b0; got_hi <= 1'b0;
-                bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b0;
-                bk_addr  <= VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00};
-                bk2_req  <= 1'b1;
-                bk2_addr <= (VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00}) | 22'd2;
             end
             else if (!wq_empty) begin
                 cur_kind  <= 2'd2;
@@ -808,6 +782,17 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     bk_wdata <= wq[wq_rp][16 + 8*fb +: 8];
                     word_pend <= |(wq[wq_rp][51:48] >> (fb + 1));
                 end
+            end
+            else if (!rq_empty && !late_v) begin     // no pisar la tardia
+                cur_kind  <= 2'd1;
+                cur_tag   <= rq[rq_rp][20:16];
+                cur_addrw <= rq[rq_rp][15:0];
+                rq_rp     <= rq_rp + 4'd1;
+                got_lo <= 1'b0; got_hi <= 1'b0;
+                bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b0;
+                bk_addr  <= VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00};
+                bk2_req  <= 1'b1;
+                bk2_addr <= (VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00}) | 22'd2;
             end
         end
     end

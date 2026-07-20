@@ -433,9 +433,9 @@ initial begin
     $display("SHIM: wq_used=%0d rq_used=%0d pfq w/r=%0d/%0d wq_vld=%b",
              u_shim.wq_used, u_shim.rq_used, u_shim.pfq_wp, u_shim.pfq_rp,
              u_shim.wq_vld);
-    $display("SHIM: bsy=%b cur_kind=%0d word_pend=%b late_v=%b rq_dirty=%b stall=%b",
+    $display("SHIM: bsy=%b cur_kind=%0d word_pend=%b late_v=%b stall=%b",
              u_shim.bsy, u_shim.cur_kind, u_shim.word_pend, u_shim.late_v,
-             u_shim.rq_dirty, u_shim.vram_stall);
+             u_shim.vram_stall);
     $display("SHIM: obl_pend=%b obl_chk=%b obl_do=%b pfB_pend=%b fill_pend=%b",
              u_shim.obl_pend, u_shim.obl_chk, u_shim.obl_do, u_shim.pfB_pend,
              u_shim.fill_pend);
