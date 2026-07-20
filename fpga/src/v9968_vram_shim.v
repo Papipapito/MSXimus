@@ -189,6 +189,7 @@ wire       pfq_full  = (pfq_wp + 3'd1 == pfq_rp);
 // cola de escrituras (4 plazas: {mask,wdata,addr})
 reg [51:0] wq [0:7];                     // {mask[3:0], wdata[31:0], addr[17:2]} (_120e: 8 plazas, umbral igual)
 reg [2:0]  wq_wp, wq_rp;
+reg [7:0]  wq_vld;                       // _126: bitmap de ocupacion (snoop)
 wire       wq_empty = (wq_wp == wq_rp);
 wire       wq_full  = (wq_wp + 3'd1 == wq_rp);
 
@@ -275,6 +276,24 @@ reg        word_pend;                    // palabra de 32b en construccion
 reg        late_v;
 reg [4:0]  late_tag;
 reg [31:0] late_data;
+
+// _126: SNOOP anti-rancio de los fills. Con pfq por DELANTE de wq (y ya
+// antes con rq: la escritura podia encolarse con la lectura EN VUELO), un
+// fill que completa mientras una escritura al MISMO word espera en wq
+// cachearia dato PRE-escritura marcado valido — la invalidacion del
+// write-check ocurrio al ENCOLAR, cuando la entrada aun no existia. Si
+// algun wq ocupado casa con la op en curso, el fill se DESCARTA (la
+// entrada queda invalida y el siguiente fetch la rescata). La RESPUESTA
+// al consumidor (late_v) NO se descarta: el unico lector que podria ver
+// su propia escritura pendiente es la CPU, y no puede reordenarse asi.
+wire pf_dirty = (wq_vld[0] && wq[0][15:0] == cur_addrw) ||
+                (wq_vld[1] && wq[1][15:0] == cur_addrw) ||
+                (wq_vld[2] && wq[2][15:0] == cur_addrw) ||
+                (wq_vld[3] && wq[3][15:0] == cur_addrw) ||
+                (wq_vld[4] && wq[4][15:0] == cur_addrw) ||
+                (wq_vld[5] && wq[5][15:0] == cur_addrw) ||
+                (wq_vld[6] && wq[6][15:0] == cur_addrw) ||
+                (wq_vld[7] && wq[7][15:0] == cur_addrw);
 
 // ---- pliegue del bit de mitad en los INDICES (_120, glitches SC7/8/12
 // de HW _119): con el entrelazado del V9938 ({a[17],a[0],a[16:1]}) el bg
@@ -367,20 +386,30 @@ always @(negedge clk_vdp) begin
     pww_idx_n  <= pww_idx;
     pww_en_n   <= pww_en;
 end
-// _123: el OBL CEDE el puerto de lectura a TODO vram_valid entrante. Antes
-// obl_pend ganaba el mux y el fetch/write-check de ese ciclo leia el slot
-// EQUIVOCADO: (a) fetch bg -> compare de tag contra slot ajeno -> MISS
-// ESPURIO con colas vacias (la radiografia exacta del TB: wv=1, wtag ajeno,
-// pfq=0 rq=0) = el guion de la "linea barredora", precesando porque el
-// tráfico de comandos/CPU se desliza con el refresh; (b) escritura VDP ->
-// write-check contra slot ajeno -> INVALIDACION PERDIDA -> dato rancio
-// servido despues (mas lineas justo con lluvia de escrituras: el blink).
-wire       obl_read_now = obl_pend && !vram_valid;
-wire [7:0] pw_ridx = obl_read_now ? w_idx(obl_w) : w_idx(vram_address);
+// _123: el OBL CEDIA el puerto de lectura a TODO vram_valid entrante (fix
+// de la "linea barredora": antes obl_pend ganaba el mux y el fetch de ese
+// ciclo leia el slot equivocado -> miss espurio / invalidacion perdida).
+// _126: la cesion creo el hambre SIMETRICA — un chorro de comandos (HMMV
+// SC8) no deja NINGUN ciclo libre, el OBL no resiembra la ventana y la
+// linea siguiente nace fria (radiografia del TB sc8cmd_full: 16k misses
+// con pfq=0 rq=0 y wv=1 = rectangulos despedazados de la foto 4297).
+// Fix estructural: BSRAM ESPEJO pw_memB solo-OBL con el MISMO write-site
+// (cada array queda 1W+1R limpio) — el OBL lee SIEMPRE al ciclo siguiente
+// y el fetch/write-check conserva pw_mem en exclusiva. Cero contencion en
+// ambos sentidos, 256x42b extra de BSRAM.
+wire       obl_read_now = obl_pend;
+wire [7:0] pw_ridx = w_idx(vram_address);
 always @(posedge clk_vdp) begin
     if (pww_en_n) pw_mem[pww_idx_n] <= pww_word_n;
     pwq <= pw_mem[pw_ridx];
 end
+reg [41:0] pw_memB [0:255];              // espejo (BSRAM) — lector: solo OBL
+reg [41:0] pwqB;
+always @(posedge clk_vdp) begin
+    if (pww_en_n) pw_memB[pww_idx_n] <= pww_word_n;
+    pwqB <= pw_memB[w_idx(obl_w)];
+end
+reg        pwqB_v;
 
 wire [21:0] sd_base = VRAM_BASE + {4'd0, cur_addrw, 2'b00};
 wire [15:0] nxt_w   = vram_address[17:2] + 16'd1;   // palabra siguiente (OBL)
@@ -391,7 +420,7 @@ wire [1:0]  nxt_byte = cur_mask[0] ? 2'd0 : cur_mask[1] ? 2'd1
 always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
         pw_v <= 256'd0; scv_swp <= 13'd0; pfq_wp <= 0; pfq_rp <= 0;
-        wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0;
+        wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 8'd0;
         bsy <= 0; done_d <= 0; done2_d <= 0; got_lo <= 0; got_hi <= 0;
         pwv_set_p <= 0; pwv_set_i <= 0;
         word_pend <= 0;
@@ -425,6 +454,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         wrk_p1 <= 1'b0;
         pww_en <= 1'b0;
         pwq_v  <= pw_v[pw_ridx];
+        pwqB_v <= pw_v[w_idx(obl_w)];    // _126: valid del espejo OBL
         if (!scv_ready) scv_swp <= scv_swp + 13'd1;
         // _120: el valid de la VENTANA se pone UN CICLO DESPUES de la
         // completacion — la media etapa negedge hace que el dato aterrice
@@ -453,36 +483,25 @@ always @(posedge clk_vdp or negedge rst_n) begin
         else vram_rdata_en <= 1'b0;
         for (pi = 6; pi > 0; pi = pi - 1) pipe[pi] <= pipe[pi-1];
         pipe[0] <= 38'd0;
-`ifdef SHIM_DBG_DROPS
-        // S6: SECUESTRO del puerto de lectura de la ventana — obl_pend gana el
-        // mux pw_ridx y el fetch entrante lee el slot EQUIVOCADO -> miss espurio
-        if (obl_pend && vram_valid && !vram_write)
-            $display("DROP S6_hijack_pwridx t=%0t obl_w=%h addr=%h tag=%h",
-                     $time, obl_w, vram_address, vram_tag);
-`endif
+        // (_126: el S6_hijack ya no existe — el OBL tiene su BSRAM espejo)
 
         // ---------- write-check de la VENTANA (v4, etapa 1): invalidacion
         // por coherencia si el tag leido de la BSRAM casa ----
         if (wrk_p1 && pwq_v && pwq[41:32] == wrk_addr1[15:6])
             pw_v[w_idx(wrk_addr1)] <= 1'b0;
 
-        // ---------- OBL en TRES fases (_121b) + CESION DE PUERTO (_123):
-        // obl_pend RETIENE mientras vram_valid le quite el puerto y lee en
-        // el primer ciclo libre; la direccion viaja en sombras (obl_w_c/_d)
-        // para que un hit nuevo pueda pisar obl_w sin corromper la fase en
-        // vuelo. El encolado va al PUSH UNIFICADO del final del ciclo (pfA).
-        // El OBL es prefetch especulativo: +1 ciclo de espera es inofensivo.
-        obl_pend <= obl_pend && vram_valid;     // retiene solo si cedio
+        // ---------- OBL en TRES fases (_121b) — _126: con el ESPEJO pw_memB
+        // el OBL ya no cede puerto: dispara SIEMPRE al ciclo siguiente del
+        // hit (obl_pend se consume solo). La direccion sigue viajando en
+        // sombras (obl_w_c/_d) para que un hit nuevo pise obl_w sin
+        // corromper la fase en vuelo.
+        obl_pend <= 1'b0;                       // consumido (el hit lo re-arma)
         obl_chk  <= obl_read_now;
         obl_w_c  <= obl_w;
-        obl_do   <= obl_chk && !(pwq_v && pwq[41:32] == obl_w_c[15:6]);
+        obl_do   <= obl_chk && !(pwqB_v && pwqB[41:32] == obl_w_c[15:6]);
         obl_w_d  <= obl_w_c;
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
                                          // suben (asignacion posterior gana)
-`ifdef SHIM_DBG_DROPS
-        if (obl_read_now && vram_valid)          // imposible por construccion
-            $display("BUG S6_hijack_pwridx t=%0t", $time);
-`endif
 
         // ---------- etapa 1 UNIFICADA del lookup (v4): VENTANA + CACHE ----
         // Todo fetch (bg/sprite/CPU/comando) llega aqui con las lecturas
@@ -606,6 +625,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // no se escribe) — vdp_vram_interface pone 4'b1110 para el
                     // byte 0. En la cola se guarda INVERTIDA (1 = escribir).
                     wq[wq_wp] <= {~vram_wdata_mask, vram_wdata, vram_address};
+                    wq_vld[wq_wp] <= 1'b1;
                     wq_wp <= wq_wp + 3'd1;
                 end
 `ifdef SHIM_DBG_DROPS
@@ -658,19 +678,22 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bsy <= 1'b0;
                 if (cur_kind == 2'd0) begin
                     // fill de ventana via registros pww (write-site BSRAM)
-                    pww_en   <= 1'b1;
-                    pww_idx  <= w_idx(cur_addrw);
-                    pww_tag  <= cur_addrw[15:6];
-                    pww_data <= {w_hi, w_lo};
-                    pwv_set_p <= 1'b1;
-                    pwv_set_i <= w_idx(cur_addrw);
+                    // _126: descartado si hay escritura pendiente al word
+                    if (!pf_dirty) begin
+                        pww_en   <= 1'b1;
+                        pww_idx  <= w_idx(cur_addrw);
+                        pww_tag  <= cur_addrw[15:6];
+                        pww_data <= {w_hi, w_lo};
+                        pwv_set_p <= 1'b1;
+                        pwv_set_i <= w_idx(cur_addrw);
+                    end
                 end
                 else begin
                     late_v    <= 1'b1;
                     late_tag  <= cur_tag;
                     late_data <= {w_hi, w_lo};
-                    // y de paso a la ventana si es bg
-                    if (cur_tag[4:2] == C_BG) begin
+                    // y de paso a la ventana si es bg (_126: mismo descarte)
+                    if (cur_tag[4:2] == C_BG && !pf_dirty) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
@@ -680,9 +703,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     end
                     // ...y a la CACHE (v3c: TODO consumidor de lectura
                     // rellena — bg/sprite/CPU/comando) — via fill_pend
-                    fill_pend <= 1'b1;
-                    fill_addr <= cur_addrw;
-                    fill_word <= {w_hi, w_lo};
+                    // (_126: tambien descartado si el word esta sucio)
+                    if (!pf_dirty) begin
+                        fill_pend <= 1'b1;
+                        fill_addr <= cur_addrw;
+                        fill_word <= {w_hi, w_lo};
+                    end
                 end
             end
         end
@@ -699,11 +725,28 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bk_addr   <= sd_base | {20'd0, nxt_byte};
                 bk_wdata  <= cur_word[8*nxt_byte +: 8];
             end
+            // _126: PREFETCH PRIMERO — la pantalla manda, como en el VDP
+            // real (los comandos comen los ciclos sobrantes). Antes wq iba
+            // primero y un HMMV a chorro mataba de hambre a la ventana
+            // (16k misses/frame en el TB sc8cmd_full). rq se queda DETRAS
+            // de wq: preserva el orden write->read de CPU/comando. El
+            // hazard del prefetch adelantando escrituras lo cubre pf_dirty.
+            else if (!pfq_empty) begin
+                cur_kind  <= 2'd0;
+                cur_addrw <= pfq[pfq_rp];
+                pfq_rp    <= pfq_rp + 3'd1;
+                got_lo <= 1'b0; got_hi <= 1'b0;
+                bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b0;
+                bk_addr  <= VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00};
+                bk2_req  <= 1'b1;
+                bk2_addr <= (VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00}) | 22'd2;
+            end
             else if (!wq_empty) begin
                 cur_kind  <= 2'd2;
                 cur_addrw <= wq[wq_rp][15:0];
                 cur_word  <= wq[wq_rp][47:16];
                 cur_mask  <= wq[wq_rp][51:48];
+                wq_vld[wq_rp] <= 1'b0;
                 wq_rp     <= wq_rp + 3'd1;
                 // primer byte habilitado de la mascara
                 begin : first_byte
@@ -728,16 +771,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bk_addr  <= VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00};
                 bk2_req  <= 1'b1;
                 bk2_addr <= (VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00}) | 22'd2;
-            end
-            else if (!pfq_empty) begin
-                cur_kind  <= 2'd0;
-                cur_addrw <= pfq[pfq_rp];
-                pfq_rp    <= pfq_rp + 3'd1;
-                got_lo <= 1'b0; got_hi <= 1'b0;
-                bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b0;
-                bk_addr  <= VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00};
-                bk2_req  <= 1'b1;
-                bk2_addr <= (VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00}) | 22'd2;
             end
         end
     end
