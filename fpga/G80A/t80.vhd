@@ -151,7 +151,7 @@ architecture rtl of T80 is
     -- fuerza a GowinSynthesis a REPLICAR el registro (identico por
     -- construccion, sin espejo a mano) y acorta las redes.
     attribute syn_maxfan : integer;
-    attribute syn_maxfan of ISet : signal is 4;
+    attribute syn_maxfan of ISet : signal is 2;  -- _126: 4->2 (ram_busy CE a -2.0 con el netlist del espejo)
     signal RegBusA_r        : std_logic_vector(15 downto 0);
 
     signal ID16             : signed(15 downto 0);
@@ -171,7 +171,7 @@ architecture rtl of T80 is
     -- _125b: al replicar ISet el cuello salto a su hermano IStatus (mismo
     -- mux de direccion RegAddrC/A_i). Misma medicina (declarado ANTES del
     -- atributo, exigencia VHDL).
-    attribute syn_maxfan of IStatus : signal is 4;
+    attribute syn_maxfan of IStatus : signal is 2;  -- _126: 4->2 (idem)
 
     signal DI_Reg           : std_logic_vector(7 downto 0);
     signal T_Res            : std_logic;
