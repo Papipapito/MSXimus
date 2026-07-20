@@ -180,7 +180,7 @@ module vdp_command (
 	reg			[10:0]	ff_dy;
 	reg			[10:0]	ff_nx;
 	reg			[10:0]	ff_ny;
-	(* syn_preserve *) reg [10:0] ff_ny_b;	//	_124d: espejo (ver abajo)
+	(* syn_preserve, syn_maxfan = 8 *) reg [10:0] ff_ny_b;	//	_124d: espejo (ver abajo); _126: maxfan (violaba en el dado 257)
 	reg			[15:0]	reg_vx;
 	reg			[15:0]	reg_vy;
 	reg			[8:0]	reg_wsx;
@@ -207,7 +207,7 @@ module vdp_command (
 	//	_125b (MSXimus): ff_command abanica al case gigante del motor
 	//	(state/next_state/wait_counter) y su familia rota con la de ISet
 	//	del T80 en la loteria de placement — syn_maxfan la replica.
-	reg			[3:0]	ff_command /* synthesis syn_maxfan = 8 */;
+	reg			[3:0]	ff_command /* synthesis syn_maxfan = 4 */;	//	_126: 8->4 (5 dados seguidos violando su cono con el netlist del espejo)
 	reg					ff_start;
 
 	reg			[17:0]	ff_cache_vram_address;
