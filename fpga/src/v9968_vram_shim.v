@@ -178,6 +178,19 @@ reg [15:0] obl_w;
 // linea N+1 del mismo stream sigue a +stride).
 reg [15:0] bg_prev0, bg_prev1;           // ultimo fetch bg POR STREAM
 reg [15:0] stride;                       // zancada aprendida (0 = no)
+// _127J EL CAMINANTE: la radiografia (tb_scroll +SHIM_DBG_DROPS) enseno que
+// CADA linea se fetchea DOS VECES (line-doubling): el 2o pase aparece como
+// wrap -31 POR LINEA (6912 wraps, todos stride=32, ya en quiet) y durante
+// ese pase el OBL esta OCIOSO (todos sus +2 ya residen -> espejo filtra).
+// Los intentos de ANADIR trafico fracasaron TODOS (el presupuesto es ~1
+// fetch por palabra consumida: dual-reseed = 48851 drops pfq_full y quiet
+// 232->357004). El caminante NO anade: cuando el objetivo +2 YA RESIDE y
+// hay zancada, re-apunta ese slot ocioso a la MISMA palabra de la LINEA
+// SIGUIENTE (obl_w_c + stride - 2 = addr_hit + stride). Una sola vez por
+// slot (correa obl_walked; sin ella el lazo de 3 fases se desboca +stride
+// cada ~3 ciclos). Efecto: el 2o pase pre-calienta la linea N+1 ENTERA con
+// su patron de wrap del scroll H incluido, a coste CERO de trafico.
+reg        obl_walked;                   // correa: 1 walk por slot OBL
 reg [15:0] obl_w_c, obl_w_d;             // _123: la direccion VIAJA con la
                                          // tuberia (un hit nuevo pisaba obl_w
                                          // con la fase 3 aun en vuelo: se
@@ -477,7 +490,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
-        bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0;
+        bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0; obl_walked <= 0;
         obl_w_c <= 0; obl_w_d <= 0;
         bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0; pkov_p <= 0;
         pfB_pend <= 0; pfB_wr <= 0;
@@ -545,6 +558,16 @@ always @(posedge clk_vdp or negedge rst_n) begin
         obl_w_c  <= obl_w;
         obl_do   <= obl_chk && !(pwqB_v && pwqB_tag == obl_w_c[15:6]);
         obl_w_d  <= obl_w_c;
+        // _127J: caminante (ver arriba) — slot OBL ocioso + zancada => se
+        // re-arma la maquinaria de 3 fases hacia la linea siguiente. Un hit
+        // bg simultaneo PISA obl_pend/obl_w mas abajo (el hit vivo manda) y
+        // eso es exactamente la prioridad deseada.
+        if (obl_chk && pwqB_v && pwqB_tag == obl_w_c[15:6]
+            && stride != 16'd0 && !obl_walked) begin
+            obl_pend   <= 1'b1;
+            obl_w      <= obl_w_c + stride - 16'd2;  // = addr_hit + stride
+            obl_walked <= 1'b1;
+        end
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
                                          // suben (asignacion posterior gana)
 
@@ -587,9 +610,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     pfB_wr   <= obl_w;
                 end
                 obl_pend  <= 1'b1;
-                // _127: con zancada aprendida se prefetchea la MISMA columna
-                // de la LINEA SIGUIENTE (prediccion); sin ella, el +2 clasico
-                obl_w     <= spr_addr1 + 16'd2;  // BISECT: stride inerte
+                // _127J: el +2 lineal SE QUEDA como primario (la prediccion
+                // sustitutiva fracaso: cualquier cambio de cadena abre
+                // huecos). La linea siguiente la cubre el CAMINANTE en los
+                // slots ociosos del 2o pase. Cada hit renueva su credito.
+                obl_w      <= spr_addr1 + 16'd2;
+                obl_walked <= 1'b0;
             end
             else if (scq_v && scq_tag == spr_addr1[15:12])
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};

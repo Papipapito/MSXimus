@@ -9,9 +9,9 @@ for tb in $TBS; do
     verilator --binary --timing -j 8 -Wno-fatal -Wno-BLKANDNBLK \
         --top-module $tb \
         $M/tools/v9968_sim/$tb.sv \
-        $M/fpga/src/v9968_vram_shim.v \
-        $M/fpga/src/v9968_sdram_bridge.v \
-        $M/fpga/src/memory.v \
+        $W/fpga/src/v9968_vram_shim.v \
+        $W/fpga/src/v9968_sdram_bridge.v \
+        $W/fpga/src/memory.v \
         $M/tools/sdr16_tb/w9825_model.v \
         $W/fpga/v9968/*.v > verilate.log 2>&1
     if [ -x obj_dir/V$tb ]; then
