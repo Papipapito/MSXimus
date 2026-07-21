@@ -1,6 +1,6 @@
 //
 //	vdp_video_out.v
-//	 DVI 800x480 horizontal magnifier.
+//	 LCD 800x480 horizontal magnifier.
 //
 //	Copyright (C) 2025 Takayuki Hara.
 //	All rights reserved.

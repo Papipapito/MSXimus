@@ -160,7 +160,7 @@ module vdp_command (
 	wire		[7:0]	w_lop_pixel;
 	//	_125b (MSXimus): maxfan ADEMAS de los clones de HRA — la familia
 	//	ff_screen_mode -> next_state/cache_vram_address fue la ultima migaja
-	//	(-0.09) de la campana de timing.
+	//	de la campana de timing.
 	reg			[9:0]	ff_screen_mode;				/* synthesis syn_preserve = 1 syn_maxfan = 8 */
 	reg			[9:0]	ff_screen_mode_clone;		/* synthesis syn_preserve = 1 syn_maxfan = 8 */
 
@@ -180,7 +180,7 @@ module vdp_command (
 	reg			[10:0]	ff_dy;
 	reg			[10:0]	ff_nx;
 	reg			[10:0]	ff_ny;
-	(* syn_preserve, syn_maxfan = 8 *) reg [10:0] ff_ny_b;	//	_124d: espejo (ver abajo); _126: maxfan (violaba en el dado 257)
+	(* syn_preserve, syn_maxfan = 8 *) reg [10:0] ff_ny_b;	//	_124d/_126: espejo (ver abajo)
 	reg			[15:0]	reg_vx;
 	reg			[15:0]	reg_vy;
 	reg			[8:0]	reg_wsx;
@@ -204,10 +204,9 @@ module vdp_command (
 	reg					ff_xhr;
 	reg					ff_fg4;
 	reg			[3:0]	ff_logical_opration;
-	//	_125b (MSXimus): ff_command abanica al case gigante del motor
-	//	(state/next_state/wait_counter) y su familia rota con la de ISet
-	//	del T80 en la loteria de placement — syn_maxfan la replica.
-	reg			[3:0]	ff_command /* synthesis syn_maxfan = 4 */;	//	_126: 8->4 (5 dados seguidos violando su cono con el netlist del espejo)
+	//	_125b/_126 (MSXimus): ff_command abanica al case gigante del motor;
+	//	syn_maxfan=4 replica el registro (5 dados de la _126 violando a 8).
+	reg			[3:0]	ff_command /* synthesis syn_maxfan = 4 */;
 	reg					ff_start;
 
 	reg			[17:0]	ff_cache_vram_address;
@@ -237,6 +236,10 @@ module vdp_command (
 	reg					ff_border_detect_request;
 	reg					ff_border_detect;
 	reg					ff_read_color;
+	wire				w_sx_active;
+	wire				w_dx_active;
+	wire				w_sy_active;
+	wire				w_dy_active;
 	reg					ff_sx_active;
 	reg					ff_dx_active;
 	reg					ff_sy_active;
@@ -321,33 +324,15 @@ module vdp_command (
 	//	Address
 	// --------------------------------------------------------------------
 	assign w_sy					= (ff_command == c_lrmm && ff_xhr) ? { ff_sy[20], ff_sy[20:1] }: ff_sy;
-
-	//	[MSXimus _120f] Comparadores de ventana LRMM con el mux DESPUES del
-	//	resultado (transformacion algebraica bit-exacta). El decode de
-	//	ff_command entraba ANTES de la cadena de comparacion con signo de
-	//	w_sy (15 niveles hasta ff_source, violaba setup a 85.9MHz); las dos
-	//	variantes (normal y >>1) se comparan en paralelo y el decode solo
-	//	elige el bit final. syn_keep evita que la sintesis las re-fusione.
-	wire		w_lrmm_xhr	= (ff_command == c_lrmm && ff_xhr);
-	wire		w_wsy_lt_n /* synthesis syn_keep = 1 */;
-	wire		w_wsy_lt_s /* synthesis syn_keep = 1 */;
-	wire		w_wsy_gt_n /* synthesis syn_keep = 1 */;
-	wire		w_wsy_gt_s /* synthesis syn_keep = 1 */;
-	assign w_wsy_lt_n	= ( $signed(ff_sy[20:8])                < $signed({ 2'd0, reg_wsy }) );
-	assign w_wsy_lt_s	= ( $signed({ ff_sy[20], ff_sy[20:9] }) < $signed({ 2'd0, reg_wsy }) );
-	assign w_wsy_gt_n	= ( $signed(ff_sy[20:8])                > $signed({ 2'd0, reg_wey }) );
-	assign w_wsy_gt_s	= ( $signed({ ff_sy[20], ff_sy[20:9] }) > $signed({ 2'd0, reg_wey }) );
-	wire		w_wsy_lt	= w_lrmm_xhr ? w_wsy_lt_s : w_wsy_lt_n;
-	wire		w_wsy_gt	= w_lrmm_xhr ? w_wsy_gt_s : w_wsy_gt_n;
 	assign w_address_s_pre		= (ff_screen_mode_clone[c_g4] || ff_fg4) ? { w_sy[18:8], ff_sx[15: 9] }:	// SCREEN5, 128byte/line, 2pixel/byte, 256line * 8page
 	                  			  (ff_screen_mode_clone[c_g5]          ) ? { w_sy[18:8], ff_sx[16:10] }:	// SCREEN6, 128byte/line, 4pixel/byte, 256line * 8page
 	                  			  (ff_screen_mode_clone[c_g6]          ) ? { w_sy[17:8], ff_sx[16: 9] }:	// SCREEN7, 256byte/line, 2pixel/byte, 256line * 4page
-	                  			                           	               { w_sy[17:8], ff_sx[15: 8] };	// SCREEN8, 256byte/line, 1pixel/byte, 256line * 4page
+	                  			                                     { w_sy[17:8], ff_sx[15: 8] };	// SCREEN8, 256byte/line, 1pixel/byte, 256line * 4page
 
 	assign w_address_d_pre		= (ff_screen_mode_clone[c_g4] || ff_fg4) ? { ff_dy[10:0], ff_dx[ 7: 1] }:	// SCREEN5, 128byte/line, 2pixel/byte, 256line * 8page
 	                  			  (ff_screen_mode_clone[c_g5]          ) ? { ff_dy[10:0], ff_dx[ 8: 2] }:	// SCREEN6, 128byte/line, 4pixel/byte, 256line * 8page
 	                  			  (ff_screen_mode_clone[c_g6]          ) ? { ff_dy[ 9:0], ff_dx[ 8: 1] }:	// SCREEN7, 256byte/line, 2pixel/byte, 256line * 4page
-	                  			                                           { ff_dy[ 9:0], ff_dx[ 7: 0] };	// SCREEN8, 256byte/line, 1pixel/byte, 256line * 4page
+	                  			                                     { ff_dy[ 9:0], ff_dx[ 7: 0] };	// SCREEN8, 256byte/line, 1pixel/byte, 256line * 4page
 
 	assign w_address_s			= vram_interleave ? { w_address_s_pre[17], w_address_s_pre[0], w_address_s_pre[16:1] }: w_address_s_pre;
 	assign w_address_d			= vram_interleave ? { w_address_d_pre[17], w_address_d_pre[0], w_address_d_pre[16:1] }: w_address_d_pre;
@@ -521,16 +506,12 @@ module vdp_command (
 		end
 	end
 
-	// ------------------------------------------------------------------------
-	//	LRMMコマンドにおける、参照座標の Y方向走査
-	//
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_sx2 <= 20'd0;
 			ff_sy2 <= 21'd0;
 		end
 		else if( ff_start ) begin
-			//	コマンド実行開始時
 			ff_sx2	<= { reg_sx, 8'd0 };
 			if( ff_command == c_lfmm ) begin
 				ff_sy2	<= { 2'd0, ff_dy, 8'd0 };
@@ -714,22 +695,24 @@ module vdp_command (
 			ff_512pixel <= 1'b0;
 		end
 		else if( ff_start ) begin
-			//	SX のオーバーフロー判定 (LRMM は意図的に外してある)
-			ff_sx_active <= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmcm || ff_command == c_srch);
-			ff_sy_active <= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmcm || ff_command == c_lrmm);
-
-			ff_dx_active <= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmmc || ff_command == c_hmmc || 
-							 ff_command == c_lmmv || ff_command == c_hmmv || ff_command == c_lrmm || ff_command == c_lfmc || ff_command == c_lfmm ||
-							 ff_command == c_line);
-			ff_dy_active <= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmmc || ff_command == c_hmmc || 
-							 ff_command == c_lmmv || ff_command == c_hmmv || ff_command == c_lrmm || ff_command == c_lfmc || ff_command == c_lfmm ||
-							 ff_command == c_line);
+			ff_sx_active <= w_sx_active;
+			ff_dx_active <= w_dx_active;
+			ff_sy_active <= w_sy_active;
+			ff_dy_active <= w_dy_active;
 			ff_512pixel <= w_512pixel;
 		end
 	end
 
 	assign w_next_dx		= ff_dix ? ( { 1'b0, ff_dx } - w_next ): ( { 1'b0, ff_dx } + w_next );
 	assign w_next_dy		= ff_diy ? ( { 2'd0, ff_dy } - 13'd1  ): ( { 2'd0, ff_dy } + 13'd1  );
+	assign w_sx_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmcm || ff_command == c_srch);
+	assign w_dx_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmmc || ff_command == c_hmmc || 
+							   ff_command == c_lmmv || ff_command == c_hmmv || ff_command == c_lrmm || ff_command == c_lfmc || ff_command == c_lfmm ||
+							   ff_command == c_line);
+	assign w_sy_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmcm);
+	assign w_dy_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmmc || ff_command == c_hmmc || 
+							   ff_command == c_lmmv || ff_command == c_hmmv || ff_command == c_lrmm || ff_command == c_lfmc || ff_command == c_lfmm ||
+							   ff_command == c_line);
 	assign w_sx_overflow	= ff_sx_active && (w_next_sx[9] || (!ff_512pixel && w_next_sx[8]));
 	assign w_dx_overflow	= ff_dx_active && (w_next_dx[9] || (!ff_512pixel && w_next_dx[8]));
 	assign w_dy_overflow	= w_next_dy[12];
@@ -867,13 +850,11 @@ module vdp_command (
 		end
 	end
 
-	//	_124d (MSXimus): ESPEJO anti-congestion de ff_ny. La familia
-	//	ff_ny -> ff_next_state/ff_state (via w_ny_end) reincide en el
-	//	placement del GW5AT-60 (hasta -2.5ns con CLS ~81%). El espejo
-	//	syn_preserve alimenta SOLO el cono de comparacion (w_ny/w_ny_end)
-	//	y el placer puede pegarlo a la FSM; el original sigue en el
-	//	datapath (reg_ny <= ff_ny). Cero cambio semantico: ambos registros
-	//	llevan siempre el mismo valor.
+	//	_124d (MSXimus): ESPEJO anti-congestion de ff_ny (re-aplicado sobre
+	//	th9958). El espejo syn_preserve alimenta SOLO el cono de comparacion
+	//	(w_ny/w_ny_end) y el placer puede pegarlo a la FSM; el original sigue
+	//	en el datapath (reg_ny <= ff_ny). Cero cambio semantico: ambos
+	//	registros llevan siempre el mismo valor (mismas ramas exactas).
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_ny_b	<= 11'd1;
@@ -1716,8 +1697,8 @@ module vdp_command (
 			end
 			c_state_lrmm_wait_source: begin
 				//	Copy source pixel value
-				if( $signed(ff_sx[19:8]) < $signed({ 3'd0, reg_wsx }) || w_wsy_lt ||
-					$signed(ff_sx[19:8]) > $signed({ 3'd0, reg_wex }) || w_wsy_gt ) begin
+				if( $signed(ff_sx[19:8]) < $signed({ 3'd0, reg_wsx }) || $signed(w_sy[20:8]) < $signed({ 2'd0, reg_wsy }) || 
+					$signed(ff_sx[19:8]) > $signed({ 3'd0, reg_wex }) || $signed(w_sy[20:8]) > $signed({ 2'd0, reg_wey }) ) begin
 					//	Replace color in outside of window
 					ff_source				<= ff_color;
 				end

@@ -227,10 +227,12 @@ module vdp_cpu_interface (
 	reg					ff_interrupt_line_nonR23_mode;
 	reg					ff_sprite_mode3;
 	reg					ff_ext_palette_mode;
+	reg					ff_ext_command_mode;
+	reg					ff_vram256k_mode;
 	reg					ff_sprite16_mode;
 	reg					ff_flat_interlace_mode;
 	reg					ff_force_highspeed;
-	reg					ff_v9958_mode;
+	reg					ff_fakeID;
 
 	reg					ff_2nd_access;
 	reg		[7:0]		ff_1st_byte;
@@ -448,16 +450,16 @@ module vdp_cpu_interface (
 			if( ff_vram_address_noinc ) begin
 				ff_vram_address_noinc	<= 1'b0;
 			end
-			//	_125 (MSXimus): VR=0 (R#8 bit3) NO bloquea el acarreo del
-			//	contador al banco — en silicio real y openMSX VR solo elige
-			//	el tipo de DRAM para el refresh. Con el gate, un stream de
-			//	escritura >16KB (soft_vdp_test2 de HRA escribe R#8=0x02)
-			//	envolvia en el banco 0: "media pantalla" en HW _124. El
-			//	wrap de 14 bits queda SOLO para los modos TMS9918.
+			//	MSXimus _125 (re-aplicado sobre th9958): VR=0 (R#8 bit3) NO
+			//	bloquea el acarreo del contador al banco — en silicio real y
+			//	openMSX VR solo elige el tipo de DRAM para el refresh. Con el
+			//	gate, un stream de escritura >16KB (soft_vdp_test2 escribe
+			//	R#8=0x02) envolvia en el banco 0: "media pantalla" en HW _124.
+			//	El wrap de 14 bits queda SOLO para los modos TMS9918.
 			else if( ff_screen_mode[4:3] == 2'b00 ) begin
 				ff_vram_address[13:0]	<= w_next_vram_address[13:0];
 			end
-			else if( !ff_v9958_mode ) begin
+			else if( ff_vram256k_mode ) begin
 				ff_vram_address			<= w_next_vram_address;
 			end
 			else begin
@@ -466,9 +468,9 @@ module vdp_cpu_interface (
 		end
 		else if( ff_register_write && ff_register_num == 6'd14 ) begin
 			//	R#14 = [N/A][N/A][N/A][N/A][A17][A16][A15][A14]
-			//	_125 (MSXimus): VR=0 tampoco fuerza aqui el banco a 0
+			//	MSXimus _125: VR=0 tampoco fuerza aqui el banco a 0
 			//	(misma justificacion que arriba).
-			if( !ff_v9958_mode ) begin
+			if( ff_vram256k_mode ) begin
 				ff_vram_address[17:14]	<= ff_1st_byte[3:0];
 			end
 			else begin
@@ -543,10 +545,12 @@ module vdp_cpu_interface (
 			ff_interrupt_line_nonR23_mode <= 1'b0;
 			ff_sprite_mode3 <= 1'b0;
 			ff_ext_palette_mode <= 1'b0;
+			ff_ext_command_mode <= 1'b0;
+			ff_vram256k_mode <= 1'b0;
 			ff_sprite16_mode <= 1'b0;
 			ff_command_end_interrupt_enable <= 1'b0;
 			ff_flat_interlace_mode <= 1'b0;
-			ff_v9958_mode <= 1'b1;
+			ff_fakeID <= 1'b1;
 		end
 		else if( ff_register_write ) begin
 			case( ff_register_num )
@@ -596,11 +600,11 @@ module vdp_cpu_interface (
 				end
 			6'd9:	//	R#9 = [LN][N/A][N/A][N/A][IL][EO][NT][N/A]
 				begin
-					//	_125 (MSXimus v1): NTSC-only — el puente HDMI es
-					//	60Hz/525 fijo; con NT=1 el core cambiaba a 625
-					//	lineas y la imagen quedaba negra/descompuesta
-					//	(PAL TEST de HRA, HW _124). El bit se IGNORA:
-					//	software PAL se ve a 60Hz. PAL real = pendiente.
+					//	MSXimus _125 (v1): NTSC-only — el puente HDMI es
+					//	60Hz/525 fijo; con NT=1 el core cambiaba a 625 lineas
+					//	y la imagen quedaba negra/descompuesta (PAL TEST de
+					//	HRA, HW _124). El bit se IGNORA: software PAL se ve a
+					//	60Hz. PAL real = pendiente.
 					ff_50hz_mode <= 1'b0;
 					ff_interleaving_mode <= ff_1st_byte[2];
 					ff_interlace_mode <= ff_1st_byte[3];
@@ -649,13 +653,15 @@ module vdp_cpu_interface (
 					ff_interrupt_line_nonR23_mode <= ff_1st_byte[2];
 					ff_sprite_mode3 <= ff_1st_byte[3];
 					ff_ext_palette_mode <= ff_1st_byte[4];
-					ff_flat_interlace_mode <= ff_1st_byte[5];
-					ff_command_end_interrupt_enable <= ff_1st_byte[6];
+					ff_ext_command_mode <= ff_1st_byte[5];
+					ff_vram256k_mode <= ff_1st_byte[6];
 					ff_sprite16_mode <= ff_1st_byte[7];
 				end
 			8'd21:	//	R#21 = [CEIE][N/A][N/A][N/A][N/A][N/A][N/A][N/A]
 				begin
-					ff_v9958_mode <= ff_1st_byte[0];
+					ff_fakeID <= ff_1st_byte[0];
+					ff_flat_interlace_mode <= ff_1st_byte[6];
+					ff_command_end_interrupt_enable <= ff_1st_byte[7];
 				end
 			8'd23:	//	R#23 = [DO7][DO6][DO5][DO4][DO3][DO2][DO1][DO0]
 				begin
@@ -763,7 +769,7 @@ module vdp_cpu_interface (
 	always @( posedge clk ) begin
 		case( ff_status_register_pointer )
 		4'd0:		ff_status_register <= { ff_frame_interrupt, sprite_overmap, sprite_collision, sprite_overmap_id };
-		4'd1:		ff_status_register <= { 2'd0, ff_v9958_mode ? c_v9958id: c_v9968id, ff_line_interrupt };
+		4'd1:		ff_status_register <= { 2'd0, ff_fakeID ? c_v9958id: c_v9968id, ff_line_interrupt };
 		4'd2:		ff_status_register <= { status_transfer_ready, status_vsync, status_hsync, status_border_detect, 2'b11, status_field, status_command_execute };
 		4'd3:		ff_status_register <= sprite_collision_x[7:0];
 		4'd4:		ff_status_register <= { 7'b1111111, sprite_collision_x[8] };
@@ -836,6 +842,10 @@ module vdp_cpu_interface (
 				//	Clear line interrupt flag
 				ff_line_interrupt <= 1'b0;
 			end
+			else if( ff_status_register_pointer == 4'd10 ) begin
+				//	Clear line interrupt flag
+				ff_command_end_interrupt <= 1'b0;
+			end
 		end
 		else if( w_write && ff_port4 ) begin
 			if( ff_bus_wdata[0] == 1'b1 ) begin
@@ -847,7 +857,7 @@ module vdp_cpu_interface (
 				ff_line_interrupt <= 1'b0;
 			end
 			if( ff_bus_wdata[2] == 1'b1 ) begin
-				//	Clear command end interrupt flag
+				//	Clear line interrupt flag
 				ff_command_end_interrupt <= 1'b0;
 			end
 		end
@@ -939,8 +949,8 @@ module vdp_cpu_interface (
 	assign reg_interrupt_line_nonR23_mode			= ff_interrupt_line_nonR23_mode;
 	assign reg_sprite_mode3							= ff_sprite_mode3;
 	assign reg_ext_palette_mode						= ff_ext_palette_mode;
-	assign reg_ext_command_mode						= ~ff_v9958_mode;
-	assign reg_vram256k_mode						= ~ff_v9958_mode;
+	assign reg_ext_command_mode						= ff_ext_command_mode;
+	assign reg_vram256k_mode						= ff_vram256k_mode;
 	assign reg_sprite16_mode						= ff_sprite16_mode;
 	assign reg_flat_interlace_mode					= ff_flat_interlace_mode;
 endmodule
