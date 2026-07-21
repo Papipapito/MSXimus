@@ -1754,6 +1754,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // Si los cortes de ~3s del audio coinciden con saltos de rst_cnt, el
     // culpable es el re-arranque del stream HDMI (el receptor silencia).
     wire v68_dbg_lock, v68_dbg_rst;
+    wire [31:0] v68_dbg_apkt;        // _127I: contadores del packet_picker
     reg [2:0]  aud_rst_sy = 3'd0, aud_lock_sy = 3'd0;
     reg [15:0] aud_rst_cnt = 16'd0, aud_lock_cnt = 16'd0;
     always @(posedge clk_54m) begin
@@ -1799,7 +1800,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .dbg_nonblack (),
         .dbg_lock_tgl (v68_dbg_lock),    // _127H: telemetria audio
         .dbg_hdmi_rst (v68_dbg_rst),
-        .dbg_rd_act   ()
+        .dbg_rd_act   (),
+        .dbg_apkt     (v68_dbg_apkt)     // _127I: {ovr, 0, paquetes_audio}
     );
 
     // ---- dh/dl: divisor LIBRE clk_108m ÷8/÷16 — el patron EXACTO con el
@@ -4243,7 +4245,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .clk(clk_54m), .rst_n(bus_reset_n),
         .cnt_a(v68dbg_miss),
         .cnt_b({aud_rst_cnt, aud_lock_cnt}),      // _127H: {resets HDMI, toggles lock}
-        .cnt_c(v68dbg_bkb),
+        .cnt_c(v68_dbg_apkt),                     // _127I: {ovr, 0, paquetes_audio}
         .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
         .cnt_e(v68dbg_park),                      // _124: {pisadas, drenajes} del park
         .tx(usb_uart_tx_int)

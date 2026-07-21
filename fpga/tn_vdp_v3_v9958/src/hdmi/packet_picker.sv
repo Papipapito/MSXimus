@@ -22,7 +22,11 @@ module packet_picker
     input logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word [1:0],
     input logic aspect_16_9,
     output logic [23:0] header,
-    output logic [55:0] sub [3:0]
+    output logic [55:0] sub [3:0],
+    // _127I telemetria bug #14: pulso por paquete de audio despachado y por
+    // overrun del doble buffer (el productor pisa un buffer sin consumir)
+    output logic audio_pkt_pulse,
+    output logic audio_ovr_pulse = 1'b0
 );
 
 // Connect the current packet type's data to the output.
@@ -90,6 +94,13 @@ end
 
 logic sample_buffer_used = 1'b0;
 logic sample_buffer_ready = 1'b0;
+
+// _127I: sample_buffer_used ya es un pulso de 1 ciclo exactamente cuando se
+// despacha un paquete de muestras (packet_type 0x02) — se exporta tal cual.
+assign audio_pkt_pulse = sample_buffer_used;
+always_ff @(posedge clk_pixel)
+    audio_ovr_pulse <= (audio_sample_word_transfer_control_synchronizer_chain[0] ^ audio_sample_word_transfer_control_synchronizer_chain[1])
+                       && samples_remaining == 2'd3 && sample_buffer_ready && !sample_buffer_used;
 
 always_ff @(posedge clk_pixel)
 begin

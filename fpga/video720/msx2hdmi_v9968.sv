@@ -105,7 +105,8 @@ module msx2hdmi_v9968 (
     output wire        dbg_nonblack, // clk: stretch de mem_we con dato != 0
     output wire        dbg_lock_tgl, // clk: frame_tgl tal cual (~30 Hz NTSC)
     output wire        dbg_hdmi_rst, // clk_pixel: stretch del pulso hdmi_rst
-    output wire        dbg_rd_act    // clk_pixel: nivel ventana activa lectura
+    output wire        dbg_rd_act,   // clk_pixel: nivel ventana activa lectura
+    output wire [31:0] dbg_apkt      // _127I: {ovr[7:0], 8'h00, paquetes_audio[15:0]}
 );
 
     localparam HS_ACTIVE_LOW   = 0;  // V9968: display_hs/vs activos ALTOS
@@ -556,6 +557,7 @@ module msx2hdmi_v9968 (
     // ========================================================================
 
     logic [9:0] tmds_ntsc [NUM_CHANNELS-1:0];
+    wire apkt_pulse_ntsc, aovr_pulse_ntsc;      // _127I telemetria bug #14
     hdmi #( .VIDEO_ID_CODE(4),                  // 720p60, frame 1650×750
             .DVI_OUTPUT(0),
             .VIDEO_REFRESH_RATE(60.0),
@@ -578,8 +580,23 @@ module msx2hdmi_v9968 (
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_ntsc),
           .cy(cy_ntsc),
-          .tmds_internal(tmds_ntsc)
+          .tmds_internal(tmds_ntsc),
+          .audio_pkt_pulse(apkt_pulse_ntsc),
+          .audio_ovr_pulse(aovr_pulse_ntsc)
         );
+
+    // _127I telemetria bug #14: contadores de paquetes de audio despachados
+    // y de overruns del doble buffer del packet_picker (instancia NTSC — la
+    // salida real; el nucleo es NTSC-only). Esperado: 11025.0 paquetes/s
+    // CLAVADOS y ovr=0. Si la tasa baja o hay ovr durante un corte audible,
+    // el lado transmisor es culpable; si sigue perfecta -> receptor/cable.
+    reg [15:0] apkt_cnt = 16'd0;
+    reg [7:0]  aovr_cnt = 8'd0;
+    always @(posedge clk_pixel) begin
+        if (apkt_pulse_ntsc) apkt_cnt <= apkt_cnt + 1'b1;
+        if (aovr_pulse_ntsc) aovr_cnt <= aovr_cnt + 1'b1;
+    end
+    assign dbg_apkt = {aovr_cnt, 8'h00, apkt_cnt};
 
     logic [9:0] tmds_pal [NUM_CHANNELS-1:0];
     hdmi #( .VIDEO_ID_CODE(19),                 // 720p50, frame 1980×750

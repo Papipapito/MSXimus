@@ -91,7 +91,11 @@ module hdmi
     output logic [BIT_WIDTH-1:0] screen_width,
     output logic [BIT_HEIGHT-1:0] screen_height,
 
-    output logic [9:0] tmds_internal [NUM_CHANNELS-1:0]
+    output logic [9:0] tmds_internal [NUM_CHANNELS-1:0],
+
+    // _127I telemetria bug #14 (desde packet_picker; 0 fijo en modo DVI)
+    output logic audio_pkt_pulse,
+    output logic audio_ovr_pulse
 );
 
 //localparam int NUM_CHANNELS = 3;
@@ -318,7 +322,7 @@ generate
             .VENDOR_NAME(VENDOR_NAME),
             .PRODUCT_DESCRIPTION(PRODUCT_DESCRIPTION),
             .SOURCE_DEVICE_INFORMATION(SOURCE_DEVICE_INFORMATION)
-        ) packet_picker (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_sample_word), .aspect_16_9(aspect_16_9), .header(header), .sub(sub));
+        ) packet_picker (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_sample_word), .aspect_16_9(aspect_16_9), .header(header), .sub(sub), .audio_pkt_pulse(audio_pkt_pulse), .audio_ovr_pulse(audio_ovr_pulse));
         logic [8:0] packet_data;
         packet_assembler packet_assembler (.clk_pixel(clk_pixel), .reset(reset), .data_island_period(data_island_period), .header(header), .sub(sub), .packet_data(packet_data), .counter(packet_pixel_counter));
 
@@ -346,6 +350,8 @@ generate
     end
     else // DVI_OUTPUT = 1
     begin
+        assign audio_pkt_pulse = 1'b0;
+        assign audio_ovr_pulse = 1'b0;
         always_ff @(posedge clk_pixel)
         begin
             if (reset)
