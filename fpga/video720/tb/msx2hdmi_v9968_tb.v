@@ -232,7 +232,7 @@ module msx2hdmi_v9968_tb;
             if (cyv < 720 && cxv >= XW && cxv < XW + AW) begin
                 if ((((cxv - XW) % 7) == 0) || (aspect && (cxv - XW) < 4)) begin
                     ip     = cxv - XW;
-                    xx_ref = (ip * 800) / AW;          // V9968: 800 nativos
+                    xx_ref = aspect ? (ip * 3) / 4 : (ip * 800) / AW;  // _127C: wide = x4/3 exacto
                     yy_ref = (cyv * NAT) / 720;
 
                     // -------- a) geometria / patron --------
@@ -328,7 +328,7 @@ module msx2hdmi_v9968_tb;
         phase        = 2;
         aspect       = 1'b1;
         scanln       = 1'b1;
-        XW           = 0;   AW = 1280;
+        XW           = 107; AW = 1066;  // _127C: pixel-perfecto centrado
         HOFF         = 100;
         toggles_mode = 0; locks_mode = 0; rbase = -1; base_pending = -1000000;
         @(negedge clk); @(negedge clk);

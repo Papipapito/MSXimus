@@ -65,7 +65,7 @@
 //   * write-side en clk_86 (85.909 MHz) con `ce` (2 ciclos/pixel del V9968);
 //   * ring de 32 lineas x 800 px (el V9968 saca 800 activos: 256x3=768 de
 //     contenido + bordes — el ring de 720 croparia 48 px de contenido);
-//   * lectura: H 800->960 (acumulador +800/umbral 960) 4:3, 800->1280 16:9;
+//   * lectura: H 800->1200 (x1,5 EXACTO, _127C) 4:3, 800->1280 16:9;
 //     V FIJO 240->720 x3 en AMBOS modos (el V9968 normaliza NTSC y PAL a
 //     480 lineas dobladas = 240 nativas);
 //   * scanlines: patron x3 (1 de cada 3) tambien en PAL;
@@ -117,8 +117,20 @@ module msx2hdmi_v9968 (
     localparam AUDIO_RATE      = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
     localparam NUM_CHANNELS    = 3;
-    localparam XSTART          = (1280-960)/2;  // 160   (4:3)
-    localparam XSTOP           = (1280+960)/2;  // 1120  (4:3)
+    // _127C (BUILD DE PRUEBA): el 4:3 clasico queda INTACTO (960, ventana
+    // 4:3 exacta = proporcionado; el x1,2 fraccional es el precio: cada
+    // pixel MSX — 3 columnas nativas del core, que ya escala 256->768 —
+    // sale a 3 o 4 columnas alternas = palos desiguales en las fuentes).
+    // La POSICION 16:9 del menu pasa a ser el modo PIXEL-PERFECTO para
+    // comparar en caliente: 800->1066 (x4/3, acumulador +600 umbral 800,
+    // patron 2,1,1 por nativa -> CUALQUIER triplete suma 4): pixel MSX =
+    // 4 columnas EXACTAS, inmune a la fase de los bordes. Ventana 1066
+    // centrada (~11% mas ancha que el 4:3 puro). En la _128 se decide:
+    // tercera opcion de menu o sustitucion.
+    localparam XSTART          = (1280-960)/2;   // 160   (4:3 clasico)
+    localparam XSTOP           = (1280+960)/2;   // 1120  (4:3 clasico)
+    localparam XSTART_P        = (1280-1066)/2;  // 107   (pixel-perfecto)
+    localparam XSTOP_P         = (1280+1066)/2;  // 1173  (pixel-perfecto)
     // _56 (16:9 estirado): ventana a pantalla completa, 720→1280
     localparam XSTART_W        = 0;
     localparam XSTOP_W         = 1280;
@@ -301,16 +313,21 @@ module msx2hdmi_v9968 (
     reg [9:0]  cy_r = 10'd0;
 
     // _56: geometría del escalador horizontal muxeada por aspecto
+    // _127C: la posicion "wide" es ahora el modo pixel-perfecto — ventana
+    // CENTRADA como el 4:3 (la acrobacia del wrap con wlast era solo para
+    // la ventana a pantalla completa del 16:9 original; wlast se conserva
+    // para el bookkeeping de fin de linea del ring).
     wire [11:0] wlast    = pal_x ? 12'd1979 : 12'd1649;             // W-1
-    wire        xacc_en  = wide_x ? ((cx >= wlast - 12'd1) || (cx < XSTOP_W-3))
-                                  : ((cx >= XSTART-2) && (cx < XSTOP-3));
-    wire [10:0] xthresh  = wide_x ? 11'd1280 : 11'd960;
-    wire        xrst_now = wide_x ? (cx == wlast - 12'd2) : (cx == 12'd0);
+    wire        xacc_en  = wide_x ? ((cx >= XSTART_P-2) && (cx < XSTOP_P-3))
+                                  : ((cx >= XSTART-2)   && (cx < XSTOP-3));
+    wire [10:0] xthresh  = wide_x ? 11'd800 : 11'd960;
+    wire [10:0] xinc     = wide_x ? 11'd600 : 11'd800;     // x4/3 / x1,2
+    wire        xrst_now = (cx == 12'd0);
 
     always @(posedge clk_pixel) begin : scaler
         reg [10:0] xcnt_next;
         reg [10:0] ycnt_next;
-        xcnt_next = xcnt + 11'd800;              // V9968: 800->960 / 800->1280
+        xcnt_next = xcnt + xinc;                 // V9968 _127C: 800->1066 / 800->1280
         ycnt_next = ycnt + 11'd240;              // V9968: x3 FIJO ambos modos
 
         // Horizontal: acumula en la ventana adelantada 2 ciclos del modo
@@ -396,8 +413,8 @@ module msx2hdmi_v9968 (
     //  4:3:  cx+1 ∈ [160,1120) en línea activa.
     //  16:9: cx+1 ∈ [0,1280) — en cx==W-1 el próximo píxel es el x=0 de la
     //        LÍNEA SIGUIENTE (activa si cy<719, o cy==749 → línea 0).
-    wire win_next = wide_x ? ( ((cx < XSTOP_W-1) && (cy < 10'd720)) ||
-                               ((cx == wlast) && ((cy < 10'd719) || (cy == 10'd749))) )
+    // _127C: ventana pixel-perfecta CENTRADA (sin el caso del wrap en wlast)
+    wire win_next = wide_x ? ((cx >= XSTART_P-1) && (cx < XSTOP_P-1) && (cy < 10'd720))
                            : ((cx >= XSTART-1) && (cx < XSTOP-1) && (cy < 10'd720));
 
     always @(posedge clk_pixel) begin
