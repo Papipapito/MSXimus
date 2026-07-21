@@ -1748,6 +1748,20 @@ assign keyboard_addr = ppi_port_c[3:0];
     );
 
     // ---- puente de video 800px -> HDMI 720p (back-end TMDS intacto) ----
+    // _127H: telemetria del audio — eventos de reset del HDMI y toggles del
+    // lock del puente (pulsos estirados ~30ms; 2FF + flanco a clk_54m). El
+    // lock togglea a ~30Hz en regimen: su TASA en el lector delata perdidas.
+    // Si los cortes de ~3s del audio coinciden con saltos de rst_cnt, el
+    // culpable es el re-arranque del stream HDMI (el receptor silencia).
+    wire v68_dbg_lock, v68_dbg_rst;
+    reg [2:0]  aud_rst_sy = 3'd0, aud_lock_sy = 3'd0;
+    reg [15:0] aud_rst_cnt = 16'd0, aud_lock_cnt = 16'd0;
+    always @(posedge clk_54m) begin
+        aud_rst_sy  <= {aud_rst_sy[1:0],  v68_dbg_rst};
+        aud_lock_sy <= {aud_lock_sy[1:0], v68_dbg_lock};
+        if (aud_rst_sy[1]  & ~aud_rst_sy[2])  aud_rst_cnt  <= aud_rst_cnt  + 16'd1;
+        if (aud_lock_sy[1] & ~aud_lock_sy[2]) aud_lock_cnt <= aud_lock_cnt + 16'd1;
+    end
     // ce de pixel: el V9968 emite 1 pixel cada 2 ciclos de 85.9; un toggle
     // libre muestrea cada pixel exactamente una vez (la fase da igual: el
     // dato es estable 2 ciclos y la captura se auto-alinea con HS).
@@ -1783,8 +1797,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .dbg_vs_tick  (),
         .dbg_wr_act   (),
         .dbg_nonblack (),
-        .dbg_lock_tgl (),
-        .dbg_hdmi_rst (),
+        .dbg_lock_tgl (v68_dbg_lock),    // _127H: telemetria audio
+        .dbg_hdmi_rst (v68_dbg_rst),
         .dbg_rd_act   ()
     );
 
@@ -3320,9 +3334,29 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         + {{3{jt2413_wav[15]}}, jt2413_wav} + {{3{y8950_wav[15]}}, y8950_wav}
         + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
         + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term[15]}}, opl4pcm_term};
+    // _127H: TONO DE TEST — activado por el toggle "Sprite Limit" del menu
+    // (config2[3], LIBRE con el V9968: el SPMAXSPR murio). 440Hz cuadrada a
+    // -12dB directa al puente, PUENTEANDO el mezclador entero. Discriminador
+    // del bug #14: si el TONO tambien se corta -> HDMI/receptor; si el tono
+    // aguanta limpio mientras la musica se corta -> mezclador/fuentes.
+    reg [14:0] tone_cnt = 15'd0;
+    reg        tone_sq  = 1'b0;
+    always @ (posedge clk_27m) begin
+        if (tone_cnt == 15'd30681) begin      // 27e6/(2*440) - 1
+            tone_cnt <= 15'd0;
+            tone_sq  <= ~tone_sq;
+        end else
+            tone_cnt <= tone_cnt + 15'd1;
+    end
+    wire [15:0] tone_smp = tone_sq ? 16'd4096 : 16'hF000;   // +-4096 (-12dB)
+
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
-            if (config_enable_stereo == 1) begin
+            if (config_enable_8sprites == 1) begin
+                audio_sample   <= tone_smp;
+                audio_sample_r <= tone_smp;
+            end
+            else if (config_enable_stereo == 1) begin
                 audio_sample   <= sat16(mixL_st);
                 audio_sample_r <= sat16(mixR_st);
             end
@@ -4207,7 +4241,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire usb_uart_tx_int;
     dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
         .clk(clk_54m), .rst_n(bus_reset_n),
-        .cnt_a(v68dbg_miss), .cnt_b(v68dbg_bka), .cnt_c(v68dbg_bkb),
+        .cnt_a(v68dbg_miss),
+        .cnt_b({aud_rst_cnt, aud_lock_cnt}),      // _127H: {resets HDMI, toggles lock}
+        .cnt_c(v68dbg_bkb),
         .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
         .cnt_e(v68dbg_park),                      // _124: {pisadas, drenajes} del park
         .tx(usb_uart_tx_int)
