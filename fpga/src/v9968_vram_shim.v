@@ -157,6 +157,27 @@ reg        obl_pend;
 reg        obl_chk;
 reg        obl_do;                       // _121b: fase 3 (comparador registrado)
 reg [15:0] obl_w;
+// _127: PREDICCION DE ZANCADA. El scroll H rompe el stream +1 DOS veces
+// por linea (arranque y wrap del ring): ~28k px rancios/frame en
+// tb_scroll (las franjas de la foto 4300). Parchear la oferta no vale
+// (la rafaga tras miss EMPEORO: 506k, fetches duplicados); la solucion
+// es PREDECIR: en bitmap el fetch de la linea N+1 es EXACTAMENTE el de
+// la N desplazado UNA ZANCADA (32 palabras SC5/6, 64 SC7/8/12) —
+// incluidos los dos saltos del scroll H. El OBL prefetchea addr+stride
+// (la misma columna de la linea siguiente): prediccion perfecta, mismo
+// trafico que el +2 de antes, cero duplicados.
+// La zancada se aprende DEL PROPIO WRAP del ring, POR STREAM FISICO:
+// con el entrelazado {a17,a0,a16:1} el bg llega como DOS streams (pares
+// e impares, bit 14 del vector) en ping-pong ±16384 — radiografia del
+// tb_scroll: cada stream avanza +1 y el wrap del scroll H aparece como
+// delta -31 (SC8: ring de 32 palabras/stream) DENTRO de su stream,
+// compuesto con el salto de stream si se mira el bus plano (por eso un
+// aprendiz de stream unico es CIEGO). stride = 1 - delta_por_stream =
+// palabras/linea/stream (16 SC5/6, 32 SC7/8/12), saneada a
+// {8,16,32,64}; una vez aprendida vale tambien para el caso lineal (la
+// linea N+1 del mismo stream sigue a +stride).
+reg [15:0] bg_prev0, bg_prev1;           // ultimo fetch bg POR STREAM
+reg [15:0] stride;                       // zancada aprendida (0 = no)
 reg [15:0] obl_w_c, obl_w_d;             // _123: la direccion VIAJA con la
                                          // tuberia (un hit nuevo pisaba obl_w
                                          // con la fase 3 aun en vuelo: se
@@ -227,6 +248,7 @@ reg [1:0]  bgp_wp, bgp_rp;
 wire       bgp_empty = (bgp_wp == bgp_rp);
 wire       bgp_full  = (bgp_wp + 2'd1 == bgp_rp);
 reg [15:0] c_park, c_pkov;                     // drenajes OK / pisadas (overflow)
+reg        pkov_p;                             // _127: pisada, registrada 1 ciclo
 
 // ============================================================================
 // TUBERIA DE RESPUESTA A 8 CICLOS para bg: shift-register de 8 etapas con
@@ -455,8 +477,9 @@ always @(posedge clk_vdp or negedge rst_n) begin
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
+        bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0;
         obl_w_c <= 0; obl_w_d <= 0;
-        bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0;
+        bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0; pkov_p <= 0;
         pfB_pend <= 0; pfB_wr <= 0;
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0;
         pwq_v <= 0;
@@ -475,6 +498,8 @@ always @(posedge clk_vdp or negedge rst_n) begin
         pww_en <= 1'b0;
         pwq_v  <= pw_v[pw_ridx];
         pwqB_v <= pw_v[w_idx(obl_w)];    // _126: valid del espejo OBL
+        pkov_p <= 1'b0;                  // _127: pisada consumida al contador
+        if (pkov_p) c_pkov <= c_pkov + 16'd1;
         if (!scv_ready) scv_swp <= scv_swp + 13'd1;
         // _120: el valid de la VENTANA se pone UN CICLO DESPUES de la
         // completacion — la media etapa negedge hace que el dato aterrice
@@ -523,6 +548,24 @@ always @(posedge clk_vdp or negedge rst_n) begin
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
                                          // suben (asignacion posterior gana)
 
+        // ---------- _127: aprendizaje de la zancada (wrap POR STREAM) ----
+        if (spr_p1 && spr_tag1[4:2] == C_BG) begin : stride_learn
+            reg [15:0] d;
+            d = spr_addr1 - (spr_addr1[14] ? bg_prev1 : bg_prev0);
+            if (spr_addr1[14]) bg_prev1 <= spr_addr1;
+            else               bg_prev0 <= spr_addr1;
+            // salto negativo con magnitud <= 64 = wrap del ring por stream
+            if (d[15] && (&d[14:6])) begin
+                if ((16'd1 - d) == 16'd8  || (16'd1 - d) == 16'd16 ||
+                    (16'd1 - d) == 16'd32 || (16'd1 - d) == 16'd64)
+                    stride <= 16'd1 - d;
+`ifdef SHIM_DBG_DROPS
+                $display("WRAP addr=%h delta=%0d stride_n=%0d t=%0t",
+                         spr_addr1, $signed(d), 16'd1 - d, $time);
+`endif
+            end
+        end
+
         // ---------- etapa 1 UNIFICADA del lookup (v4): VENTANA + CACHE ----
         // Todo fetch (bg/sprite/CPU/comando) llega aqui con las lecturas
         // BSRAM ya en pwq/scq. Prioridad: ventana (solo bg, streaming) ->
@@ -543,8 +586,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     pfB_pend <= 1'b1;
                     pfB_wr   <= obl_w;
                 end
-                obl_pend <= 1'b1;
-                obl_w    <= spr_addr1 + 16'd2;
+                obl_pend  <= 1'b1;
+                // _127: con zancada aprendida se prefetchea la MISMA columna
+                // de la LINEA SIGUIENTE (prediccion); sin ella, el +2 clasico
+                obl_w     <= spr_addr1 + 16'd2;  // BISECT: stride inerte
             end
             else if (scq_v && scq_tag == spr_addr1[15:12])
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};
@@ -566,7 +611,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                             bgp_wp <= bgp_wp + 2'd1;
                         end
                         else begin
-                            c_pkov <= c_pkov + 16'd1;
+                            // _127: el incremento va REGISTRADO (pkov_p) — el
+                            // CE de los 16 bits colgaba del DO de la BSRAM
+                            // (pwq via el compare del hit) y era la unica
+                            // familia violada del dado 337 (-13ps). Un ciclo
+                            // tarde en un contador de telemetria es gratis.
+                            pkov_p <= 1'b1;
 `ifdef SHIM_DBG_DROPS
                             $display("DROP S3b_park_lleno t=%0t addr=%h tag=%h", $time, spr_addr1, spr_tag1);
 `endif
@@ -587,8 +637,13 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     pfB_pend <= 1'b1;            // semilla +1 (registrada; si
                     pfB_wr   <= spr_addr1 + 16'd1; // habia OBL retenido cede:
                                                  // el miss resiembra la cadena)
-                    obl_pend <= 1'b1;
-                    obl_w    <= spr_addr1 + 16'd2;
+                    obl_pend  <= 1'b1;
+                    // _127: el MISS siempre recupera la linea ACTUAL (+2
+                    // clasico; el +1 va por pfB) — la prediccion de zancada
+                    // vive SOLO en los hits. Con zancada en el miss, la
+                    // linea 0 tras cada vblank (cadena rota) no se
+                    // recuperaba: quiet 232 -> 4852.
+                    obl_w     <= spr_addr1 + 16'd2;
                     // _124: DEGRADACION ELEGANTE — el aparcamiento cura el
                     // fill posterior pero NO el guion del PRIMER miss (el
                     // consumidor muestrea a 8 ciclos fijos, pillara lo que
