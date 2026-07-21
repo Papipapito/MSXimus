@@ -467,17 +467,28 @@ module msx2hdmi_v9968 (
     // Audio: divisor a 44100 Hz desde clk_pixel + cruce 2FF (como sms2hdmi)
     // ========================================================================
 
-    localparam AUDIO_CLK_DELAY = CLKFRQ * 1000 / AUDIO_RATE / 2;
-    logic [$clog2(AUDIO_CLK_DELAY)-1:0] audio_divider = '0;
+    // _127G (bug #14, bajones de volumen): el divisor ENTERO truncaba
+    // 74.25M/44100/2 = 841.83 -> 841 y el sample rate real era 44144.5 Hz
+    // frente a los 44100 que anuncia el ACR (N=6272/CTS=82500): +0.1% de
+    // deriva continua. El buffer del receptor la aguanta ~30-40 s y luego
+    // corrige a trompicones cada ~3 s — EXACTAMENTE lo observado en HW
+    // (OPL4 wave bien 30-40 s y luego cortes ritmicos; FM/SCC "mal desde
+    // el principio" porque su musica arranca con la deriva ya saturada).
+    // Fix: acumulador FRACCIONAL — 88200 toggles/s exactos de media
+    // (2 por muestra) => 44100.000 Hz. Jitter de +-1 ciclo de pixel:
+    // irrelevante (el dato cruza por audio_sample_word y el modulo hdmi
+    // empaqueta por muestra).
+    reg  [26:0] audio_acc = 27'd0;
     logic clk_audio = 1'b0;
 
-    always_ff @(posedge clk_pixel) begin
-        if (audio_divider != AUDIO_CLK_DELAY - 1)
-            audio_divider <= audio_divider + 1'b1;
-        else begin
-            clk_audio     <= ~clk_audio;
-            audio_divider <= '0;
-        end
+    always_ff @(posedge clk_pixel) begin : audio_div_frac
+        reg [27:0] acc_n;
+        acc_n = {1'b0, audio_acc} + 28'd88200;
+        if (acc_n >= 28'd74250000) begin
+            audio_acc <= acc_n[26:0] - 27'd74250000;
+            clk_audio <= ~clk_audio;
+        end else
+            audio_acc <= acc_n[26:0];
     end
 
     // _126 (bug #14, bajones de volumen): el "cruce 2FF" era un 2FF sobre un
