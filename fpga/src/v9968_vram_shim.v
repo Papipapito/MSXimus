@@ -191,6 +191,20 @@ reg [15:0] stride;                       // zancada aprendida (0 = no)
 // cada ~3 ciclos). Efecto: el 2o pase pre-calienta la linea N+1 ENTERA con
 // su patron de wrap del scroll H incluido, a coste CERO de trafico.
 reg        obl_walked;                   // correa: 1 walk por slot OBL
+// _127J-c ECO DEL MISS: la radiografia BGMISS enseno que el residuo del
+// scroll H es UN miss por linea y stream, SIEMPRE en la misma columna
+// relativa (la palabra s+1 del bloque, s = offset del scroll): un agujero
+// que el caminante no tapa y que se REPITE identico linea a linea. Como la
+// linea N+1 fallara en (miss_addr + stride), cada miss siembra ese eco por
+// un tercer camino de MINIMA prioridad del push de pfq (+1 fetch por miss,
+// ~2 por linea: calderilla). La cadena de misses se auto-extingue.
+reg        mecho_v;
+reg [15:0] mecho_w;
+reg [12:0] mgap;                         // ciclos desde el ultimo miss bg
+// (_127J-b, RETIRADO: un "pre-calentador de vblank" con detector de hueco
+// resulto CODIGO MUERTO — la radiografia de deltas entre wraps demostro que
+// el V9968 fetchea bg de forma CONTINUA tambien durante el blanking, solo
+// que lineal y sin wraps: nunca hay hueco >8192 ciclos que detectar.)
 reg [15:0] obl_w_c, obl_w_d;             // _123: la direccion VIAJA con la
                                          // tuberia (un hit nuevo pisaba obl_w
                                          // con la fase 3 aun en vuelo: se
@@ -491,6 +505,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
         bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0; obl_walked <= 0;
+        mecho_v <= 0; mecho_w <= 0; mgap <= 0;
         obl_w_c <= 0; obl_w_d <= 0;
         bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0; pkov_p <= 0;
         pfB_pend <= 0; pfB_wr <= 0;
@@ -570,6 +585,8 @@ always @(posedge clk_vdp or negedge rst_n) begin
         end
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
                                          // suben (asignacion posterior gana)
+
+        if (!mgap[12]) mgap <= mgap + 13'd1;   // _127J-c (el miss lo resetea)
 
         // ---------- _127: aprendizaje de la zancada (wrap POR STREAM) ----
         if (spr_p1 && spr_tag1[4:2] == C_BG) begin : stride_learn
@@ -658,6 +675,20 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // _122: siembra COMPLETA de la cadena +2 — el +1 va
                     // directo a pfq y el +2 via OBL (fase 2, un ciclo
                     // despues: sin colision en el puerto de pfq).
+`ifdef SHIM_DBG_DROPS
+                    $display("BGMISS addr=%h t=%0t", spr_addr1, $time);
+`endif
+                    // _127J-c: eco del miss hacia la linea siguiente. SOLO
+                    // para misses ESPACIADOS (>=4096 ciclos ~48us = patron
+                    // estacionario 1-miss-por-linea del scroll H): las OLAS
+                    // de un cambio de registro (huecos minimos) no ecoan —
+                    // sin este discriminador la pfq se llenaba de ecos y los
+                    // drops mataban semillas reales (vscroll 912 -> 15630).
+                    if (stride != 16'd0 && !mecho_v && mgap[12]) begin
+                        mecho_v <= 1'b1;
+                        mecho_w <= spr_addr1 + stride;
+                    end
+                    mgap <= 13'd0;
                     bg_miss <= bg_miss + 8'd1;
                     c_miss  <= c_miss + 32'd1;
                     pfB_pend <= 1'b1;            // semilla +1 (registrada; si
@@ -710,6 +741,13 @@ always @(posedge clk_vdp or negedge rst_n) begin
         else if (obl_do && !pfq_full) begin
             pfq[pfq_wp] <= obl_w_d;
             pfq_wp <= pfq_wp + 3'd1;
+        end
+        // _127J-c: eco del miss — MINIMA prioridad: solo en ciclos sin
+        // ningun otro pusher y con hueco (espera lo que haga falta).
+        else if (mecho_v && !pfq_full) begin
+            pfq[pfq_wp] <= mecho_w;
+            pfq_wp <= pfq_wp + 3'd1;
+            mecho_v <= 1'b0;
         end
 `ifdef SHIM_DBG_DROPS
         if ((obl_do || pfB_pend) && pfq_full)
