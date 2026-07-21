@@ -179,8 +179,7 @@ module vdp_command (
 	reg			[8:0]	ff_dx;
 	reg			[10:0]	ff_dy;
 	reg			[10:0]	ff_nx;
-	reg			[10:0]	ff_ny;
-	(* syn_preserve, syn_maxfan = 8 *) reg [10:0] ff_ny_b;	//	_124d/_126: espejo (ver abajo)
+	reg			[10:0]	ff_ny;						/* synthesis syn_maxfan = 8 */	//	_127C: espejo _124d RETIRADO (el th9958 redistribuyo el cono y las replicas del espejo eran el violador #1); maxfan directo
 	reg			[15:0]	reg_vx;
 	reg			[15:0]	reg_vy;
 	reg			[8:0]	reg_wsx;
@@ -850,51 +849,11 @@ module vdp_command (
 		end
 	end
 
-	//	_124d (MSXimus): ESPEJO anti-congestion de ff_ny (re-aplicado sobre
-	//	th9958). El espejo syn_preserve alimenta SOLO el cono de comparacion
-	//	(w_ny/w_ny_end) y el placer puede pegarlo a la FSM; el original sigue
-	//	en el datapath (reg_ny <= ff_ny). Cero cambio semantico: ambos
-	//	registros llevan siempre el mismo valor (mismas ramas exactas).
-	always @( posedge clk ) begin
-		if( !reset_n ) begin
-			ff_ny_b	<= 11'd1;
-		end
-		else if( ff_start ) begin
-			if( ff_command[3:2] == 2'b01  ) begin
-				ff_ny_b <= reg_ny;
-			end
-			else begin
-				ff_ny_b <= 11'd1;
-			end
-		end
-		else if( !ff_command_execute || ff_cache_vram_valid ) begin
-			//	hold
-		end
-		else if( ff_command[3:2] == 2'b01 ) begin
-			//	hold
-		end
-		else if( ff_count_valid ) begin
-			if( ff_command == c_lfmm ) begin
-				if( ff_bit_count == 3'd0 ) begin
-					if( w_ny_end ) begin
-						ff_ny_b <= 11'd1;
-					end
-					else begin
-						ff_ny_b <= w_ny[10:0];
-					end
-				end
-			end
-			else if( (w_nx_end || w_sx_overflow || w_dx_overflow) && !w_ny_end ) begin
-				ff_ny_b <= w_ny[10:0];
-			end
-		end
-	end
-
-	assign w_ny			= { 1'b0, ff_ny_b } + 12'd1;
+	assign w_ny			= { 1'b0, ff_ny } + 12'd1;
 	assign w_nx_max		= (ff_screen_mode[c_g7] || ff_command[3:2] != 2'b11) ? reg_nx:
 	             		  (ff_screen_mode[c_g5]) ? { reg_nx[10:2], 2'd0 }: { reg_nx[10:1], 1'd0 };
 	assign w_nx_end		= (ff_nx == w_nx_max && ff_command != c_ymmm);
-	assign w_ny_end		= (ff_ny_b == reg_ny) | w_ny[11] | (w_ny[10] & ~reg_vram256k_mode);
+	assign w_ny_end		= (ff_ny == reg_ny) | w_ny[11] | (w_ny[10] & ~reg_vram256k_mode);
 
 	//	LINEコマンドの分子を示すカウンタ
 	assign w_reg_nx		= reg_nx - 11'd1;
