@@ -29,6 +29,7 @@
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
 //`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
+//`define DISABLE_BOOT_MENU  // _127D: arranque MSX DIRECTO (enmascara la firma AB del menu; tambien salta el init FM de esa pagina). Solo builds de prueba.
 
 module top
 #(
@@ -764,8 +765,17 @@ assign keyboard_addr = ppi_port_c[3:0];
                 `ifdef ENABLE_BIOS
                      ( exp_slot0_req_r == 1) ? ~exp_slot0  :
                      ( exp_slotx_req_r == 1) ? ~exp_slotx  :
-                     ( bios_req == 1) ? ram_dout : 
+                     ( bios_req == 1) ? ram_dout :
+`ifdef DISABLE_BOOT_MENU
+                     // _127D: SIN MENU — se enmascara la firma "AB" del menu
+                     // (slot expandido, bytes 0x4000/0x4001): el slot-scan de
+                     // la BIOS no ve cartucho y el MSX arranca DIRECTO.
+                     // OJO: tambien salta el init encadenado de esa pagina
+                     // (FM-BIOS del pack) — build de prueba, no de uso diario.
+                     ( subrom_logo_req == 1 ) ? ((bus_addr[14:1] == 14'h2000) ? 8'h00 : ram_dout) :
+`else
                      ( subrom_logo_req == 1 ) ? ram_dout :
+`endif
                 `endif
                 `ifdef ENABLE_SDCARD
                      ( sd_busreq_w == 1) ? sd_cd_w :
