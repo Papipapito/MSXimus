@@ -191,6 +191,13 @@ reg [15:0] stride;                       // zancada aprendida (0 = no)
 // cada ~3 ciclos). Efecto: el 2o pase pre-calienta la linea N+1 ENTERA con
 // su patron de wrap del scroll H incluido, a coste CERO de trafico.
 reg        obl_walked;                   // correa: 1 walk por slot OBL
+reg [15:0] wk_tgt;                       // objetivo del walk REGISTRADO (el
+                                         // sumador +stride-2 fuera del cono
+                                         // de obl_w: obl_w es estable desde
+                                         // el hit hasta la fase 3, el valor
+                                         // registrado es identico; 9 dados
+                                         // seguidos violando las familias
+                                         // cronicas con el sumador en linea)
 // _127J-c ECO DEL MISS: la radiografia BGMISS enseno que el residuo del
 // scroll H es UN miss por linea y stream, SIEMPRE en la misma columna
 // relativa (la palabra s+1 del bloque, s = offset del scroll): un agujero
@@ -571,6 +578,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         obl_pend <= 1'b0;                       // consumido (el hit lo re-arma)
         obl_chk  <= obl_read_now;
         obl_w_c  <= obl_w;
+        wk_tgt   <= obl_w + stride - 16'd2;   // = addr_hit + stride en fase 3
         obl_do   <= obl_chk && !(pwqB_v && pwqB_tag == obl_w_c[15:6]);
         obl_w_d  <= obl_w_c;
         // _127J: caminante (ver arriba) — slot OBL ocioso + zancada => se
@@ -580,7 +588,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         if (obl_chk && pwqB_v && pwqB_tag == obl_w_c[15:6]
             && stride != 16'd0 && !obl_walked) begin
             obl_pend   <= 1'b1;
-            obl_w      <= obl_w_c + stride - 16'd2;  // = addr_hit + stride
+            obl_w      <= wk_tgt;                    // = addr_hit + stride
             obl_walked <= 1'b1;
         end
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
