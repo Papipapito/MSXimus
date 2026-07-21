@@ -479,20 +479,29 @@ module msx2hdmi_v9968 (
     // (2 por muestra) => 44100.000 Hz. Jitter de +-1 ciclo de pixel:
     // irrelevante (el dato cruza por audio_sample_word y el modulo hdmi
     // empaqueta por muestra).
+    // _127I (bug #14, LA CAUSA): clk_audio era un REGISTRO usado como reloj —
+    // Gowin lo rutaba por fabric generico (PR1014 en el log del PnR:
+    // "excessive delay or skew") y el skew intra-dominio en el contador del
+    // ACR corrompia el CTS => el monitor re-engancha su PLL de audio a
+    // trompicones (cortes ~3s tras 30-40s). Con el diseno v9958 (holgado)
+    // el skew no mordia; con el V9968 (congestionado) si. FIX: se ELIMINA el
+    // reloj de fabric — clock-enable de 1 ciclo a 44100.000 Hz exactos de
+    // media (acumulador fraccional 44100/74250000), todo sincrono a
+    // clk_pixel. De regalo el CTS medido queda exacto y el SDC ya no
+    // necesita el create_clock clock_audio68 (retirado de msx_v9968.sdc).
     reg  [26:0] audio_acc = 27'd0;
-    // syn_preserve: el SDC cuelga clock_audio68 del pin clk_audio_s0/Q —
-    // sin preserve la sintesis renombro el FF con el acumulador y el PnR
-    // murio con TA2004 'Cannot get clock' (las 3 builds 823/827/829).
-    logic clk_audio = 1'b0 /* synthesis syn_preserve = 1 */;
+    reg         audio_ce  = 1'b0;
 
     always_ff @(posedge clk_pixel) begin : audio_div_frac
         reg [27:0] acc_n;
-        acc_n = {1'b0, audio_acc} + 28'd88200;
+        acc_n = {1'b0, audio_acc} + 28'd44100;
         if (acc_n >= 28'd74250000) begin
             audio_acc <= acc_n[26:0] - 27'd74250000;
-            clk_audio <= ~clk_audio;
-        end else
+            audio_ce  <= 1'b1;
+        end else begin
             audio_acc <= acc_n[26:0];
+            audio_ce  <= 1'b0;
+        end
     end
 
     // _126 (bug #14, bajones de volumen): el "cruce 2FF" era un 2FF sobre un
@@ -573,7 +582,7 @@ module msx2hdmi_v9968 (
             )
     hdmi_ntsc ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
-          .clk_audio(clk_audio),
+          .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),
@@ -614,7 +623,7 @@ module msx2hdmi_v9968 (
             )
     hdmi_pal ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
-          .clk_audio(clk_audio),
+          .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),

@@ -66,7 +66,9 @@ module hdmi
 (
     input logic clk_pixel_x5,
     input logic clk_pixel,
-    input logic clk_audio,
+    // _127I (bug #14): audio_ce = pulso 1 ciclo @fs sincrono a clk_pixel;
+    // sustituye al reloj de fabric clk_audio (skew PR1014 => CTS corrupto).
+    input logic audio_ce,
     // synchronous reset back to 0,0
     input logic reset,
     input logic [23:0] rgb,
@@ -322,7 +324,7 @@ generate
             .VENDOR_NAME(VENDOR_NAME),
             .PRODUCT_DESCRIPTION(PRODUCT_DESCRIPTION),
             .SOURCE_DEVICE_INFORMATION(SOURCE_DEVICE_INFORMATION)
-        ) packet_picker (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_sample_word), .aspect_16_9(aspect_16_9), .header(header), .sub(sub), .audio_pkt_pulse(audio_pkt_pulse), .audio_ovr_pulse(audio_ovr_pulse));
+        ) packet_picker (.clk_pixel(clk_pixel), .audio_ce(audio_ce), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_sample_word), .aspect_16_9(aspect_16_9), .header(header), .sub(sub), .audio_pkt_pulse(audio_pkt_pulse), .audio_ovr_pulse(audio_ovr_pulse));
         logic [8:0] packet_data;
         packet_assembler packet_assembler (.clk_pixel(clk_pixel), .reset(reset), .data_island_period(data_island_period), .header(header), .sub(sub), .packet_data(packet_data), .counter(packet_pixel_counter));
 
@@ -390,7 +392,8 @@ always_ff @(posedge clk_pixel) begin
     mode_q <= mode;
 end
 
-logic [9:0] tmds_internal [NUM_CHANNELS-1:0] /* verilator public_flat */ ;
+// _127I: declaracion duplicada de tmds_internal retirada (ya es puerto ANSI;
+// Gowin la toleraba, Verilator no).
 genvar i;
 generate
     // TMDS code production.

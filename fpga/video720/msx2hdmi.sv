@@ -431,16 +431,22 @@ module msx2hdmi (
     // Audio: divisor a 44100 Hz desde clk_pixel + cruce 2FF (como sms2hdmi)
     // ========================================================================
 
-    localparam AUDIO_CLK_DELAY = CLKFRQ * 1000 / AUDIO_RATE / 2;
-    logic [$clog2(AUDIO_CLK_DELAY)-1:0] audio_divider = '0;
-    logic clk_audio = 1'b0;
+    // _127I (bug #14 MSXimus): clk_audio era un registro usado como RELOJ de
+    // fabric (skew sin garantias, PR1014). Ahora clock-enable de 1 ciclo a
+    // 44100.000 Hz exactos (acumulador fraccional), sincrono a clk_pixel —
+    // mismo patron que msx2hdmi_v9968.sv. El SDC ya no necesita clock_audio.
+    reg  [26:0] audio_acc = 27'd0;
+    reg         audio_ce  = 1'b0;
 
-    always_ff @(posedge clk_pixel) begin
-        if (audio_divider != AUDIO_CLK_DELAY - 1)
-            audio_divider <= audio_divider + 1'b1;
-        else begin
-            clk_audio     <= ~clk_audio;
-            audio_divider <= '0;
+    always_ff @(posedge clk_pixel) begin : audio_div_frac
+        reg [27:0] acc_n;
+        acc_n = {1'b0, audio_acc} + 28'd44100;
+        if (acc_n >= 28'd74250000) begin
+            audio_acc <= acc_n[26:0] - 27'd74250000;
+            audio_ce  <= 1'b1;
+        end else begin
+            audio_acc <= acc_n[26:0];
+            audio_ce  <= 1'b0;
         end
     end
 
@@ -508,7 +514,7 @@ module msx2hdmi (
             )
     hdmi_ntsc ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
-          .clk_audio(clk_audio),
+          .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),
@@ -534,7 +540,7 @@ module msx2hdmi (
             )
     hdmi_pal ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
-          .clk_audio(clk_audio),
+          .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
           .audio_sample_word(audio_sample_word),

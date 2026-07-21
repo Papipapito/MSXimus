@@ -14,7 +14,9 @@ module packet_picker
 )
 (
     input logic clk_pixel,
-    input logic clk_audio,
+    // _127I (bug #14): audio_ce sustituye al reloj de fabric clk_audio —
+    // pulso de 1 ciclo @fs sincrono a clk_pixel (ver nota en el ACR).
+    input logic audio_ce,
     input logic reset,
     input logic video_field_end,
     input logic packet_enable,
@@ -53,7 +55,7 @@ assign subs[0][3] = 56'dX;
 
 // Audio Clock Regeneration Packet
 logic clk_audio_counter_wrap;
-audio_clock_regeneration_packet #(.VIDEO_RATE(VIDEO_RATE), .AUDIO_RATE(AUDIO_RATE)) audio_clock_regeneration_packet (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .clk_audio_counter_wrap(clk_audio_counter_wrap), .header(headers[1]), .sub(subs[1]));
+audio_clock_regeneration_packet #(.VIDEO_RATE(VIDEO_RATE), .AUDIO_RATE(AUDIO_RATE)) audio_clock_regeneration_packet (.clk_pixel(clk_pixel), .audio_ce(audio_ce), .clk_audio_counter_wrap(clk_audio_counter_wrap), .header(headers[1]), .sub(subs[1]));
 
 // Audio Sample packet
 localparam bit [3:0] SAMPLING_FREQUENCY = AUDIO_RATE == 32000 ? 4'b0011
@@ -70,10 +72,13 @@ localparam bit WORD_LENGTH_LIMIT = AUDIO_BIT_WIDTH <= 20 ? 1'b0 : 1'b1;
 
 logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word_transfer [1:0];
 logic audio_sample_word_transfer_control = 1'd0;
-always_ff @(posedge clk_audio)
+always_ff @(posedge clk_pixel)
 begin
-    audio_sample_word_transfer <= audio_sample_word;
-    audio_sample_word_transfer_control <= !audio_sample_word_transfer_control;
+    if (audio_ce)
+    begin
+        audio_sample_word_transfer <= audio_sample_word;
+        audio_sample_word_transfer_control <= !audio_sample_word_transfer_control;
+    end
 end
 
 logic [1:0] audio_sample_word_transfer_control_synchronizer_chain = 2'd0;

@@ -180,12 +180,12 @@ IO_LOC "usb1_dn" G13; IO_PORT "usb1_dn" IO_TYPE=LVCMOS33;
 IO_LOC "usb2_dp" M15; IO_PORT "usb2_dp" IO_TYPE=LVCMOS33;
 IO_LOC "usb2_dn" M16; IO_PORT "usb2_dn" IO_TYPE=LVCMOS33;
 
-// ===== v3.5: la red PRIMARY estaba SATURADA (8/8) — clk_audio (44.1 kHz del
-// puente, ~20 FFs, periodo 22700 ns) NO necesita carril global. Degradarlo
-// libera un PRIMARY y ESTABILIZA la asignacion de relojes entre builds (la
-// reasignacion aleatoria con la red llena mato el bitstream _45: build con
-// timing limpio y logs identicos pero muerto en placa).
-CLOCK_LOC "vdp4/u_msx2hdmi/clk_audio" LOCAL_CLOCK;
+// ===== v3.5: la red PRIMARY estaba SATURADA (8/8) — se degrado clk_audio a
+// LOCAL_CLOCK para liberar un carril. _127I: ese LOCAL_CLOCK resulto ser LA
+// CAUSA del bug #14 (skew del reloj de fabric => CTS corrupto => cortes de
+// audio en el monitor). El reloj de fabric YA NO EXISTE: el audio corre con
+// clock-enable sincrono a clk_pixel (ver msx2hdmi*.sv). Constraint retirada;
+// el carril PRIMARY sigue libre porque ya no hay reloj de audio que asignar.
 
 // ============ P1: endurecimiento anti-loteria de strobes (2026-07-11) ============
 // Los samplers negedge de RD/WR del T80 y su primer LUT se FIJAN en el centroide

@@ -57,11 +57,10 @@ create_clock -name eng_clk375 -period 26.666 [get_pins {pll_main/u_pll/PLLA_inst
 # bus_reset_n y clk_audio clockean FFs propios (gated); VideoDH/DLClk (÷2/÷4 de
 # 27) fasan el secuenciador de memoria.
 create_clock -name clock_reset -period 277.778 [get_nets {bus_reset_n}] -add
-# v3.0 VIDEO720: clk_audio = divisor a 44.1 kHz dentro de msx2hdmi. El
-# packet_picker de hdl-util cruza clk_audio<->clk_pixel con SU PROPIO handshake
-# (audio_sample_word_transfer) tolerante a fase — mismo caso que la false_path
-# del SDC viejo. Se declara y se agrupa ASINCRONO (ambas direcciones).
-create_clock -name clock_audio -period 22675.737 [get_nets {vdp4/u_msx2hdmi/clk_audio}] -add
+# v3.0 VIDEO720 / _127I: el clk_audio de fabric YA NO EXISTE — el audio del
+# puente corre con clock-enable sincrono a clk_pixel (fix del bug #14: el
+# reloj de fabric con LOCAL_CLOCK tenia skew sin garantias => CTS corrupto).
+# El create_clock clock_audio y su grupo asincrono quedan RETIRADOS.
 create_generated_clock -name clock_VideoDHClk -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}] -master_clock clk_27m -divide_by 2 [get_nets {VideoDHClk}] -add
 create_generated_clock -name clock_VideoDLClk -source [get_pins {pll_main/u_pll/PLLA_inst/CLKOUT2}] -master_clock clk_27m -divide_by 4 [get_nets {VideoDLClk}] -add
 
@@ -72,7 +71,7 @@ create_clock -name spi_sclk -period 50.000 [get_ports {spi_sclk}]
 # por este clock-group (el mux spi_ext del dock ya no existe). clock_audio se
 # queda SIN agrupar (sincrono a 27, como en el TN20K; su unico path critico
 # tiene false_path abajo).
-set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m clock_VideoDHClk clock_VideoDLClk eng_clk375}] -group [get_clocks {clock_reset}] -group [get_clocks {clk27_video clk_hdmi clk_hdmi5}] -group [get_clocks {clock_audio}] -group [get_clocks {clk_usb12}]
+set_clock_groups -asynchronous -group [get_clocks {spi_sclk}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m clock_VideoDHClk clock_VideoDLClk eng_clk375}] -group [get_clocks {clock_reset}] -group [get_clocks {clk27_video clk_hdmi clk_hdmi5}] -group [get_clocks {clk_usb12}]
 # v3.0: el grupo de video 720p es ASINCRONO al arbol del MSX por construccion:
 # los unicos cruces son la BRAM dual-clock del ring, los toggles 2FF y el audio
 # 2FF de msx2hdmi (patron smstang/486tang).
