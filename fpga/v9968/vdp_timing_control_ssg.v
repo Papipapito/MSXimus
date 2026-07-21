@@ -124,7 +124,7 @@ module vdp_timing_control_ssg (
 	wire		[ 7:0]	w_pixel_pos_y;
 	reg			[13:0]	ff_screen_pos_x;			/* synthesis syn_preserve = 1 */
 	reg			[13:0]	ff_screen_pos_x_clone;		/* synthesis syn_preserve = 1 */
-	reg			[13:0]	ff_screen_pos_x_sprite;		/* synthesis syn_preserve = 1 */
+	reg			[13:0]	ff_screen_pos_x_sprite;		/* synthesis syn_preserve = 1 syn_maxfan = 8 */	// _127B: familia reincidente (3/5 dados)
 	reg			[ 9:0]	ff_screen_pos_y;
 	reg			[ 8:0]	ff_pixel_pos_x;
 	reg			[ 7:0]	ff_pixel_pos_y;
