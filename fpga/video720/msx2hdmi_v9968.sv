@@ -479,7 +479,10 @@ module msx2hdmi_v9968 (
     // irrelevante (el dato cruza por audio_sample_word y el modulo hdmi
     // empaqueta por muestra).
     reg  [26:0] audio_acc = 27'd0;
-    logic clk_audio = 1'b0;
+    // syn_preserve: el SDC cuelga clock_audio68 del pin clk_audio_s0/Q —
+    // sin preserve la sintesis renombro el FF con el acumulador y el PnR
+    // murio con TA2004 'Cannot get clock' (las 3 builds 823/827/829).
+    logic clk_audio = 1'b0 /* synthesis syn_preserve = 1 */;
 
     always_ff @(posedge clk_pixel) begin : audio_div_frac
         reg [27:0] acc_n;
