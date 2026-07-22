@@ -750,19 +750,30 @@ always @(posedge clk_vdp or negedge rst_n) begin
             pfq[pfq_wp] <= obl_w_d;
             pfq_wp <= pfq_wp + 3'd1;
         end
-        // _127J-c: eco del miss — MINIMA prioridad: solo en ciclos sin
-        // ningun otro pusher y con hueco (espera lo que haga falta).
-        else if (mecho_v && !pfq_full) begin
-            pfq[pfq_wp] <= mecho_w;
-            pfq_wp <= pfq_wp + 3'd1;
-            mecho_v <= 1'b0;
-        end
+        // (_127J-c v2: el eco YA NO empuja aqui — el 4o brazo del mux de
+        // pfq resucito las familias criticas de placement (15 dados
+        // seguidos violando). Ahora monta en el registro pfB, mas abajo.)
 `ifdef SHIM_DBG_DROPS
         if ((obl_do || pfB_pend) && pfq_full)
             $display("DROP S1_pfq_full t=%0t A=%b:%h B=%b:%h", $time, obl_do, obl_w_d, pfB_pend, pfB_wr);
         else if (obl_do && pfB_pend && (pfq_wp + 3'd2 == pfq_rp))
             $display("DROP S1b_room1_pierde_A t=%0t A=%h", $time, obl_w_d);
 `endif
+
+        // ---------- _127J-c v2: el eco monta en pfB cuando queda libre ----
+        // Ultima palabra sobre pfB en el ciclo: si ningun escritor real lo
+        // reclamo (rescate/miss/re-siembra ya corrieron arriba), el eco lo
+        // toma. El push de pfq conserva su estructura de 3 brazos de la
+        // _127I (que cerraba timing a la primera).
+        // Guard anti-carrera: los escritores reales de pfB (rescate y
+        // semilla del miss) corren SOLO bajo spr_p1&&C_BG — en esos ciclos
+        // el eco NO toca pfB (la asignacion posterior ganaria y pisaria la
+        // semilla real del mismo ciclo, invisible en lectura NBA).
+        if (!pfB_pend && mecho_v && !(spr_p1 && spr_tag1[4:2] == C_BG)) begin
+            pfB_pend <= 1'b1;
+            pfB_wr   <= mecho_w;
+            mecho_v  <= 1'b0;
+        end
 
         // ---------- aceptar peticion del VDP ----------
         if (vram_valid) begin
