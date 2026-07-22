@@ -1773,7 +1773,17 @@ assign keyboard_addr = ppi_port_c[3:0];
         .clk_x1_out(vddr_clk_x1), .ready(vddr_ready), .diag(vddr_diag),
         .recal_req(1'b0),
         .clk_27(clk27_video),      // misma topologia que wave_ddr3/_86
-        .clk_g50(ex_clk_27m),      // pad de 50MHz (mal llamado)
+        // _128Z — LA CAUSA (regla estructural confirmada en HW por alanswx
+        // en ESTA MISMA placa, Arcade-MCR2-TangFPGA): el reloj del
+        // controlador/mDRP de la IP DDR3 DEBE venir de una SALIDA DE PLL,
+        // nunca del pad crudo; desde el pad el PnR lo rutea por recursos
+        // genericos (PR1014) y "la IP NUNCA ENTRENA" = calibracion que no
+        // completa jamas, que es EXACTAMENTE nuestro sintoma. Nuestro log
+        // lo gritaba: "PR1014: Generic routing ... 'ex_clk_27m_d'".
+        // clk_54m es salida del PLLA principal (CLKOUT1) con arbol de reloj
+        // dedicado. 54 vs 50 MHz: los contadores de POR/watchdog quedan un
+        // 7% mas cortos — irrelevante.
+        .clk_g50(clk_54m),
         .pll27_lock(pll27_lock),
         .ddr_addr(ddr_addr), .ddr_bank(ddr_bank), .ddr_cs(ddr_cs),
         .ddr_ras(ddr_ras), .ddr_cas(ddr_cas), .ddr_we(ddr_we),
