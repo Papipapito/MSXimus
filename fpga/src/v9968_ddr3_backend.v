@@ -107,19 +107,23 @@ always @(posedge clk_g50) begin
     else if (rc_cnt != 9'd0)     rc_cnt <= rc_cnt - 9'd1;
 end
 
-// _87: watchdog de calibracion (~42ms)
-reg [21:0] wd_cnt = 22'd0;
+// _87: watchdog de calibracion. _128Y: ALARGADO a 2^24 ciclos (~335ms; era
+// 2^21 = 42ms) — si la calibracion de ESTA placa necesitara mas de 42ms, el
+// watchdog la estaba MATANDO en bucle eterno (justo el sintoma observado:
+// wd_fires saturado y calib nunca completa). Con 335ms cabe cualquier
+// calibracion razonable y el reintento sigue existiendo.
+reg [24:0] wd_cnt = 25'd0;
 reg        wd_rst = 1'b0;
 wire       init_calib_complete;
 wire       ip_rst_n = ~(wd_rst | rc_pulse);
 always @(posedge clk_g50) begin
     if (init_calib_complete || !por_done) begin
-        wd_cnt <= 22'd0;
+        wd_cnt <= 25'd0;
         wd_rst <= 1'b0;
     end
     else begin
-        wd_cnt <= wd_cnt + 22'd1;
-        wd_rst <= (wd_cnt[21] && (wd_cnt[20:8] == 13'd0));
+        wd_cnt <= wd_cnt + 25'd1;
+        wd_rst <= (wd_cnt[24] && (wd_cnt[23:8] == 16'd0));
     end
 end
 
@@ -179,6 +183,8 @@ end
 // ---------------------------------------------------------------------------
 wire         clk_x1;
 wire         ddr_rst;
+wire [13:0]  ddr_addr_ip;                // _128Y: la IP solo saca 14 bits
+assign ddr_addr = {1'b0, ddr_addr_ip};   // A14 CONDUCIDA A 0 (no flotante)
 
 wire         app_rdy;
 reg          app_en;
@@ -219,7 +225,14 @@ DDR3_Memory_Interface_Top u_ddr3 (
     .pll_lock        (pll_lock),
     .burst           (1'b1),
     .ddr_rst         (ddr_rst),
-    .O_ddr_addr      (ddr_addr),
+    // _128Y: la IP saca 14 bits (O_ddr_addr[13:0]) pero la placa tiene 15
+    // lineas (A14 = pin D1). Conectando el bus de 15 al puerto de 14, el
+    // BIT 14 QUEDABA FLOTANDO (WARN EX3670 en el log, ignorado desde la
+    // era wave _86): una linea de direccion flotante en una DDR3 la lee el
+    // chip como ruido y puede cambiar POR ARRANQUE — sospechoso numero uno
+    // de la "loteria del ojo" de la saga _94-_103. Ahora A14 se conduce a 0
+    // explicitamente (la IP direcciona 14 bits de fila: A14 no se usa).
+    .O_ddr_addr      (ddr_addr_ip),
     .O_ddr_ba        (ddr_bank),
     .O_ddr_cs_n      (ddr_cs),
     .O_ddr_ras_n     (ddr_ras),
@@ -266,7 +279,29 @@ always @(posedge clk_x1) begin
     if (init_calib_complete) calib_seen <= 1'b1;
     if (calib_seen && !init_calib_complete) calib_drop <= 1'b1;
 end
-assign diag = {calib_drop, wd_fires, wd_ops};
+// _128Y: telemetria AMPLIADA para localizar el bloqueo exacto. El byte pasa
+// a ser {clkx1_vivo, pll_lock, por_done, calib_ever, wd_fires[2:0], ovf} —
+// asi se distingue "el PLL no engancha" de "la IP no arranca su reloj" de
+// "el PHY no calibra" (que es lo unico realmente fisico).
+reg [3:0] x1_tick = 4'd0;               // contador libre en clk_x1
+always @(posedge clk_x1) x1_tick <= x1_tick + 4'd1;
+reg [2:0] x1_s = 3'd0;                  // ¿late clk_x1? (visto desde g50)
+reg [7:0] x1_win = 8'd0;
+reg       x1_alive = 1'b0;
+always @(posedge clk_g50) begin
+    x1_s <= {x1_s[1:0], x1_tick[3]};
+    x1_win <= x1_win + 8'd1;
+    if (x1_s[2] != x1_s[1]) x1_alive <= 1'b1;   // pegajoso: hubo actividad
+end
+reg pll_lock_s1 = 1'b0, pll_lock_s2 = 1'b0;
+always @(posedge clk_g50) begin
+    pll_lock_s1 <= pll_lock; pll_lock_s2 <= pll_lock_s1;
+end
+reg calib_ever_g = 1'b0;
+always @(posedge clk_g50) if (init_calib_complete) calib_ever_g <= 1'b1;
+
+assign diag = {x1_alive, pll_lock_s2, por_done, calib_ever_g,
+               wd_fires, calib_drop};
 assign ready = init_calib_complete;    // mismo dominio que los canales
 
 always @(posedge clk_x1 or posedge ddr_rst) begin
