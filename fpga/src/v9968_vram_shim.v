@@ -198,16 +198,10 @@ reg [15:0] wk_tgt;                       // objetivo del walk REGISTRADO (el
                                          // registrado es identico; 9 dados
                                          // seguidos violando las familias
                                          // cronicas con el sumador en linea)
-// _127J-c ECO DEL MISS: la radiografia BGMISS enseno que el residuo del
-// scroll H es UN miss por linea y stream, SIEMPRE en la misma columna
-// relativa (la palabra s+1 del bloque, s = offset del scroll): un agujero
-// que el caminante no tapa y que se REPITE identico linea a linea. Como la
-// linea N+1 fallara en (miss_addr + stride), cada miss siembra ese eco por
-// un tercer camino de MINIMA prioridad del push de pfq (+1 fetch por miss,
-// ~2 por linea: calderilla). La cadena de misses se auto-extingue.
-reg        mecho_v;
-reg [15:0] mecho_w;
-reg [12:0] mgap;                         // ciclos desde el ultimo miss bg
+// (_127J-c ECO DEL MISS: RETIRADO para la build — con el eco en el
+// netlist las familias cronicas de placement violaron 24 dados
+// seguidos (_127I sin el cerro a la primera). El eco vive en git
+// (5825684) para reintentarlo tras entender la loteria.)
 // (_127J-b, RETIRADO: un "pre-calentador de vblank" con detector de hueco
 // resulto CODIGO MUERTO — la radiografia de deltas entre wraps demostro que
 // el V9968 fetchea bg de forma CONTINUA tambien durante el blanking, solo
@@ -512,7 +506,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
         bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0; obl_walked <= 0;
-        mecho_v <= 0; mecho_w <= 0; mgap <= 0;
         obl_w_c <= 0; obl_w_d <= 0;
         bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0; pkov_p <= 0;
         pfB_pend <= 0; pfB_wr <= 0;
@@ -594,7 +587,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
                                          // suben (asignacion posterior gana)
 
-        if (!mgap[12]) mgap <= mgap + 13'd1;   // _127J-c (el miss lo resetea)
 
         // ---------- _127: aprendizaje de la zancada (wrap POR STREAM) ----
         if (spr_p1 && spr_tag1[4:2] == C_BG) begin : stride_learn
@@ -686,17 +678,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
 `ifdef SHIM_DBG_DROPS
                     $display("BGMISS addr=%h t=%0t", spr_addr1, $time);
 `endif
-                    // _127J-c: eco del miss hacia la linea siguiente. SOLO
-                    // para misses ESPACIADOS (>=4096 ciclos ~48us = patron
-                    // estacionario 1-miss-por-linea del scroll H): las OLAS
-                    // de un cambio de registro (huecos minimos) no ecoan —
-                    // sin este discriminador la pfq se llenaba de ecos y los
-                    // drops mataban semillas reales (vscroll 912 -> 15630).
-                    if (stride != 16'd0 && !mecho_v && mgap[12]) begin
-                        mecho_v <= 1'b1;
-                        mecho_w <= spr_addr1 + stride;
-                    end
-                    mgap <= 13'd0;
                     bg_miss <= bg_miss + 8'd1;
                     c_miss  <= c_miss + 32'd1;
                     pfB_pend <= 1'b1;            // semilla +1 (registrada; si
@@ -759,21 +740,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
         else if (obl_do && pfB_pend && (pfq_wp + 3'd2 == pfq_rp))
             $display("DROP S1b_room1_pierde_A t=%0t A=%h", $time, obl_w_d);
 `endif
-
-        // ---------- _127J-c v2: el eco monta en pfB cuando queda libre ----
-        // Ultima palabra sobre pfB en el ciclo: si ningun escritor real lo
-        // reclamo (rescate/miss/re-siembra ya corrieron arriba), el eco lo
-        // toma. El push de pfq conserva su estructura de 3 brazos de la
-        // _127I (que cerraba timing a la primera).
-        // Guard anti-carrera: los escritores reales de pfB (rescate y
-        // semilla del miss) corren SOLO bajo spr_p1&&C_BG — en esos ciclos
-        // el eco NO toca pfB (la asignacion posterior ganaria y pisaria la
-        // semilla real del mismo ciclo, invisible en lectura NBA).
-        if (!pfB_pend && mecho_v && !(spr_p1 && spr_tag1[4:2] == C_BG)) begin
-            pfB_pend <= 1'b1;
-            pfB_wr   <= mecho_w;
-            mecho_v  <= 1'b0;
-        end
 
         // ---------- aceptar peticion del VDP ----------
         if (vram_valid) begin
