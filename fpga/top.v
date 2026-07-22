@@ -29,6 +29,7 @@
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
 //`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
+//`define ENABLE_VRAM_DDR3   // _128X EXPERIMENTO: la VRAM del V9968 en la DDR3 del SOM (v9968_ddr3_backend; requiere ENABLE_V9968_VDP y USE_VRAM_DDR3=1 en build.tcl). ADVERTENCIA: DDR3 analogicamente marginal en esta placa (saga _94-_103)
 //`define DISABLE_BOOT_MENU  // _127D: arranque MSX DIRECTO (enmascara la firma AB del menu; tambien salta el init FM de esa pagina). Solo builds de prueba.
 
 module top
@@ -1730,6 +1731,57 @@ assign keyboard_addr = ppi_port_c[3:0];
         .dbg_miss(v68dbg_miss), .dbg_bka(v68dbg_bka), .dbg_bkb(v68dbg_bkb),
         .dbg_park(v68dbg_park)
     );
+`ifdef ENABLE_VRAM_DDR3
+    // ==== EXPERIMENTO _128X: la VRAM del V9968 vive en la DDR3 del SOM ====
+    // Los MISMOS bridges CDC, con el lado far a clk_x1 (74.25, lo genera la
+    // IP DDR3) y hablando con v9968_ddr3_backend en vez de memory.v. Los
+    // puertos wv2/wv3 de memory.v quedan inertes (reqs a 0, abajo). El shim
+    // NO se toca. ADVERTENCIA saga _94-_103: la DDR3 de esta placa es
+    // analogicamente marginal (loteria de calibracion) — telemetria
+    // vddr_diag en cnt_c[23:16] del COM11.
+    wire        vddr_clk_x1;
+    wire        vddr_a_req, vddr_a_we, vddr_b_req;
+    wire [21:0] vddr_a_addr, vddr_b_addr;
+    wire [7:0]  vddr_a_wdata;
+    wire [15:0] vddr_a_dout, vddr_b_dout;
+    wire        vddr_a_done, vddr_b_done;
+    wire        vddr_ready;
+    wire [7:0]  vddr_diag;
+
+    v9968_sdram_bridge u_v68bridge (
+        .clk_vdp(clk_86), .rst_n(rst86_n),
+        .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
+        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .clk_108m(vddr_clk_x1),
+        .wv2_req(vddr_a_req), .wv2_we(vddr_a_we), .wv2_addr(vddr_a_addr),
+        .wv2_wdata(vddr_a_wdata), .wv2_dout(vddr_a_dout), .wv2_done(vddr_a_done)
+    );
+    v9968_sdram_bridge u_v68bridge2 (
+        .clk_vdp(clk_86), .rst_n(rst86_n),
+        .bk_req(v68bk2_req), .bk_we(1'b0), .bk_addr(v68bk2_addr),
+        .bk_wdata(8'd0), .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
+        .clk_108m(vddr_clk_x1),
+        .wv2_req(vddr_b_req), .wv2_we(), .wv2_addr(vddr_b_addr),
+        .wv2_wdata(), .wv2_dout(vddr_b_dout), .wv2_done(vddr_b_done)
+    );
+
+    v9968_ddr3_backend u_vddr3 (
+        .a_req(vddr_a_req), .a_we(vddr_a_we), .a_addr(vddr_a_addr),
+        .a_wdata(vddr_a_wdata), .a_dout(vddr_a_dout), .a_done(vddr_a_done),
+        .b_req(vddr_b_req), .b_addr(vddr_b_addr),
+        .b_dout(vddr_b_dout), .b_done(vddr_b_done),
+        .clk_x1_out(vddr_clk_x1), .ready(vddr_ready), .diag(vddr_diag),
+        .recal_req(1'b0),
+        .clk_27(clk27_video),      // misma topologia que wave_ddr3/_86
+        .clk_g50(ex_clk_27m),      // pad de 50MHz (mal llamado)
+        .pll27_lock(pll27_lock),
+        .ddr_addr(ddr_addr), .ddr_bank(ddr_bank), .ddr_cs(ddr_cs),
+        .ddr_ras(ddr_ras), .ddr_cas(ddr_cas), .ddr_we(ddr_we),
+        .ddr_ck(ddr_ck), .ddr_ck_n(ddr_ck_n), .ddr_cke(ddr_cke),
+        .ddr_odt(ddr_odt), .ddr_reset_n(ddr_reset_n), .ddr_dm(ddr_dm),
+        .ddr_dq(ddr_dq), .ddr_dqs(ddr_dqs), .ddr_dqs_n(ddr_dqs_n)
+    );
+`else
     v9968_sdram_bridge u_v68bridge (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
@@ -1746,6 +1798,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         .wv2_req(wv3_req), .wv2_we(wv3_we), .wv2_addr(wv3_addr),
         .wv2_wdata(wv3_wdata), .wv2_dout(wv3_dout), .wv2_done(wv3_done)
     );
+`endif
 
     // ---- puente de video 800px -> HDMI 720p (back-end TMDS intacto) ----
     // _127H: telemetria del audio — eventos de reset del HDMI y toggles del
@@ -2019,6 +2072,18 @@ assign wv3_req   = 1'b0;
 assign wv3_we    = 1'b0;
 assign wv3_addr  = 22'd0;
 assign wv3_wdata = 8'd0;
+`else
+`ifdef ENABLE_VRAM_DDR3
+// _128X: la VRAM vive en la DDR3 — los puertos wv2/wv3 de memory.v inertes
+assign wv2_req   = 1'b0;
+assign wv2_we    = 1'b0;
+assign wv2_addr  = 22'd0;
+assign wv2_wdata = 8'd0;
+assign wv3_req   = 1'b0;
+assign wv3_we    = 1'b0;
+assign wv3_addr  = 22'd0;
+assign wv3_wdata = 8'd0;
+`endif
 `endif
 
 memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
@@ -2920,7 +2985,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wv_done    (wv_done)
     );
 
-    // pines DDR3 del SOM en reposo seguro (la IP y su PLL fuera del build)
+`ifndef ENABLE_VRAM_DDR3
+    // pines DDR3 del SOM en reposo seguro (la IP y su PLL fuera del build;
+    // con _128X los conduce u_vddr3 — la VRAM del V9968 vive alli)
     assign ddr_addr = 15'd0;  assign ddr_bank = 3'd0;
     assign ddr_cs = 1'b1;     assign ddr_ras = 1'b1;
     assign ddr_cas = 1'b1;    assign ddr_we = 1'b1;
@@ -2928,6 +2995,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign ddr_cke = 1'b0;    assign ddr_odt = 1'b0;
     assign ddr_reset_n = 1'b0; assign ddr_dm = 2'b11;
     assign ddr_dq = 16'hzzzz; assign ddr_dqs = 2'bzz; assign ddr_dqs_n = 2'bzz;
+`endif
 `else
     assign wdbg_rd34_w = 1'b0;
     assign wdbg_rd35_w = 1'b0;
@@ -2936,7 +3004,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign wdbg_status = 8'hFF;
     assign wdbg_rdata  = 8'hFF;
     assign wdbg_diag_ddr3 = 8'hFF;
-    // DDR3 en reposo seguro
+`ifndef ENABLE_VRAM_DDR3
+    // DDR3 en reposo seguro (con _128X los pines los conduce u_vddr3)
     assign ddr_addr = 15'd0;  assign ddr_bank = 3'd0;
     assign ddr_cs = 1'b1;     assign ddr_ras = 1'b1;
     assign ddr_cas = 1'b1;    assign ddr_we = 1'b1;
@@ -2944,6 +3013,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign ddr_cke = 1'b0;    assign ddr_odt = 1'b0;
     assign ddr_reset_n = 1'b0; assign ddr_dm = 2'b11;
     assign ddr_dq = 16'hzzzz; assign ddr_dqs = 2'bzz; assign ddr_dqs_n = 2'bzz;
+`endif
 `endif
 
     // ===== MoonSound FM (_82): OPL3 en C4-C7 + stub wave 7E/7F =====
@@ -4245,7 +4315,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .clk(clk_54m), .rst_n(bus_reset_n),
         .cnt_a(v68dbg_miss),
         .cnt_b({aud_rst_cnt, aud_lock_cnt}),      // _127H: {resets HDMI, toggles lock}
+`ifdef ENABLE_VRAM_DDR3
+        // _128X: los 8 bits libres [23:16] llevan el diag de la DDR3
+        // ({calib_drop, wd_fires[2:0], wd_ops[3:0]}); sano = 00
+        .cnt_c({v68_dbg_apkt[31:24], vddr_diag, v68_dbg_apkt[15:0]}),
+`else
         .cnt_c(v68_dbg_apkt),                     // _127I: {ovr, 0, paquetes_audio}
+`endif
         .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
         .cnt_e(v68dbg_park),                      // _124: {pisadas, drenajes} del park
         .tx(usb_uart_tx_int)

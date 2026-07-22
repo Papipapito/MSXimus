@@ -114,6 +114,7 @@ add_file src/wondertang/sdcmd_ctrl.sv
 # puentes los usan); el arbol tn_vdp solo entra en el build clasico
 # (colision de nombre vdp/VDP con el core V9968 + ahorro de CLS).
 set USE_V9968 0
+set USE_VRAM_DDR3 0
 add_file tn_vdp_v3_v9958/src/hdmi/audio_clock_regeneration_packet.sv
 add_file tn_vdp_v3_v9958/src/hdmi/audio_info_frame.sv
 add_file tn_vdp_v3_v9958/src/hdmi/audio_sample_packet.sv
@@ -157,6 +158,15 @@ if {$USE_V9968} {
     add_file src/v9968_cpu_glue.v
     add_file src/pll_86.v
     add_file video720/msx2hdmi_v9968.sv
+    # _128X (USE_VRAM_DDR3): VRAM del V9968 en la DDR3 del SOM — IP + PLL 297
+    # + danza mDRP (los mismos ficheros de la era wave _86) + backend nuevo.
+    # El define ENABLE_VRAM_DDR3 de top.v gobierna el RTL; esto solo compila.
+    if {$USE_VRAM_DDR3} {
+        add_file ddr3/ddr3_memory_interface.v
+        add_file ddr3/pll_ddr3.v
+        add_file ddr3/pll_mDRP_intf.v
+        add_file src/v9968_ddr3_backend.v
+    }
 }
 add_file top.v
 
@@ -264,6 +274,14 @@ if {$USE_V9968} {
     set fp_o [open constraints/msx_v9968_combined.sdc w]
     puts $fp_o $sdc_f
     puts $fp_o $sdc_b
+    if {$USE_VRAM_DDR3} {
+        # _128X: relojes de la DDR3 (nombres/pines de la era wave _86 con la
+        # instancia u_vddr3). Solo cuando la IP esta en el build: con matches
+        # vacios el create_clock seria TA2003/TA2004.
+        puts $fp_o "create_clock -name ddr_clk4x -period 3.367 -waveform {0 1.684} \[get_pins {u_vddr3/pll_ddr3_inst/PLLA_inst/CLKOUT2}\]"
+        puts $fp_o "create_clock -name ddr_clk1x -period 13.47 -waveform {0 6.734} \[get_pins {u_vddr3/u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv/CLKOUT}\]"
+        puts $fp_o "set_clock_groups -asynchronous -group \[get_clocks {ddr_clk4x ddr_clk1x}\] -group \[get_clocks {clk_86}\] -group \[get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m eng_clk375}\] -group \[get_clocks {clk27_video clk_hdmi clk_hdmi5}\]"
+    }
     close $fp_o
     add_file constraints/msx_v9968_combined.sdc
 } else {
