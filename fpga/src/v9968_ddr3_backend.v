@@ -156,9 +156,15 @@ end
 reg [24:0] wd_cnt = 25'd0;
 reg        wd_rst = 1'b0;
 wire       init_calib_complete;
-// _129: la IP NO sale de reset hasta que su reloj de memoria existe y esta
-// asentado (ver arriba). Antes: ~(wd_rst | rc_pulse) = 1 desde el ciclo 0.
-wire       ip_rst_n = settle_done & ~(wd_rst | rc_pulse);
+// _129d ⚠ VEREDICTO HW: retener la IP hasta settle_done ROMPE la
+// calibracion en esta placa (HW: _128Z sin retener CALIBRABA; _129/b/c
+// reteniendo = PHY-NO-CALIBRA). La causa es la MISMA trampa del PLL: como
+// la IP para el PLL durante su propio arranque (GW5A sin enclk), esperar un
+// lock estable antes de soltar la IP es un pulso-muerto que no converge.
+// Se VUELVE al esquema _128Z (probado que calibra): la IP sale de reset ya
+// (solo la frenan el watchdog y la recalibracion forzada). settle_* queda
+// SOLO para telemetria (no gobierna el reset).
+wire       ip_rst_n = ~(wd_rst | rc_pulse);
 always @(posedge clk_g50) begin
     if (init_calib_complete || !por_done) begin
         wd_cnt <= 25'd0;
