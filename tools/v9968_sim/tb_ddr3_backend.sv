@@ -208,6 +208,26 @@ module tb_ddr3_backend;
         end
         $display("T5 rafaga OK (sin cuelgue)");
 
+        // T7 (_130): COHERENCIA DE LA CACHE DE LINEA — leer palabra (llena
+        // la cache), escribir un byte de ESA linea, releer: debe verse el
+        // byte nuevo (la escritura actualiza la linea cacheada, no solo la
+        // DDR3). Por los DOS canales.
+        op_a(1'b0, BASE + 22'h20, 8'h00, rw);          // llena clA
+        op_b_rd(BASE + 22'h24, rw);                    // llena clB (misma linea? 0x24>>4==0x2 si, misma)
+        op_a(1'b1, BASE + 22'h21, 8'h5A, rw);          // escribe byte impar
+        ref_mem[BASE + 22'h21] = 8'h5A;
+        op_a(1'b0, BASE + 22'h20, 8'h00, rw);          // hit clA: ¿byte nuevo?
+        if (rw !== ref_word(BASE + 22'h20)) begin
+            $display("FALLO T7a coherencia clA: leido=%h esp=%h", rw, ref_word(BASE + 22'h20));
+            errores++;
+        end
+        op_b_rd(BASE + 22'h20, rw);                    // hit clB de la misma linea
+        if (rw !== ref_word(BASE + 22'h20)) begin
+            $display("FALLO T7b coherencia clB: leido=%h esp=%h", rw, ref_word(BASE + 22'h20));
+            errores++;
+        end
+        $display("T7 coherencia cache OK");
+
         // T6: watchdog _95 — el modelo deja de responder lecturas
         dut.u_ddr3.fail_mode = 1;
         op_a(1'b0, BASE, 8'h00, rw);

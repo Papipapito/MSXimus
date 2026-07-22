@@ -87,109 +87,41 @@ module v9968_ddr3_backend (
     inout  wire [1:0]  ddr_dqs_n
 );
 
-// ---------------------------------------------------------------------------
-// POR + lock del arbol de 27 (_87) — verbatim de wave_ddr3
-// ---------------------------------------------------------------------------
-reg [15:0] por_cnt = 16'd0;
-reg        por_done = 1'b0;
-always @(posedge clk_g50) begin
-    if (!por_done) begin
-        if (pll27_lock) begin
-            por_cnt <= por_cnt + 16'd1;
-            if (&por_cnt) por_done <= 1'b1;
-        end
-        else por_cnt <= 16'd0;
-    end
-end
+// _130 FIDELIDAD ddr3_framebuffer (nand2mario, PROBADO con imagen en esta
+// placa, IP byte-identica sha d5ca815e): NADA de POR, NADA de watchdog de
+// calibracion, NADA de settle. Su receta exacta:
+//   * pll_ddr3.reset = ~pll27_lock  (solo mientras el arbol de 27 arranca)
+//   * IP rst_n = 1'b1               (UN intento de calibracion con tiempo
+//                                    infinito; "occasionally fails;
+//                                    power-cycle to retry")
+//   * clk/mdclk = pad de 50MHz      (como el)
+// Las _129* demostraron en HW que CUALQUIER intervencion sobre el reset
+// durante el arranque (POR, settle, watchdog corto) mata la calibracion:
+// la IP para su PLL a proposito mientras entrena y toda logica que
+// interprete esa caida como fallo entra en bucle.
 
-// _100: recalibracion forzada (toggle -> pulso de 256 ciclos)
-reg  rc_s1 = 1'b0, rc_s2 = 1'b0, rc_s3 = 1'b0;
-reg  [8:0] rc_cnt = 9'd0;
-wire rc_pulse = (rc_cnt != 9'd0);
-always @(posedge clk_g50) begin
-    rc_s1 <= recal_req; rc_s2 <= rc_s1; rc_s3 <= rc_s2;
-    if (rc_s3 != rc_s2)          rc_cnt <= 9'd256;
-    else if (rc_cnt != 9'd0)     rc_cnt <= rc_cnt - 9'd1;
-end
+// (_100 recalibracion forzada: RETIRADA en _130 — implicaba resetear la
+// IP, y la fidelidad manda. El puerto recal_req queda sin uso.)
+wire rc_unused = recal_req;
 
-// _129 SECUENCIA DE RESET DE LA IP (causa raiz documentada por a2fpga en
-// este mismo chip, commits a302d566 y 79f4afc1): hasta ahora ip_rst_n valia
-// 1 DESDE EL INSTANTE 0, mientras el PLL de 297MHz seguia en reset ~1.3ms
-// => la IP arrancaba su calibracion SIN memory_clk. En sus palabras: "la
-// calibracion era un unico disparo sin secuenciar compitiendo con el lock
-// del PLL, y fallar era PERMANENTE". Ahora la IP se mantiene en reset hasta
-// (a) POR completo, (b) PLL enganchado y (c) 65536 ciclos de asentado
-// (~1.2ms) DESPUES del lock. Su receta: settle 1ms, watchdog 100ms.
-wire       pll_lock;                    // declarado aqui: lo usa el reset
+// telemetria pasiva del lock (no gobierna nada)
+wire pll_lock;
 reg pll_lk_s1 = 1'b0, pll_lk_s2 = 1'b0;
-reg [15:0] settle_cnt  = 16'd0;
-reg        settle_done = 1'b0;
-// _129c ⚠ LECCION CARA: settle_done es de UN SOLO DISPARO. La version _129
-// lo limpiaba cuando caia pll_lock — pero el GW5A NO tiene enclk en su
-// PLLA, asi que LA IP PARA EL PLL A PROPOSITO durante la calibracion (esa
-// es toda la funcion de la danza mDRP, IPUG281 4.4.4). Con la version
-// anterior, esa caida LEGITIMA del lock reiniciaba el asentado y volvia a
-// meter la IP en reset EN MITAD del entrenamiento: bucle eterno
-// (HW: _128Z calibraba, _129/_129b "PHY-NO-CALIBRA"). Ahora solo el POR o
-// una recalibracion forzada pueden rearmarlo.
 always @(posedge clk_g50) begin
     pll_lk_s1 <= pll_lock;
     pll_lk_s2 <= pll_lk_s1;
-    if (!por_done || rc_pulse) begin
-        settle_cnt  <= 16'd0;
-        settle_done <= 1'b0;
-    end
-    else if (!settle_done) begin
-        if (pll_lk_s2) begin
-            settle_cnt <= settle_cnt + 16'd1;
-            if (&settle_cnt) settle_done <= 1'b1;
-        end
-        else settle_cnt <= 16'd0;      // aun sin enganchar: esperar
-    end
 end
 
-// _87: watchdog de calibracion. _128Y: ALARGADO a 2^24 ciclos (~335ms; era
-// 2^21 = 42ms) — si la calibracion de ESTA placa necesitara mas de 42ms, el
-// watchdog la estaba MATANDO en bucle eterno (justo el sintoma observado:
-// wd_fires saturado y calib nunca completa). Con 335ms cabe cualquier
-// calibracion razonable y el reintento sigue existiendo.
-reg [24:0] wd_cnt = 25'd0;
-reg        wd_rst = 1'b0;
 wire       init_calib_complete;
-// _129d ⚠ VEREDICTO HW: retener la IP hasta settle_done ROMPE la
-// calibracion en esta placa (HW: _128Z sin retener CALIBRABA; _129/b/c
-// reteniendo = PHY-NO-CALIBRA). La causa es la MISMA trampa del PLL: como
-// la IP para el PLL durante su propio arranque (GW5A sin enclk), esperar un
-// lock estable antes de soltar la IP es un pulso-muerto que no converge.
-// Se VUELVE al esquema _128Z (probado que calibra): la IP sale de reset ya
-// (solo la frenan el watchdog y la recalibracion forzada). settle_* queda
-// SOLO para telemetria (no gobierna el reset).
-wire       ip_rst_n = ~(wd_rst | rc_pulse);
-always @(posedge clk_g50) begin
-    if (init_calib_complete || !por_done) begin
-        wd_cnt <= 25'd0;
-        wd_rst <= 1'b0;
-    end
-    else begin
-        wd_cnt <= wd_cnt + 25'd1;
-        wd_rst <= (wd_cnt[24] && (wd_cnt[23:8] == 16'd0));
-    end
-end
+// _130: FIEL — la IP nunca se resetea (nand2mario .rst_n(1'b1))
+wire       ip_rst_n = 1'b1;
 
-// _95: contar reintentos de calibracion
-reg        wd_rst_d  = 1'b0;
-reg [2:0]  wd_fires  = 3'd0;
-always @(posedge clk_g50) begin
-    wd_rst_d <= wd_rst;
-    if (wd_rst && !wd_rst_d && wd_fires != 3'd7) wd_fires <= wd_fires + 3'd1;
-end
 
 // ---------------------------------------------------------------------------
 // PLL 297MHz + danza mDRP — verbatim de wave_ddr3 (_101: la recal resetea
 // TAMBIEN el PLL: re-lock con fase nueva = billete de ojo INDEPENDIENTE)
 // ---------------------------------------------------------------------------
 wire memory_clk;
-// (pll_lock se declara arriba, junto a la secuencia de reset _129)
 wire pll_stop;
 wire        mdrp_inc;
 wire [1:0]  mdrp_op;
@@ -201,7 +133,7 @@ pll_ddr3 pll_ddr3_inst (
     .clkout0(),
     .clkout2(memory_clk),
     .clkin  (clk_27),
-    .reset  (~por_done | rc_pulse),
+    .reset  (~pll27_lock),        // _130 fiel: solo el arranque del arbol de 27
     .mdclk  (clk_g50),
     .mdopc  (mdrp_op),
     .mdainc (mdrp_inc),
@@ -321,6 +253,19 @@ reg [7:0]  op_wdata;
 reg [1:0] st;
 localparam ST_IDLE = 2'd0, ST_ISSUE = 2'd1, ST_WAITRD = 2'd2;
 
+// _130 CACHE DE LINEA (una linea de 128b por canal): el fetch bg del shim
+// es SECUENCIAL (pfq drena palabras consecutivas) => 8 palabras de 16b por
+// linea => tras el miss inicial, ~7 hits servidos EN 1 CICLO sin tocar la
+// DDR3. Trafico DDR3 /8 y el presupuesto de 730ns respira (el peor caso
+// refresh+write del informe F deja de ser por-palabra). Coherencia: las
+// escrituras (write-through) ACTUALIZAN el byte en las lineas cacheadas de
+// AMBOS canales si el tag casa (el VDP escribe VRAM constantemente).
+reg [127:0] clA_data, clB_data;
+reg [17:0]  clA_tag,  clB_tag;         // addr[21:4]
+reg         clA_v = 1'b0, clB_v = 1'b0;
+wire a_hit = clA_v && (a_addr[21:4] == clA_tag);
+wire b_hit = clB_v && (b_addr[21:4] == clB_tag);
+
 // _95: watchdog de operacion
 reg [16:0] op_wd;
 reg [3:0]  wd_ops;
@@ -348,8 +293,8 @@ end
 reg calib_ever_g = 1'b0;
 always @(posedge clk_g50) if (init_calib_complete) calib_ever_g <= 1'b1;
 
-assign diag = {x1_alive, pll_lk_s2, por_done, calib_ever_g,
-               wd_fires, calib_drop};
+assign diag = {x1_alive, pll_lk_s2, 1'b1, calib_ever_g,
+               3'b000, calib_drop};   // _130: sin POR ni watchdog
 
 // _129b: contadores de operaciones servidas (dominio clk_x1; el lector los
 // muestrea desde otro dominio — cuasi-estaticos, un tearing es irrelevante)
@@ -376,6 +321,9 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         op_b <= 1'b0; op_combo <= 1'b0; op_we <= 1'b0;
         op_addr <= 22'd0; op_baddr <= 22'd0; op_wdata <= 8'd0;
         op_wd <= 17'd0; wd_ops <= 4'd0;
+        clA_v <= 1'b0; clB_v <= 1'b0;
+        clA_tag <= 18'd0; clB_tag <= 18'd0;
+        clA_data <= 128'd0; clB_data <= 128'd0;
     end
     else begin
         app_en <= 1'b0;
@@ -390,18 +338,29 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         case (st)
         ST_IDLE:
             if (init_calib_complete) begin
-                if (a_req && !a_srv) begin
+                // _130: HITS de la cache de linea — servidos AQUI MISMO, sin
+                // tocar la DDR3 ni salir de IDLE (ambos canales pueden
+                // acertar el mismo ciclo). Solo lecturas.
+                if (a_req && !a_srv && !a_we && a_hit) begin
+                    a_dout <= clA_data[a_addr[3:1]*16 +: 16];
+                    a_done <= 1'b1; a_srv <= 1'b1;
+                end
+                if (b_req && !b_srv && b_hit) begin
+                    b_dout <= clB_data[b_addr[3:1]*16 +: 16];
+                    b_done <= 1'b1; b_srv <= 1'b1;
+                end
+                if (a_req && !a_srv && !(!a_we && a_hit)) begin
                     op_b    <= 1'b0;
                     op_we   <= a_we;
                     op_addr <= a_addr;           // payload estable: el bridge
                     op_wdata <= a_wdata;         // lo mantiene hasta el done
                     // combo: B pendiente, lectura, misma linea de 128b
-                    op_combo <= (!a_we && b_req && !b_srv
+                    op_combo <= (!a_we && b_req && !b_srv && !b_hit
                                  && b_addr[21:4] == a_addr[21:4]);
                     op_baddr <= b_addr;
                     st <= ST_ISSUE;
                 end
-                else if (b_req && !b_srv) begin
+                else if (b_req && !b_srv && !b_hit) begin
                     op_b    <= 1'b1;
                     op_we   <= 1'b0;
                     op_addr <= b_addr;
@@ -433,6 +392,12 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     app_wdf_data <= {16{op_wdata}};
                     app_wdf_mask <= ~(16'h0001 << op_addr[3:0]);
                     a_done <= 1'b1; a_srv <= 1'b1;   // write = fire&forget
+                    // _130: coherencia de la cache — actualizar el byte en
+                    // las lineas cacheadas de AMBOS canales si el tag casa
+                    if (clA_v && op_addr[21:4] == clA_tag)
+                        clA_data[op_addr[3:0]*8 +: 8] <= op_wdata;
+                    if (clB_v && op_addr[21:4] == clB_tag)
+                        clB_data[op_addr[3:0]*8 +: 8] <= op_wdata;
                     st <= ST_IDLE;
                 end
                 else begin
@@ -448,14 +413,19 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     b_dout <= app_rd_data[op_baddr[3:1]*16 +: 16];
                     a_done <= 1'b1; a_srv <= 1'b1;
                     b_done <= 1'b1; b_srv <= 1'b1;
+                    // _130: la linea aterriza en AMBAS caches
+                    clA_data <= app_rd_data; clA_tag <= op_addr[21:4]; clA_v <= 1'b1;
+                    clB_data <= app_rd_data; clB_tag <= op_addr[21:4]; clB_v <= 1'b1;
                 end
                 else if (op_b) begin
                     b_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
                     b_done <= 1'b1; b_srv <= 1'b1;
+                    clB_data <= app_rd_data; clB_tag <= op_addr[21:4]; clB_v <= 1'b1;
                 end
                 else begin
                     a_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
                     a_done <= 1'b1; a_srv <= 1'b1;
+                    clA_data <= app_rd_data; clA_tag <= op_addr[21:4]; clA_v <= 1'b1;
                 end
                 st <= ST_IDLE;
             end
