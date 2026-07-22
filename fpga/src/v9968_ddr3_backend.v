@@ -107,6 +107,31 @@ always @(posedge clk_g50) begin
     else if (rc_cnt != 9'd0)     rc_cnt <= rc_cnt - 9'd1;
 end
 
+// _129 SECUENCIA DE RESET DE LA IP (causa raiz documentada por a2fpga en
+// este mismo chip, commits a302d566 y 79f4afc1): hasta ahora ip_rst_n valia
+// 1 DESDE EL INSTANTE 0, mientras el PLL de 297MHz seguia en reset ~1.3ms
+// => la IP arrancaba su calibracion SIN memory_clk. En sus palabras: "la
+// calibracion era un unico disparo sin secuenciar compitiendo con el lock
+// del PLL, y fallar era PERMANENTE". Ahora la IP se mantiene en reset hasta
+// (a) POR completo, (b) PLL enganchado y (c) 65536 ciclos de asentado
+// (~1.2ms) DESPUES del lock. Su receta: settle 1ms, watchdog 100ms.
+wire       pll_lock;                    // declarado aqui: lo usa el reset
+reg pll_lk_s1 = 1'b0, pll_lk_s2 = 1'b0;
+reg [15:0] settle_cnt  = 16'd0;
+reg        settle_done = 1'b0;
+always @(posedge clk_g50) begin
+    pll_lk_s1 <= pll_lock;
+    pll_lk_s2 <= pll_lk_s1;
+    if (!por_done || !pll_lk_s2) begin
+        settle_cnt  <= 16'd0;
+        settle_done <= 1'b0;
+    end
+    else if (!settle_done) begin
+        settle_cnt <= settle_cnt + 16'd1;
+        if (&settle_cnt) settle_done <= 1'b1;
+    end
+end
+
 // _87: watchdog de calibracion. _128Y: ALARGADO a 2^24 ciclos (~335ms; era
 // 2^21 = 42ms) — si la calibracion de ESTA placa necesitara mas de 42ms, el
 // watchdog la estaba MATANDO en bucle eterno (justo el sintoma observado:
@@ -115,7 +140,9 @@ end
 reg [24:0] wd_cnt = 25'd0;
 reg        wd_rst = 1'b0;
 wire       init_calib_complete;
-wire       ip_rst_n = ~(wd_rst | rc_pulse);
+// _129: la IP NO sale de reset hasta que su reloj de memoria existe y esta
+// asentado (ver arriba). Antes: ~(wd_rst | rc_pulse) = 1 desde el ciclo 0.
+wire       ip_rst_n = settle_done & ~(wd_rst | rc_pulse);
 always @(posedge clk_g50) begin
     if (init_calib_complete || !por_done) begin
         wd_cnt <= 25'd0;
@@ -140,7 +167,7 @@ end
 // TAMBIEN el PLL: re-lock con fase nueva = billete de ojo INDEPENDIENTE)
 // ---------------------------------------------------------------------------
 wire memory_clk;
-wire pll_lock;
+// (pll_lock se declara arriba, junto a la secuencia de reset _129)
 wire pll_stop;
 wire        mdrp_inc;
 wire [1:0]  mdrp_op;
@@ -175,7 +202,9 @@ pll_mDRP_intf u_pll_mDRP_intf (
 
 always @(posedge clk_g50) begin
     pll_stop_r <= pll_stop;
-    mdrp_wr    <= pll_stop ^ pll_stop_r;
+    // _129: la danza mDRP solo cuando el PLL esta enganchado (a2fpga gatea
+    // igual: sin lock, el pll_stop no significa nada y ensucia el bus mDRP)
+    mdrp_wr    <= (pll_stop ^ pll_stop_r) & pll_lk_s2;
 end
 
 // ---------------------------------------------------------------------------
@@ -293,14 +322,10 @@ always @(posedge clk_g50) begin
     x1_win <= x1_win + 8'd1;
     if (x1_s[2] != x1_s[1]) x1_alive <= 1'b1;   // pegajoso: hubo actividad
 end
-reg pll_lock_s1 = 1'b0, pll_lock_s2 = 1'b0;
-always @(posedge clk_g50) begin
-    pll_lock_s1 <= pll_lock; pll_lock_s2 <= pll_lock_s1;
-end
 reg calib_ever_g = 1'b0;
 always @(posedge clk_g50) if (init_calib_complete) calib_ever_g <= 1'b1;
 
-assign diag = {x1_alive, pll_lock_s2, por_done, calib_ever_g,
+assign diag = {x1_alive, pll_lk_s2, por_done, calib_ever_g,
                wd_fires, calib_drop};
 assign ready = init_calib_complete;    // mismo dominio que los canales
 
