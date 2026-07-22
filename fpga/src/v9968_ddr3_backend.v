@@ -55,6 +55,11 @@ module v9968_ddr3_backend (
 
     // ---- telemetria (_95): {calib_drop, wd_fires[2:0], wd_ops[3:0]} ----
     output wire [7:0]  diag,
+    // _129b: contadores de OPERACIONES servidas — {lecturas[31:16],
+    // escrituras[15:0]}. Sano en marcha: ~1.3M lecturas/s (una palabra
+    // cada 730ns) y escrituras a ritmo de la CPU. Si sale 0, el camino de
+    // datos esta muerto aunque la calibracion diga OK.
+    output wire [31:0] dbg_ops,
 
     // ---- recalibracion forzada (_100; toggle, dominio libre) ----
     input  wire        recal_req,
@@ -327,6 +332,18 @@ always @(posedge clk_g50) if (init_calib_complete) calib_ever_g <= 1'b1;
 
 assign diag = {x1_alive, pll_lk_s2, por_done, calib_ever_g,
                wd_fires, calib_drop};
+
+// _129b: contadores de operaciones servidas (dominio clk_x1; el lector los
+// muestrea desde otro dominio — cuasi-estaticos, un tearing es irrelevante)
+reg [15:0] op_rd_cnt = 16'd0, op_wr_cnt = 16'd0;
+always @(posedge clk_x1) begin
+    // op_we vale para la operacion que acaba de completar (el FSM lo
+    // mantiene hasta el siguiente ISSUE)
+    if (a_done &&  op_we) op_wr_cnt <= op_wr_cnt + 16'd1;
+    if ((a_done && !op_we) || b_done)
+                          op_rd_cnt <= op_rd_cnt + 16'd1;
+end
+assign dbg_ops = {op_rd_cnt, op_wr_cnt};
 assign ready = init_calib_complete;    // mismo dominio que los canales
 
 always @(posedge clk_x1 or posedge ddr_rst) begin

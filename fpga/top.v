@@ -1747,6 +1747,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire        vddr_a_done, vddr_b_done;
     wire        vddr_ready;
     wire [7:0]  vddr_diag;
+    wire [31:0] vddr_ops;      // _129b: {lecturas[31:16], escrituras[15:0]}
 
     v9968_sdram_bridge u_v68bridge (
         .clk_vdp(clk_86), .rst_n(rst86_n),
@@ -1771,6 +1772,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         .b_req(vddr_b_req), .b_addr(vddr_b_addr),
         .b_dout(vddr_b_dout), .b_done(vddr_b_done),
         .clk_x1_out(vddr_clk_x1), .ready(vddr_ready), .diag(vddr_diag),
+        .dbg_ops(vddr_ops),        // _129b: {lecturas, escrituras} servidas
         .recal_req(1'b0),
         .clk_27(clk27_video),      // misma topologia que wave_ddr3/_86
         // _128Z — LA CAUSA (regla estructural confirmada en HW por alanswx
@@ -4333,7 +4335,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .cnt_c(v68_dbg_apkt),                     // _127I: {ovr, 0, paquetes_audio}
 `endif
         .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
+`ifdef ENABLE_VRAM_DDR3
+        .cnt_e(vddr_ops),                         // _129b: ops DDR3 servidas
+`else
         .cnt_e(v68dbg_park),                      // _124: {pisadas, drenajes} del park
+`endif
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)

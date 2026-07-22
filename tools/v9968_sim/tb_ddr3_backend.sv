@@ -65,7 +65,7 @@ module tb_ddr3_backend;
         .a_req(a_req_w), .a_we(a_we_w), .a_addr(a_addr_w), .a_wdata(a_wdata_w),
         .a_dout(a_dout_w), .a_done(a_done_w),
         .b_req(b_req_w), .b_addr(b_addr_w), .b_dout(b_dout_w), .b_done(b_done_w),
-        .clk_x1_out(clk_x1), .ready(ready_w), .diag(diag_w),
+        .clk_x1_out(clk_x1), .ready(ready_w), .diag(diag_w), .dbg_ops(),
         .recal_req(1'b0),
         .clk_27(clk_27), .clk_g50(clk_g50), .pll27_lock(1'b1),
         .ddr_addr(ddr_addr), .ddr_bank(ddr_bank), .ddr_cs(ddr_cs),
