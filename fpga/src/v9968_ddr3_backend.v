@@ -124,16 +124,27 @@ wire       pll_lock;                    // declarado aqui: lo usa el reset
 reg pll_lk_s1 = 1'b0, pll_lk_s2 = 1'b0;
 reg [15:0] settle_cnt  = 16'd0;
 reg        settle_done = 1'b0;
+// _129c ⚠ LECCION CARA: settle_done es de UN SOLO DISPARO. La version _129
+// lo limpiaba cuando caia pll_lock — pero el GW5A NO tiene enclk en su
+// PLLA, asi que LA IP PARA EL PLL A PROPOSITO durante la calibracion (esa
+// es toda la funcion de la danza mDRP, IPUG281 4.4.4). Con la version
+// anterior, esa caida LEGITIMA del lock reiniciaba el asentado y volvia a
+// meter la IP en reset EN MITAD del entrenamiento: bucle eterno
+// (HW: _128Z calibraba, _129/_129b "PHY-NO-CALIBRA"). Ahora solo el POR o
+// una recalibracion forzada pueden rearmarlo.
 always @(posedge clk_g50) begin
     pll_lk_s1 <= pll_lock;
     pll_lk_s2 <= pll_lk_s1;
-    if (!por_done || !pll_lk_s2) begin
+    if (!por_done || rc_pulse) begin
         settle_cnt  <= 16'd0;
         settle_done <= 1'b0;
     end
     else if (!settle_done) begin
-        settle_cnt <= settle_cnt + 16'd1;
-        if (&settle_cnt) settle_done <= 1'b1;
+        if (pll_lk_s2) begin
+            settle_cnt <= settle_cnt + 16'd1;
+            if (&settle_cnt) settle_done <= 1'b1;
+        end
+        else settle_cnt <= 16'd0;      // aun sin enganchar: esperar
     end
 end
 
@@ -207,9 +218,10 @@ pll_mDRP_intf u_pll_mDRP_intf (
 
 always @(posedge clk_g50) begin
     pll_stop_r <= pll_stop;
-    // _129: la danza mDRP solo cuando el PLL esta enganchado (a2fpga gatea
-    // igual: sin lock, el pll_stop no significa nada y ensucia el bus mDRP)
-    mdrp_wr    <= (pll_stop ^ pll_stop_r) & pll_lk_s2;
+    // _129c: SIN gatear por lock — la danza mDRP es justo lo que para y
+    // arranca el PLL durante la calibracion; gatearla con pll_lock la dejaba
+    // muda precisamente cuando hace falta (ver la leccion de settle_done).
+    mdrp_wr    <= pll_stop ^ pll_stop_r;
 end
 
 // ---------------------------------------------------------------------------
