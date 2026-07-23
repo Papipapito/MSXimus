@@ -91,14 +91,17 @@ set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/?*?/?*}]
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/?*?/D}] -setup -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/?*?/CE}] -setup -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/?*?/CE}] -setup -end 2
-set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/Regs/RegsL_RegsL*/DI*}] -setup -end 2
+# _139 (Gowin 1.9.12): linea RegsL_RegsL*/DI* RETIRADA — la sintesis nueva
+# ya no infiere el banco de registros del T80 como SSRAM (va en fabric,
+# cubierto por los patrones cpu1/u0/Regs/?*?/?* de arriba); el match vacio
+# era ERROR TA2003 en el PnR 1.9.12.
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/?*?/D}] -hold -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/Regs/?*?/?*}] -hold -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/?*?/?*}] -hold -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/?*?/D}] -hold -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/?*?/CE}] -hold -end 2
 set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/?*?/CE}] -hold -end 2
-set_multicycle_path -from [get_clocks {clk_54m}] -to [get_pins {cpu1/u0/Regs/RegsL_RegsL*/DI*}] -hold -end 2
+# (idem -hold, retirada en _139)
 
 # --- P1b-por-constraint (_70): salidas del Z80 -> FSMs de memoria/wait ---
 # Espejo de las excepciones -to cpu1 de arriba: las SALIDAS del T80 (RD/WR/
