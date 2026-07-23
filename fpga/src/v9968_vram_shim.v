@@ -653,22 +653,15 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 obl_w      <= spr_addr1 + 16'd2;
                 obl_walked <= 1'b0;
             end
-            else if (scq_v && scq_tag == spr_addr1[15:12]) begin
+            else if (scq_v && scq_tag == spr_addr1[15:12])
+                // _137: el re-armado del OBL en el CHIT (_135 micro-fix 2)
+                // RETIRADO — en T2/80col (arranque del MSX-DOS) cada CHIT
+                // disparaba un prefetch inutil: tormenta que saturaba pfq
+                // (prioridad maxima) y mataba de hambre a wq/rq => CPU
+                // congelada imprimiendo "detectando SD" (HW _136, 23/07).
+                // La regla de oro por la puerta de atras. El eco de
+                // arranque (drenaje solo-ocioso) hace el trabajo sin esto.
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};
-                // _135 (informe 23/07): el CHIT de bg era un callejon sin
-                // salida del relevo +2 — re-armar el OBL igual que el hit
-                // de ventana (con rescate del OBL retenido). Vigilar en el
-                // gate de timing el cono nuevo scq_tag -> CE de obl_*.
-                if (spr_tag1[4:2] == C_BG) begin
-                    if (obl_pend) begin
-                        pfB_pend <= 1'b1;
-                        pfB_wr   <= obl_w;
-                    end
-                    obl_pend   <= 1'b1;
-                    obl_w      <= spr_addr1 + 16'd2;
-                    obl_walked <= 1'b0;
-                end
-            end
             else begin
                 // MISS de cache: backend + fill al volver. bg/sprite encolan
                 // con reserva (drop tolerable, se autocuran); CPU/COMANDO
