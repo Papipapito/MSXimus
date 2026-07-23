@@ -107,7 +107,9 @@ module msx2hdmi_v9968 (
     output wire        dbg_lock_tgl, // clk: frame_tgl tal cual (~30 Hz NTSC)
     output wire        dbg_hdmi_rst, // clk_pixel: stretch del pulso hdmi_rst
     output wire        dbg_rd_act,   // clk_pixel: nivel ventana activa lectura
-    output wire [31:0] dbg_apkt      // _127I: {ovr[7:0], 8'h00, paquetes_audio[15:0]}
+    output wire [31:0] dbg_apkt,     // _127I: {ovr[7:0], 8'h00, paquetes_audio[15:0]}
+    output wire [5:0]  dbg_defer,    // _134: yanks diferidos (esperado ~60/s)
+    output wire [4:0]  dbg_tear      // _134: resets en zona de peligro (esperado 0)
 );
 
     localparam HS_ACTIVE_LOW   = 0;  // V9968: display_hs/vs activos ALTOS
@@ -260,7 +262,50 @@ module msx2hdmi_v9968 (
     reg [2:0] tgl_x = 3'b000;
     always @(posedge clk_pixel)
         tgl_x <= {tgl_x[1:0], frame_tgl};
-    wire hdmi_rst = tgl_x[2] ^ tgl_x[1];        // pulso de 1 ciclo por frame
+    wire hdmi_rst_raw = tgl_x[2] ^ tgl_x[1];    // pulso de 1 ciclo por frame
+
+    // _134 (bug #14, CAUSA RAIZ PROPUESTA): con los relojes reales
+    // (clk_86 = 27*35/11, clk_pixel = 27*55/20, ratio exacto 121/140) el
+    // yank por-frame aterrizaba SIEMPRE en cx~1595 = DENTRO de la ventana
+    // de data islands del frame VIC4 (cx en [1290,1610), todas las lineas)
+    // => truncaba un paquete HDMI (audio/ACR/NULL) en el cable CADA frame,
+    // sin ECC ni guard de cierre. El video lo tolera; el audio del receptor
+    // no: deficit de muestras + CTS basura ocasional = "30-40s bien y luego
+    // va y viene" (el colchon del sink se drena y resbala). La v9958
+    // aterriza en zona inocua — por eso la _116 suena perfecta con el MISMO
+    // transmisor. Fix: DIFERIR el reset hasta que cx salga de la zona de
+    // peligro (preambulo + guard + islands + guard de cierre, ensanchada
+    // +-2 por el registro del pulso). Retardo maximo ~340 px = 4.6 us,
+    // CONSTANTE (el aterrizaje es deterministico) e invisible para el
+    // realineado del conversor. defer_cnt/tear_cnt = assert en silicio:
+    // esperado defer ~60/s (el yank SI caia en la ventana) y tear = 0.
+    reg  rst_pend  = 1'b0;
+    reg  hdmi_rst  = 1'b0;
+    // ventana de DECISION (peligro real ensanchada +-2 por el registro del
+    // pulso) y zona de PELIGRO real (para el assert tear)
+    wire in_defer_win = pal_x ? (cx >= 12'd1278 && cx < 12'd1870)
+                              : (cx >= 12'd1278 && cx < 12'd1620);
+    wire in_danger    = pal_x ? (cx >= 12'd1280 && cx < 12'd1868)
+                              : (cx >= 12'd1280 && cx < 12'd1618);
+    reg [5:0] defer_cnt = 6'd0;
+    reg [4:0] tear_cnt  = 5'd0;
+    always @(posedge clk_pixel) begin
+        hdmi_rst <= 1'b0;
+        if (hdmi_rst_raw) begin
+            if (in_defer_win) begin
+                rst_pend  <= 1'b1;
+                defer_cnt <= defer_cnt + 6'd1;
+            end
+            else hdmi_rst <= 1'b1;
+        end
+        else if (rst_pend && !in_defer_win) begin
+            rst_pend <= 1'b0;
+            hdmi_rst <= 1'b1;
+        end
+        if (hdmi_rst && in_danger) tear_cnt <= tear_cnt + 5'd1;
+    end
+    assign dbg_defer = defer_cnt;
+    assign dbg_tear  = tear_cnt;
 
     reg [1:0] pal_sync = 2'b00;
     always @(posedge clk_pixel)

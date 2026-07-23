@@ -1815,6 +1815,8 @@ assign keyboard_addr = ppi_port_c[3:0];
     // culpable es el re-arranque del stream HDMI (el receptor silencia).
     wire v68_dbg_lock, v68_dbg_rst;
     wire [31:0] v68_dbg_apkt;        // _127I: contadores del packet_picker
+    wire [5:0]  v68_dbg_defer;       // _134: yanks del reset diferidos
+    wire [4:0]  v68_dbg_tear;        // _134: assert en silicio (esperado 0)
     reg [2:0]  aud_rst_sy = 3'd0, aud_lock_sy = 3'd0;
     reg [15:0] aud_rst_cnt = 16'd0, aud_lock_cnt = 16'd0;
     always @(posedge clk_54m) begin
@@ -1864,7 +1866,9 @@ assign keyboard_addr = ppi_port_c[3:0];
         .dbg_lock_tgl (v68_dbg_lock),    // _127H: telemetria audio
         .dbg_hdmi_rst (v68_dbg_rst),
         .dbg_rd_act   (),
-        .dbg_apkt     (v68_dbg_apkt)     // _127I: {ovr, 0, paquetes_audio}
+        .dbg_apkt     (v68_dbg_apkt),    // _127I: {ovr, 0, paquetes_audio}
+        .dbg_defer    (v68_dbg_defer),   // _134: yanks diferidos (~60/s sano)
+        .dbg_tear     (v68_dbg_tear)     // _134: resets en zona de peligro (0 sano)
     );
 
     // ---- dh/dl: divisor LIBRE clk_108m ÷8/÷16 — el patron EXACTO con el
@@ -4351,7 +4355,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `else
         .cnt_c(v68_dbg_apkt),                     // _127I: {ovr, 0, paquetes_audio}
 `endif
-        .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
+        // _134: los 11 bits libres llevan {tear[4:0], defer[5:0]} del yank
+        .cnt_d({fan_en_o, v68_dbg_tear, v68_dbg_defer, fan_dbg_cnt}),
 `ifdef ENABLE_VRAM_DDR3
         .cnt_e(vddr_ops),                         // _129b: ops DDR3 servidas
 `else

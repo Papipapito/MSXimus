@@ -18,7 +18,7 @@ import serial
 port = sys.argv[1] if len(sys.argv) > 1 else "COM11"
 ser = serial.Serial(port, 115200, timeout=2)
 print(f"escuchando {port} @115200 — _127I audio debug (Ctrl+C para salir)")
-print("hora      RST  d  lock/s   pkt/s   miss/s  fan  ops DDR3 (ojo: 16b, satura >65k/muestra)")
+print("hora      RST  d  lock/s   pkt/s   miss/s  fan  dfr/s  ops|vumetro  estado")
 prev = None
 prev_t = None
 t0 = time.time()
@@ -55,9 +55,19 @@ while True:
         lock_s = d_lock / dt if dt > 0 else 0
         miss_s = d_miss / dt if dt > 0 else 0
         pkt_s  = d_pkt / dt if dt > 0 else 0
+        # _134: cnt_d = {fan_en, tear[4:0], defer[5:0], fan_dbg[19:0]}
+        # defer/s ~60 = el yank del reset caia en la ventana de islands y se
+        # esta difiriendo (fix activo); tear>0 = QUEDAN resets rompiendo
+        # paquetes (assert violado). En builds pre-134 ambos leen 0.
+        tear  = (fanw >> 26) & 0x1F
+        defer = (fanw >> 20) & 0x3F
+        d_tear  = (tear  - ((prev[6] >> 26) & 0x1F)) & 0x1F
+        d_defer = (defer - ((prev[6] >> 20) & 0x3F)) & 0x3F
         anom = ""
         if d_rst:
             anom = "  <<<< RESET HDMI"
+        elif d_tear:
+            anom = f"  <<<< TEAR +{d_tear} (¡reset dentro de la isla!)"
         elif d_ovr:
             anom = f"  <<<< OVERRUN +{d_ovr}"
         elif dt < 2 and not (10800 <= pkt_s <= 11250):
@@ -94,8 +104,9 @@ while True:
             d_rd = (((park >> 16) & 0xFFFF) - ((prev[5] >> 16) & 0xFFFF)) & 0xFFFF
             d_wr = ((park & 0xFFFF) - (prev[5] & 0xFFFF)) & 0xFFFF
             ops = f"rd/s={d_rd/dt:7.0f} wr/s={d_wr/dt:6.0f}"
+        dfr = f"dfr/s={d_defer/dt:4.1f}" if dt > 0 else "dfr/s= ?"
         print(f"+{now - t0:6.1f}s {rst:4d} {'+' + str(d_rst) if d_rst else ' .'} "
-              f"{lock_s:6.1f}  {pkt_s:8.1f}  {miss_s:6.0f}  {fan}  "
+              f"{lock_s:6.1f}  {pkt_s:8.1f}  {miss_s:6.0f}  {fan}  {dfr}  "
               f"{ops}  {ddtxt}{anom}")
-    prev = (rst, lock, miss, pkt, ovr, park)
+    prev = (rst, lock, miss, pkt, ovr, park, fanw)
     prev_t = now
