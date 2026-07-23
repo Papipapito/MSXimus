@@ -59,6 +59,7 @@ module tb_audio_ce;
         .clk_pixel(clk_pixel),
         .audio_ce(audio_ce),
         .reset(reset),
+        .reset_cx(11'd0),    // _136: sin diferidor en el TB
         .rgb(24'h336699),
         .audio_sample_word(audio_sample_word),
         .aspect_16_9(1'b0),

@@ -517,6 +517,7 @@ module msx2hdmi (
           .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
+          .reset_cx( 11'd0 ),  // _136: sin diferidor aqui — anclaje clasico
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_ntsc),
@@ -543,6 +544,7 @@ module msx2hdmi (
           .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
+          .reset_cx( 12'd0 ),  // _136: sin diferidor aqui — anclaje clasico
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_pal),

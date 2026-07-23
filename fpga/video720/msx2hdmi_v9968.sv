@@ -279,8 +279,18 @@ module msx2hdmi_v9968 (
     // CONSTANTE (el aterrizaje es deterministico) e invisible para el
     // realineado del conversor. defer_cnt/tear_cnt = assert en silicio:
     // esperado defer ~60/s (el yank SI caia en la ventana) y tear = 0.
+    // _136 (leccion HW _134/_135: TRES dados en pantalla negra): diferir el
+    // reset SIN compensar movia el anclaje cx/cy ~27 px y el lado de
+    // lectura del conversor (ventanas por valor de cx/cy calibradas con la
+    // fase del reset) dejaba de casar con el lado de escritura => negro.
+    // Ahora el reset diferido re-ancla cx a reset_cx = 1 + ciclos
+    // diferidos: la trayectoria cx/cy queda IDENTICA ciclo a ciclo a la
+    // del diseno viejo — el conversor NO puede notar la diferencia — y el
+    // data island en vuelo se salva igual (el reset ya no cae dentro).
     reg  rst_pend  = 1'b0;
     reg  hdmi_rst  = 1'b0;
+    reg  [11:0] rst_dly = 12'd0;     // ciclos desde el yank crudo
+    reg  [11:0] rst_cx  = 12'd0;     // re-anclaje compensado para hdmi.sv
     // ventana de DECISION (peligro real ensanchada +-2 por el registro del
     // pulso) y zona de PELIGRO real (para el assert tear)
     wire in_defer_win = pal_x ? (cx >= 12'd1278 && cx < 12'd1870)
@@ -292,15 +302,23 @@ module msx2hdmi_v9968 (
     always @(posedge clk_pixel) begin
         hdmi_rst <= 1'b0;
         if (hdmi_rst_raw) begin
+            rst_dly <= 12'd1;
             if (in_defer_win) begin
                 rst_pend  <= 1'b1;
                 defer_cnt <= defer_cnt + 6'd1;
             end
-            else hdmi_rst <= 1'b1;
+            else begin
+                hdmi_rst <= 1'b1;
+                rst_cx   <= 12'd1;   // 1 ciclo de registro (vs wire viejo)
+            end
         end
-        else if (rst_pend && !in_defer_win) begin
-            rst_pend <= 1'b0;
-            hdmi_rst <= 1'b1;
+        else if (rst_pend) begin
+            rst_dly <= rst_dly + 12'd1;
+            if (!in_defer_win) begin
+                rst_pend <= 1'b0;
+                hdmi_rst <= 1'b1;
+                rst_cx   <= rst_dly + 12'd1;
+            end
         end
         if (hdmi_rst && in_danger) tear_cnt <= tear_cnt + 5'd1;
     end
@@ -652,6 +670,7 @@ module msx2hdmi_v9968 (
           .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
+          .reset_cx( rst_cx[10:0] ),   // _136: anclaje compensado
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_ntsc),
@@ -693,6 +712,7 @@ module msx2hdmi_v9968 (
           .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
+          .reset_cx( rst_cx[11:0] ),   // _136: anclaje compensado
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_pal),

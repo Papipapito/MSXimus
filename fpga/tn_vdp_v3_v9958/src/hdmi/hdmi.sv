@@ -71,6 +71,13 @@ module hdmi
     input logic audio_ce,
     // synchronous reset back to 0,0
     input logic reset,
+    // _136 (bug #14): valor de re-anclaje de cx en el reset. El puente
+    // difiere el reset para no trocear un data island en vuelo y COMPENSA
+    // aqui los ciclos diferidos (reset_cx = ciclos desde el yank crudo):
+    // la trayectoria cx/cy queda IDENTICA a la del reset sin diferir — el
+    // lado de lectura del conversor no puede notar la diferencia. Los
+    // consumidores sin diferidor conectan el equivalente a START_X.
+    input logic [BIT_WIDTH-1:0] reset_cx,
     input logic [23:0] rgb,
     input logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word [1:0],
     input logic aspect_16_9,
@@ -225,7 +232,7 @@ always_ff @(posedge clk_pixel)
 begin
     if (reset)
     begin
-        cx <= BIT_WIDTH'(START_X);
+        cx <= reset_cx;              // _136: START_X + ciclos diferidos
         cy <= BIT_HEIGHT'(START_Y);
     end
     else
