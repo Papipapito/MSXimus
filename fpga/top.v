@@ -1569,7 +1569,20 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire VideoDLClk;
     //decode del VDP: 98-9Bh
     wire vdp_io_hit;
+`ifdef ENABLE_V9968_VDP
+    // _140 ESPEJO 88-8Bh: la demo ru66-v9968-demo y el software de cartucho
+    // V9968 EXTERNO hablan SOLO por 88-8Bh (nunca 98-9B). En HW real son dos
+    // chips (V9968 externo en 88-8B + VDP interno en 98-9B, "switch to the
+    // V9968 display"); en el MSXimus el V9968 YA ES el VDP interno, asi que
+    // aliasamos AMBOS rangos al mismo chip. Se ignora bus_addr[4]: 98-9B
+    // (bit4=1) y 88-8B (bit4=0) son las UNICAS combinaciones con [7:5]=100 y
+    // [3:2]=10 (0x88-8B libre en el MSXimus; vecinos PSG A0-A2/PPI A8-AA/
+    // Y8950 C0-C1). mode = bus_addr[1:0] es identico en ambos rangos, asi
+    // que el glue recibe el mismo puerto; BIOS/DOS siguen en 98-9B intactos.
+    assign vdp_io_hit = ( bus_addr[7:5] == 3'b100 && bus_addr[3:2] == 2'b10 );
+`else
     assign vdp_io_hit = ( bus_addr[7:2] == 6'b100110 );
+`endif
     assign vdp_csw_n = (vdp_io_hit == 1 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 0:1; // VDP write
     assign vdp_csr_n = (vdp_io_hit == 1 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0)? 0:1; // VDP read
 
