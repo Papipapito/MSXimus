@@ -69,19 +69,22 @@ module vdp_upscan_line_buffer (
 	reg				ff_re;
 
 	//	Parche MSXimus _139 (migracion Gowin 1.9.12): mismo refactor que
-	//	vdp_video_ram_line_buffer — el always unico inferia BSRAM SP con
-	//	WRITE_MODE=2'b10 (PA2122 en el PnR 1.9.12). Patron simple-dual-port
-	//	limpio; comportamiento externo identico (las X del original tras we
-	//	eran don't care; ff_re conserva su regla exacta: hold en we,
-	//	re en lectura, 0 en idle).
+	//	vdp_video_ram_line_buffer — las X explicitas del original hacian
+	//	inferir BSRAM SP con WRITE_MODE=2'b10 (PA2122 en el PnR 1.9.12).
+	//	Patron NO_CHANGE (write y read excluyentes; ff_q retiene en we)
+	//	=> WRITE_MODE=2'b00. Comportamiento externo identico (las X eran
+	//	don't care; ff_re conserva su regla exacta: hold en we, re en
+	//	lectura, 0 en idle — ff_q_out solo actualiza con ff_re).
 	always @( posedge clk ) begin
 		if( we ) begin
 			ff_imem[ address ]	<= d;
 		end
+		else begin
+			ff_q				<= ff_imem[ address ];
+		end
 	end
 
 	always @( posedge clk ) begin
-		ff_q <= ff_imem[ address ];
 		if( !we ) begin
 			ff_re <= re;
 		end
