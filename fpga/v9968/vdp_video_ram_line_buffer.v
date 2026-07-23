@@ -65,23 +65,30 @@ module vdp_video_ram_line_buffer (
 );
 	reg		[23:0]	ff_imem [0:1023];
 	reg		[23:0]	ff_q;
+	reg				ff_re_d;
 	reg		[23:0]	ff_q_out;
 
+	//	Parche MSXimus _139 (migracion Gowin 1.9.12): el bloque original
+	//	(write + read condicional en el MISMO always) inferia una BSRAM
+	//	single-port con WRITE_MODE=2'b10 que el PnR 1.9.12 rechaza con
+	//	PA2122. Refactor a patron simple-dual-port limpio (escritura y
+	//	lectura incondicional en bloques separados, sin semantica de
+	//	write-mode). Comportamiento externo IDENTICO: el original ponia
+	//	ff_q a 24'dx tras we (don't care) — aqui se refina esa X a 0 via
+	//	ff_re_d; la profundidad de tuberia (2 ciclos) se conserva.
 	always @( posedge clk ) begin
 		if( we ) begin
 			ff_imem[ address ]	<= d;
-			ff_q				<= 24'dx;
-		end
-		else if( re ) begin
-			ff_q				<= ff_imem[ address ];
-		end
-		else begin
-			ff_q				<= 24'd0;
 		end
 	end
 
 	always @( posedge clk ) begin
-		ff_q_out <= ff_q;
+		ff_q	<= ff_imem[ address ];
+		ff_re_d	<= re && !we;
+	end
+
+	always @( posedge clk ) begin
+		ff_q_out <= ff_re_d ? ff_q : 24'd0;
 	end
 
 	assign q = ff_q_out;
