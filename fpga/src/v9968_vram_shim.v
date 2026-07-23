@@ -278,6 +278,23 @@ wire       bgp_full  = (bgp_wp + 2'd1 == bgp_rp);
 reg [15:0] c_park, c_pkov;                     // drenajes OK / pisadas (overflow)
 reg        pkov_p;                             // _127: pisada, registrada 1 ciclo
 
+// _135 ECO DE ARRANQUE (residuo del hscroll, informe 23/07): el relevo +2
+// es v-lineal y con el ring rotado por R#26 NADIE produce a tiempo las
+// columnas s/s+1 del arranque de cada linea (miss autoperpetuante en las
+// 191 lineas). Cura: el HUECO de hblank (silencio de bg > ~256 ciclos)
+// arma 2 creditos por stream; los 2 primeros fetches bg de la linea (hit
+// O miss — se tapea spr_p1 REGISTRADO, sin tocar el cono de pwq/pw_mem ni
+// el mux de push de pfq, los dos puntos quemados por la loteria) encolan
+// addr+stride en esta cola lateral, drenada SOLO con todo ocioso (4o
+// brazo del lanzador). +4 palabras/linea ~ +6%, servidas en tiempo muerto
+// (el hblank tiene ~16us sin BK RD; el deadline real es la linea, 63us).
+reg [15:0] ecq [0:3];                          // addr[17:2] linea siguiente
+reg [1:0]  ecq_wp, ecq_rp;
+wire       ecq_empty = (ecq_wp == ecq_rp);
+wire       ecq_full  = (ecq_wp + 2'd1 == ecq_rp);
+reg [8:0]  bg_quiet;                           // silencio de bg (satura en 256)
+reg [1:0]  ec_cred0, ec_cred1;                 // creditos por stream (bit14)
+
 // ============================================================================
 // TUBERIA DE RESPUESTA A 8 CICLOS para bg: shift-register de 8 etapas con
 // {valido, tag, dato}. Un hit de bg agenda su respuesta en la etapa 0 y
@@ -508,6 +525,8 @@ always @(posedge clk_vdp or negedge rst_n) begin
         bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0; obl_walked <= 0;
         obl_w_c <= 0; obl_w_d <= 0;
         bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0; pkov_p <= 0;
+        ecq_wp <= 0; ecq_rp <= 0; bg_quiet <= 0;      // _135
+        ec_cred0 <= 0; ec_cred1 <= 0;
         pfB_pend <= 0; pfB_wr <= 0;
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0;
         pwq_v <= 0;
@@ -634,8 +653,22 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 obl_w      <= spr_addr1 + 16'd2;
                 obl_walked <= 1'b0;
             end
-            else if (scq_v && scq_tag == spr_addr1[15:12])
+            else if (scq_v && scq_tag == spr_addr1[15:12]) begin
                 pipe[1] <= {1'b1, spr_tag1, {scq_d3, scq_d2, scq_d1, scq_d0}};
+                // _135 (informe 23/07): el CHIT de bg era un callejon sin
+                // salida del relevo +2 — re-armar el OBL igual que el hit
+                // de ventana (con rescate del OBL retenido). Vigilar en el
+                // gate de timing el cono nuevo scq_tag -> CE de obl_*.
+                if (spr_tag1[4:2] == C_BG) begin
+                    if (obl_pend) begin
+                        pfB_pend <= 1'b1;
+                        pfB_wr   <= obl_w;
+                    end
+                    obl_pend   <= 1'b1;
+                    obl_w      <= spr_addr1 + 16'd2;
+                    obl_walked <= 1'b0;
+                end
+            end
             else begin
                 // MISS de cache: backend + fill al volver. bg/sprite encolan
                 // con reserva (drop tolerable, se autocuran); CPU/COMANDO
@@ -702,6 +735,28 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     if (pwq_v)
                         pipe[1] <= {1'b1, spr_tag1, pwq[31:0]};
                 end
+            end
+        end
+
+        // ---------- _135 eco de arranque: silencio, creditos y encolado ----
+        // (tap sobre spr_p1/spr_addr1/stride, todos REGISTRADOS: cero
+        // contacto con el cono de pwq/pw_mem DO ni con el mux de pfq)
+        if (spr_p1 && spr_tag1[4:2] == C_BG) begin
+            bg_quiet <= 9'd0;
+            if (stride != 16'd0 && !ecq_full) begin
+                if (spr_addr1[14] ? (ec_cred1 != 2'd0) : (ec_cred0 != 2'd0)) begin
+                    ecq[ecq_wp] <= spr_addr1 + stride;
+                    ecq_wp      <= ecq_wp + 2'd1;
+                    if (spr_addr1[14]) ec_cred1 <= ec_cred1 - 2'd1;
+                    else               ec_cred0 <= ec_cred0 - 2'd1;
+                end
+            end
+        end
+        else begin
+            if (!bg_quiet[8]) bg_quiet <= bg_quiet + 9'd1;
+            if (bg_quiet == 9'd256) begin       // hueco: armar (se re-pina
+                ec_cred0 <= 2'd2;               // durante todo el silencio,
+                ec_cred1 <= 2'd2;               // inofensivo)
             end
         end
 
@@ -892,7 +947,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     word_pend <= |(wq[wq_rp][51:48] >> (fb + 1));
                 end
             end
-            else if (!rq_empty && !late_v) begin     // no pisar la tardia
+            // _135 micro-fix: !pfB_pend retiene el brazo rq UN ciclo cuando
+            // hay siembra (+1 del miss / rescate OBL) aterrizando en pfq —
+            // sin el reten, el rq del propio miss se colaba por delante de
+            // su semilla (pfq aun vacia ese ciclo) y el +1 de la columna s
+            // llegaba ~117ns tarde (regimen C del informe 23/07).
+            else if (!rq_empty && !late_v && !pfB_pend) begin
                 cur_kind  <= 2'd1;
                 cur_tag   <= rq[rq_rp][20:16];
                 cur_addrw <= rq[rq_rp][15:0];
@@ -902,6 +962,21 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bk_addr  <= VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00};
                 bk2_req  <= 1'b1;
                 bk2_addr <= (VRAM_BASE + {4'd0, rq[rq_rp][15:0], 2'b00}) | 22'd2;
+            end
+            // _135: drenaje del eco de arranque — prioridad MINIMA, solo
+            // con todas las colas vacias (tiempo muerto real). Es un fill
+            // de ventana normal (cur_kind 0): tag-checked, inofensivo
+            // incluso con stride rancio.
+            else if (!ecq_empty && pfq_empty && wq_empty && rq_empty &&
+                     bgp_empty && !late_v && !pfB_pend) begin
+                cur_kind  <= 2'd0;
+                cur_addrw <= ecq[ecq_rp];
+                ecq_rp    <= ecq_rp + 2'd1;
+                got_lo <= 1'b0; got_hi <= 1'b0;
+                bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b0;
+                bk_addr  <= VRAM_BASE + {4'd0, ecq[ecq_rp], 2'b00};
+                bk2_req  <= 1'b1;
+                bk2_addr <= (VRAM_BASE + {4'd0, ecq[ecq_rp], 2'b00}) | 22'd2;
             end
         end
     end
