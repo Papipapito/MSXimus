@@ -113,8 +113,30 @@ always @(posedge clk_g50) begin
 end
 
 wire       init_calib_complete;
-// _130: FIEL — la IP nunca se resetea (nand2mario .rst_n(1'b1))
-wire       ip_rst_n = 1'b1;
+// _131 LA FUSION (todo el HW en una formula): la base fiel de la _130 + el
+// MOTOR DE REINTENTOS de la _128Z — la unica build que ha calibrado aqui,
+// y lo hizo AL 7º REINTENTO (~1/7 de exito por intento en nuestro
+// bitstream; nand2mario a un intento "occasionally fails; power-cycle").
+// El watchdog da a cada intento 335ms LIMPIOS (sin settle, sin POR, sin
+// tocar el PLL — todo lo que las _129* demostraron que mata la calib) y si
+// no completa, pulso de reset de 256 ciclos a la IP = billete nuevo.
+reg [24:0] wd_cnt = 25'd0;
+reg        wd_rst = 1'b0;
+reg        wd_rst_d = 1'b0;
+reg [2:0]  wd_fires = 3'd0;
+always @(posedge clk_g50) begin
+    if (init_calib_complete) begin
+        wd_cnt <= 25'd0;
+        wd_rst <= 1'b0;
+    end
+    else begin
+        wd_cnt <= wd_cnt + 25'd1;
+        wd_rst <= (wd_cnt[24] && (wd_cnt[23:8] == 16'd0));
+    end
+    wd_rst_d <= wd_rst;
+    if (wd_rst && !wd_rst_d && wd_fires != 3'd7) wd_fires <= wd_fires + 3'd1;
+end
+wire       ip_rst_n = ~wd_rst;
 
 
 // ---------------------------------------------------------------------------
@@ -294,7 +316,7 @@ reg calib_ever_g = 1'b0;
 always @(posedge clk_g50) if (init_calib_complete) calib_ever_g <= 1'b1;
 
 assign diag = {x1_alive, pll_lk_s2, 1'b1, calib_ever_g,
-               3'b000, calib_drop};   // _130: sin POR ni watchdog
+               wd_fires, calib_drop}; // _131: reintentos de vuelta al diag
 
 // _129b: contadores de operaciones servidas (dominio clk_x1; el lector los
 // muestrea desde otro dominio — cuasi-estaticos, un tearing es irrelevante)
