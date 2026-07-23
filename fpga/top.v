@@ -1829,6 +1829,8 @@ assign keyboard_addr = ppi_port_c[3:0];
     reg ce86 = 1'b0;
     always @(posedge clk_86) ce86 <= ~ce86;
 
+    wire [15:0] amp_hdmi;   // _133: vumetro del lado HDMI (ver dbg_uart)
+
     msx2hdmi_v9968 u_msx2hdmi68 (
         .clk          (clk_86),
         .resetn       (rst86_n),
@@ -1849,6 +1851,7 @@ assign keyboard_addr = ppi_port_c[3:0];
 `endif
         .audio_l      (audio_sample),
         .audio_r      (audio_sample_r),
+        .dbg_amp      (amp_hdmi),
         .clk_pixel    (clk_hdmi),
         .clk_5x_pixel (clk_hdmi5),
         .tmds_clk_n   (clk_n),
@@ -4317,6 +4320,25 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // _121diag: telemetria del shim V9968 (ASCII 115200): "D <miss>
     // <complA> <complB>" cada 200ms. Sale por E22 (dbg_pmod1[4], donde
     // vive el CH340 de COM11) — ver el mux junto a los assigns de PMOD.
+    // _133 VUMETRO (bug #14): pico de |audio_sample| EN LA FUENTE (el
+    // registro del mezclador, dominio clk_27m) por ventana de ~0.31s
+    // (2^23 ciclos) con retencion. Junto con amp_hdmi (pico de lo que
+    // consume el HDMI, desde msx2hdmi_v9968) discrimina durante un corte
+    // audible: ambos picos altos = receptor; fuente alta y hdmi bajo =
+    // CDC congelado; ambos bajos = el mezclador se calla de verdad.
+    reg  [15:0] amp_src_acc = 16'd0, amp_src = 16'd0;
+    reg  [22:0] amp_src_win = 23'd0;
+    wire [15:0] asrc_abs = audio_sample[15] ? (~audio_sample + 16'd1)
+                                            : audio_sample;
+    always @(posedge clk_27m) begin
+        amp_src_win <= amp_src_win + 23'd1;
+        if (amp_src_win == 23'd0) begin
+            amp_src     <= amp_src_acc;
+            amp_src_acc <= 16'd0;
+        end
+        else if (asrc_abs > amp_src_acc) amp_src_acc <= asrc_abs;
+    end
+
     wire usb_uart_tx_int;
     dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
         .clk(clk_54m), .rst_n(bus_reset_n),
@@ -4333,7 +4355,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `ifdef ENABLE_VRAM_DDR3
         .cnt_e(vddr_ops),                         // _129b: ops DDR3 servidas
 `else
-        .cnt_e(v68dbg_park),                      // _124: {pisadas, drenajes} del park
+        .cnt_e({amp_src, amp_hdmi}),              // _133: vumetro {fuente, hdmi}
 `endif
         .tx(usb_uart_tx_int)
     );

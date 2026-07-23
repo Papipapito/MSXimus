@@ -93,6 +93,7 @@ module msx2hdmi_v9968 (
                                      // Cuasi-estático desde la config del menú.
     input  wire [15:0] audio_l,      // muestras del core (cruce 2FF)
     input  wire [15:0] audio_r,
+    output wire [15:0] dbg_amp,      // _133: pico |muestra| que consume el HDMI
     input  wire        clk_pixel,    // 74.25 MHz
     input  wire        clk_5x_pixel, // 371.25 MHz
     output wire        tmds_clk_n,
@@ -524,6 +525,27 @@ module msx2hdmi_v9968 (
         if (aud_c1[0] == aud_c2[0]) audio_sample_word[0] <= aud_c2[0];
         if (aud_c1[1] == aud_c2[1]) audio_sample_word[1] <= aud_c2[1];
     end
+
+    // _133 VUMETRO (bug #14): pico de |audio_sample_word[0]| por ventana de
+    // ~0.23s (2^24 ciclos de pixel) con registro de retencion — el COM11 lo
+    // muestrea cuasi-estatico. Si durante un corte audible este pico se
+    // DESPLOMA, las muestras que consume el HDMI van ya muertas (reo aguas
+    // arriba); si sigue alto, el reo es el empaquetado o el receptor.
+    reg [15:0] amp_acc = 16'd0;
+    reg [23:0] amp_win = 24'd0;
+    reg [15:0] dbg_amp_r = 16'd0;
+    wire [15:0] asw_abs = audio_sample_word[0][15]
+                        ? (~audio_sample_word[0] + 16'd1)
+                        : audio_sample_word[0];
+    always @(posedge clk_pixel) begin
+        amp_win <= amp_win + 24'd1;
+        if (amp_win == 24'd0) begin
+            dbg_amp_r <= amp_acc;
+            amp_acc   <= 16'd0;
+        end
+        else if (asw_abs > amp_acc) amp_acc <= asw_abs;
+    end
+    assign dbg_amp = dbg_amp_r;
 
     // ========================================================================
     // Diagnóstico (stretchers retriggerables; activo = 1)
