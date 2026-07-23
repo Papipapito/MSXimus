@@ -275,6 +275,28 @@ reg [7:0]  op_wdata;
 reg [1:0] st;
 localparam ST_IDLE = 2'd0, ST_ISSUE = 2'd1, ST_WAITRD = 2'd2;
 
+// _132 HANDSHAKE ROBUSTO: la IP solo acepta con en && rdy EN EL MISMO
+// CICLO. El patron viejo (comprobar rdy y pulsar en al ciclo siguiente)
+// PIERDE la operacion en silencio si rdy cae justo entonces (pasa en cada
+// auto-refresh); peor aun, cmd y dato pueden perderse POR SEPARADO y las
+// FIFOs internas quedan desincronizadas PARA SIEMPRE (cada escritura
+// posterior escribe el byte anterior en el offset anterior = las franjas
+// y los glifos repetidos de las fotos del 23/07). A nand2mario el mismo
+// patron no le duele porque su framebuffer se reescribe entero cada
+// frame; nuestra VRAM no se cura sola. Ahora en/wren se RETIENEN hasta
+// ver su rdy, y solo se avanza cuando ambos han sido aceptados.
+wire cmd_acc = app_en       && app_rdy;       // aceptacion de comando
+wire dat_acc = app_wdf_wren && app_wdf_rdy;   // aceptacion de dato
+wire iss_free = !app_en && !app_wdf_wren;     // nada pendiente de aceptar
+
+// _132 ANTI-DESINCRONIZACION de lecturas: si el rescate _95 abandona una
+// lectura ya ACEPTADA (lenta, no perdida), su dato llega mas tarde y la
+// siguiente lectura lo tomaria como suyo (a partir de ahi TODAS las
+// lecturas devuelven la linea anterior). rd_pend cuenta las lecturas en
+// vuelo: en WAITRD solo se toma el dato cuando rd_pend==1; los beats
+// rancios (rd_pend>1) se consumen y descartan.
+reg [3:0] rd_pend;
+
 // _130 CACHE DE LINEA (una linea de 128b por canal): el fetch bg del shim
 // es SECUENCIAL (pfq drena palabras consecutivas) => 8 palabras de 16b por
 // linea => tras el miss inicial, ~7 hits servidos EN 1 CICLO sin tocar la
@@ -318,15 +340,18 @@ always @(posedge clk_g50) if (init_calib_complete) calib_ever_g <= 1'b1;
 assign diag = {x1_alive, pll_lk_s2, 1'b1, calib_ever_g,
                wd_fires, calib_drop}; // _131: reintentos de vuelta al diag
 
-// _129b: contadores de operaciones servidas (dominio clk_x1; el lector los
-// muestrea desde otro dominio — cuasi-estaticos, un tearing es irrelevante)
+// _129b/_132: contadores de operaciones servidas (dominio clk_x1; el lector
+// los muestrea desde otro dominio — cuasi-estaticos, tearing irrelevante).
+// _132: pulsos dedicados desde las ramas exactas del FSM. El esquema viejo
+// (a_done && op_we) contaba los HITS de lectura como escrituras cuando la
+// op anterior habia sido un write (op_we rancio) y contaba los rescates
+// FFFF como operaciones servidas. Ahora: rd = datos reales entregados,
+// wr = escrituras ACEPTADAS por la IP; los rescates solo van a wd_ops.
+reg inc_rd_a, inc_rd_b, inc_wr;
 reg [15:0] op_rd_cnt = 16'd0, op_wr_cnt = 16'd0;
 always @(posedge clk_x1) begin
-    // op_we vale para la operacion que acaba de completar (el FSM lo
-    // mantiene hasta el siguiente ISSUE)
-    if (a_done &&  op_we) op_wr_cnt <= op_wr_cnt + 16'd1;
-    if ((a_done && !op_we) || b_done)
-                          op_rd_cnt <= op_rd_cnt + 16'd1;
+    op_rd_cnt <= op_rd_cnt + {15'd0, inc_rd_a} + {15'd0, inc_rd_b};
+    if (inc_wr) op_wr_cnt <= op_wr_cnt + 16'd1;
 end
 assign dbg_ops = {op_rd_cnt, op_wr_cnt};
 assign ready = init_calib_complete;    // mismo dominio que los canales
@@ -346,14 +371,32 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         clA_v <= 1'b0; clB_v <= 1'b0;
         clA_tag <= 18'd0; clB_tag <= 18'd0;
         clA_data <= 128'd0; clB_data <= 128'd0;
+        rd_pend <= 4'd0;
+        inc_rd_a <= 1'b0; inc_rd_b <= 1'b0; inc_wr <= 1'b0;
     end
     else begin
-        app_en <= 1'b0;
-        app_wdf_wren <= 1'b0;
         a_done <= 1'b0;                          // pulsos de 1 ciclo
         b_done <= 1'b0;
-        if (st == ST_IDLE) op_wd <= 17'd0;
-        else               op_wd <= op_wd + 17'd1;
+        inc_rd_a <= 1'b0; inc_rd_b <= 1'b0; inc_wr <= 1'b0;
+
+        // _132: en/wren RETENIDOS hasta su aceptacion (nunca se sueltan a
+        // medias: soltar un lado con el otro pendiente desincroniza las
+        // FIFOs internas de la IP)
+        if (cmd_acc) app_en       <= 1'b0;
+        if (dat_acc) app_wdf_wren <= 1'b0;
+
+        // _132: lecturas en vuelo (aceptada +1, beat devuelto -1)
+        rd_pend <= rd_pend
+                   + ((cmd_acc && app_cmd == 3'b001) ? 4'd1 : 4'd0)
+                   - ((app_rd_data_valid && rd_pend != 4'd0) ? 4'd1 : 4'd0);
+
+        // watchdog de operacion: cuenta fuera de IDLE y TAMBIEN en IDLE si
+        // hay peticion esperando con la emision atascada (en retenido)
+        if (st == ST_IDLE && (iss_free ||
+            (!(a_req && !a_srv) && !(b_req && !b_srv))))
+             op_wd <= 17'd0;
+        else op_wd <= op_wd + 17'd1;
+
         if (!a_req) a_srv <= 1'b0;               // rearme por bajada del nivel
         if (!b_req) b_srv <= 1'b0;
 
@@ -366,12 +409,17 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                 if (a_req && !a_srv && !a_we && a_hit) begin
                     a_dout <= clA_data[a_addr[3:1]*16 +: 16];
                     a_done <= 1'b1; a_srv <= 1'b1;
+                    inc_rd_a <= 1'b1;
                 end
                 if (b_req && !b_srv && b_hit) begin
                     b_dout <= clB_data[b_addr[3:1]*16 +: 16];
                     b_done <= 1'b1; b_srv <= 1'b1;
+                    inc_rd_b <= 1'b1;
                 end
-                if (a_req && !a_srv && !(!a_we && a_hit)) begin
+                // _132: solo se emite con el canal de emision LIBRE (nada
+                // retenido de una op anterior); payload y en en el mismo
+                // flanco — la IP los muestrea juntos
+                if (iss_free && a_req && !a_srv && !(!a_we && a_hit)) begin
                     op_b    <= 1'b0;
                     op_we   <= a_we;
                     op_addr <= a_addr;           // payload estable: el bridge
@@ -380,40 +428,45 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     op_combo <= (!a_we && b_req && !b_srv && !b_hit
                                  && b_addr[21:4] == a_addr[21:4]);
                     op_baddr <= b_addr;
+                    app_addr <= {7'd0, a_addr[21:4], 3'b000};
+                    app_en   <= 1'b1;
+                    if (a_we) begin
+                        app_cmd      <= 3'b000;
+                        app_wdf_wren <= 1'b1;
+                        app_wdf_data <= {16{a_wdata}};
+                        app_wdf_mask <= ~(16'h0001 << a_addr[3:0]);
+                    end
+                    else app_cmd <= 3'b001;
                     st <= ST_ISSUE;
                 end
-                else if (b_req && !b_srv && !b_hit) begin
+                else if (iss_free && b_req && !b_srv && !b_hit) begin
                     op_b    <= 1'b1;
                     op_we   <= 1'b0;
                     op_addr <= b_addr;
                     op_combo <= 1'b0;
+                    app_addr <= {7'd0, b_addr[21:4], 3'b000};
+                    app_cmd  <= 3'b001;
+                    app_en   <= 1'b1;
                     st <= ST_ISSUE;
+                end
+                else if (!iss_free && op_wd[16]) begin
+                    // _132: emision atascada para siempre (rdy muerto) con
+                    // clientes esperando — rescate FFFF desde IDLE para no
+                    // colgar la CPU (antes esta espera era eterna)
+                    if (a_req && !a_srv) begin
+                        a_dout <= 16'hFFFF; a_done <= 1'b1; a_srv <= 1'b1;
+                    end
+                    if (b_req && !b_srv) begin
+                        b_dout <= 16'hFFFF; b_done <= 1'b1; b_srv <= 1'b1;
+                    end
+                    if (wd_ops != 4'd15) wd_ops <= wd_ops + 4'd1;
                 end
             end
         ST_ISSUE:
-            if (op_wd[16]) begin                 // _95: rdy atascado — rescate
-                if (op_combo) begin
-                    a_dout <= 16'hFFFF; a_done <= 1'b1; a_srv <= 1'b1;
-                    b_dout <= 16'hFFFF; b_done <= 1'b1; b_srv <= 1'b1;
-                end
-                else if (op_b) begin
-                    b_dout <= 16'hFFFF; b_done <= 1'b1; b_srv <= 1'b1;
-                end
-                else begin
-                    a_dout <= 16'hFFFF; a_done <= 1'b1; a_srv <= 1'b1;
-                end
-                if (wd_ops != 4'd15) wd_ops <= wd_ops + 4'd1;
-                st <= ST_IDLE;
-            end
-            else if (app_rdy && app_wdf_rdy) begin
-                app_addr <= {7'd0, op_addr[21:4], 3'b000};
-                if (op_we) begin
-                    app_cmd <= 3'b000;
-                    app_en <= 1'b1;
-                    app_wdf_wren <= 1'b1;
-                    app_wdf_data <= {16{op_wdata}};
-                    app_wdf_mask <= ~(16'h0001 << op_addr[3:0]);
-                    a_done <= 1'b1; a_srv <= 1'b1;   // write = fire&forget
+            if (op_we) begin
+                if (iss_free) begin              // cmd Y dato aceptados
+                    a_done <= 1'b1; a_srv <= 1'b1;
+                    inc_wr <= 1'b1;
                     // _130: coherencia de la cache — actualizar el byte en
                     // las lineas cacheadas de AMBOS canales si el tag casa
                     if (clA_v && op_addr[21:4] == clA_tag)
@@ -422,34 +475,65 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                         clB_data[op_addr[3:0]*8 +: 8] <= op_wdata;
                     st <= ST_IDLE;
                 end
-                else begin
-                    app_cmd <= 3'b001;
-                    app_en <= 1'b1;
-                    st <= ST_WAITRD;
+                else if (op_wd[16]) begin
+                    // _95: escritura sin aceptar en ~0.9ms — completar en
+                    // falso al cliente, pero en/wren QUEDAN RETENIDOS: si
+                    // el rdy vuelve, la escritura tardia sigue siendo la
+                    // correcta (soltarla a medias = desincronizar)
+                    a_dout <= 16'hFFFF; a_done <= 1'b1; a_srv <= 1'b1;
+                    if (wd_ops != 4'd15) wd_ops <= wd_ops + 4'd1;
+                    st <= ST_IDLE;
+                end
+            end
+            else begin
+                if (!app_en) st <= ST_WAITRD;    // lectura aceptada
+                else if (op_wd[16]) begin        // _95: rdy atascado — rescate
+                    if (op_combo) begin
+                        a_dout <= 16'hFFFF; a_done <= 1'b1; a_srv <= 1'b1;
+                        b_dout <= 16'hFFFF; b_done <= 1'b1; b_srv <= 1'b1;
+                    end
+                    else if (op_b) begin
+                        b_dout <= 16'hFFFF; b_done <= 1'b1; b_srv <= 1'b1;
+                    end
+                    else begin
+                        a_dout <= 16'hFFFF; a_done <= 1'b1; a_srv <= 1'b1;
+                    end
+                    if (wd_ops != 4'd15) wd_ops <= wd_ops + 4'd1;
+                    st <= ST_IDLE;
                 end
             end
         ST_WAITRD:
             if (app_rd_data_valid) begin
-                if (op_combo) begin
-                    a_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
-                    b_dout <= app_rd_data[op_baddr[3:1]*16 +: 16];
-                    a_done <= 1'b1; a_srv <= 1'b1;
-                    b_done <= 1'b1; b_srv <= 1'b1;
-                    // _130: la linea aterriza en AMBAS caches
-                    clA_data <= app_rd_data; clA_tag <= op_addr[21:4]; clA_v <= 1'b1;
-                    clB_data <= app_rd_data; clB_tag <= op_addr[21:4]; clB_v <= 1'b1;
+                // _132: solo es NUESTRO dato si no hay beats rancios por
+                // delante (lecturas rescatadas cuyo dato llego tarde). Los
+                // rancios se consumen y descartan aqui mismo — sin esto,
+                // un solo rescate desplazaba TODAS las lecturas siguientes
+                // una posicion (cada lectura devolvia la linea anterior).
+                if (rd_pend == 4'd1) begin
+                    if (op_combo) begin
+                        a_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
+                        b_dout <= app_rd_data[op_baddr[3:1]*16 +: 16];
+                        a_done <= 1'b1; a_srv <= 1'b1;
+                        b_done <= 1'b1; b_srv <= 1'b1;
+                        inc_rd_a <= 1'b1; inc_rd_b <= 1'b1;
+                        // _130: la linea aterriza en AMBAS caches
+                        clA_data <= app_rd_data; clA_tag <= op_addr[21:4]; clA_v <= 1'b1;
+                        clB_data <= app_rd_data; clB_tag <= op_addr[21:4]; clB_v <= 1'b1;
+                    end
+                    else if (op_b) begin
+                        b_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
+                        b_done <= 1'b1; b_srv <= 1'b1;
+                        inc_rd_b <= 1'b1;
+                        clB_data <= app_rd_data; clB_tag <= op_addr[21:4]; clB_v <= 1'b1;
+                    end
+                    else begin
+                        a_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
+                        a_done <= 1'b1; a_srv <= 1'b1;
+                        inc_rd_a <= 1'b1;
+                        clA_data <= app_rd_data; clA_tag <= op_addr[21:4]; clA_v <= 1'b1;
+                    end
+                    st <= ST_IDLE;
                 end
-                else if (op_b) begin
-                    b_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
-                    b_done <= 1'b1; b_srv <= 1'b1;
-                    clB_data <= app_rd_data; clB_tag <= op_addr[21:4]; clB_v <= 1'b1;
-                end
-                else begin
-                    a_dout <= app_rd_data[op_addr[3:1]*16 +: 16];
-                    a_done <= 1'b1; a_srv <= 1'b1;
-                    clA_data <= app_rd_data; clA_tag <= op_addr[21:4]; clA_v <= 1'b1;
-                end
-                st <= ST_IDLE;
             end
             else if (op_wd[16]) begin            // _95: lectura que nunca vuelve
                 if (op_combo) begin

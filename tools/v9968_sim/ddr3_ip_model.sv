@@ -67,6 +67,7 @@ module DDR3_Memory_Interface_Top (
     parameter int LAT_MAX  = 18;
 
     bit fail_mode = 0;                   // el TB lo fuerza via jerarquia
+    bit glitch_rdy = 1;                  // _132: readys que caen (refresh &co)
 
     // clk_out 74.25MHz autogenerado
     initial clk_out = 1'b0;
@@ -95,7 +96,27 @@ module DDR3_Memory_Interface_Top (
     int unsigned rd_line_q[$];
     int          rd_lat_q[$];
 
+    // _132: FIFOs de escritura COMO LA IP REAL — el comando de escritura y
+    // su dato entran por interfaces INDEPENDIENTES (cmd_en/cmd_ready y
+    // wr_data_en/wr_data_rdy) y el controlador los empareja EN ORDEN. Si el
+    // cliente logra colar un lado y pierde el otro (el patron racy viejo),
+    // el emparejamiento queda corrido PARA SIEMPRE — exactamente la
+    // corrupcion estructurada vista en HW el 23/07.
+    int unsigned wcmd_q[$];              // lineas destino (addr[27:3])
+    logic [127:0] wdat_d_q[$];           // datos (paralela a wdat_m_q)
+    logic [15:0]  wdat_m_q[$];           // mascaras DM
+
     int lat_lfsr = 7;
+
+    // _132: caida pseudo-aleatoria de los readys (auto-refresh y ZQ de la
+    // IP real): cmd_ready cae REF_STALL ciclos cada REF_PERIOD; wr_data_rdy
+    // cae con otra fase y ademas a rafagas cortas por LFSR. Un cliente
+    // correcto (retener en hasta ver rdy) no pierde nada; el racy pierde
+    // operaciones y desincroniza.
+    parameter int REF_PERIOD = 380;
+    parameter int REF_STALL  = 17;
+    int ref_cnt = 0;
+    int rdy_lfsr = 29;
 
     initial begin
         cmd_ready = 1'b1;
@@ -106,8 +127,31 @@ module DDR3_Memory_Interface_Top (
     end
 
     always @(posedge clk_out) begin
+        // readys
+        if (glitch_rdy) begin
+            ref_cnt = (ref_cnt + 1) % REF_PERIOD;
+            rdy_lfsr = (rdy_lfsr * 13 + 7) % 251;
+            cmd_ready   <= !(ref_cnt < REF_STALL);
+            // wr_data_rdy con fase distinta + rafagas cortas aleatorias
+            wr_data_rdy <= !((ref_cnt >= 190 && ref_cnt < 190 + REF_STALL)
+                             || (rdy_lfsr < 12));
+        end
+        else begin
+            cmd_ready <= 1'b1; wr_data_rdy <= 1'b1;
+        end
+
         rd_data_valid <= 1'b0;
         rd_data_end   <= 1'b0;
+        // compromiso de escrituras: cabeza de ambas FIFOs emparejada en orden
+        while (wcmd_q.size() > 0 && wdat_d_q.size() > 0) begin
+            automatic int unsigned line = wcmd_q.pop_front();
+            automatic logic [127:0] wd = wdat_d_q.pop_front();
+            automatic logic [15:0]  wm = wdat_m_q.pop_front();
+            automatic logic [127:0] cur = mem.exists(line) ? mem[line] : '0;
+            for (int b = 0; b < 16; b++)
+                if (!wm[b]) cur[b*8 +: 8] = wd[b*8 +: 8];
+            mem[line] = cur;
+        end
         // servicio de la cola de lecturas
         for (int i = 0; i < rd_lat_q.size(); i++) rd_lat_q[i] = rd_lat_q[i] - 1;
         if (rd_lat_q.size() > 0 && rd_lat_q[0] <= 0 && !fail_mode) begin
@@ -117,21 +161,22 @@ module DDR3_Memory_Interface_Top (
             void'(rd_line_q.pop_front());
             void'(rd_lat_q.pop_front());
         end
-        // aceptar comandos
+        // aceptar comandos — SOLO con cmd_en && cmd_ready el mismo ciclo
+        // (la IP real ignora en silencio lo demas: ese es el contrato)
         if (cmd_en && cmd_ready && init_calib_complete) begin
             if (cmd == 3'b001) begin
                 lat_lfsr = (lat_lfsr * 5 + 3) % 97;
                 rd_line_q.push_back(addr[27:3]);
                 rd_lat_q.push_back(LAT_MIN + (lat_lfsr % (LAT_MAX - LAT_MIN + 1)));
             end
+            else if (cmd == 3'b000) begin
+                wcmd_q.push_back(addr[27:3]);
+            end
         end
-        // escritura (wr_data_en puede llegar el mismo ciclo que cmd_en)
+        // dato de escritura — interfaz independiente, emparejado por orden
         if (wr_data_en && wr_data_rdy && init_calib_complete) begin
-            automatic int unsigned line = addr[27:3];
-            automatic logic [127:0] cur = mem.exists(line) ? mem[line] : '0;
-            for (int b = 0; b < 16; b++)
-                if (!wr_data_mask[b]) cur[b*8 +: 8] = wr_data[b*8 +: 8];
-            mem[line] = cur;
+            wdat_d_q.push_back(wr_data);
+            wdat_m_q.push_back(wr_data_mask);
         end
     end
 

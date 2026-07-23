@@ -228,6 +228,74 @@ module tb_ddr3_backend;
         end
         $display("T7 coherencia cache OK");
 
+        // T8 (_132): MARTILLEO bajo readys cayendo — reproduce la corrupcion
+        // del 23/07. El modelo ya tumba cmd_ready/wr_data_rdy periodicamente
+        // (glitch_rdy=1 por defecto, tambien durante T1-T7); con el patron
+        // racy viejo esto pierde operaciones y desincroniza las FIFOs de la
+        // IP (franjas + glifos repetidos); con el handshake retenido debe
+        // salir PERFECTO. Fase 1: blit secuencial (el patron del logo).
+        // Fase 2: mezcla pseudo-aleatoria de escrituras/lecturas A/B/combo.
+        begin
+            automatic int lfsr = 32'sd12345;
+            automatic logic [21:0] ad;
+            automatic logic [7:0]  wv;
+            for (i = 0; i < 256; i++) begin           // fase 1: blit secuencial
+                op_a(1'b1, BASE + 22'h200 + i[21:0], 8'h30 ^ i[7:0], rw);
+                ref_mem[BASE + 22'h200 + i[21:0]] = 8'h30 ^ i[7:0];
+            end
+            for (i = 0; i < 256; i += 2) begin
+                op_a(1'b0, BASE + 22'h200 + i[21:0], 8'h00, rw);
+                if (rw !== ref_word(BASE + 22'h200 + i[21:0])) begin
+                    if (errores < 20)
+                        $display("FALLO T8-blit addr=%h leido=%h esp=%h",
+                                 BASE+22'h200+i[21:0], rw, ref_word(BASE+22'h200+i[21:0]));
+                    errores++;
+                end
+            end
+            for (i = 0; i < 500; i++) begin           // fase 2: mezcla
+                lfsr = (lfsr * 1103515245 + 12345) & 32'h7FFFFFFF;
+                ad = BASE + 22'h200 + ((lfsr >> 8) % 256);
+                wv = lfsr[23:16];
+                case (lfsr % 4)
+                2'd0: begin
+                    op_a(1'b1, ad, wv, rw);
+                    ref_mem[ad] = wv;
+                end
+                2'd1: begin
+                    op_a(1'b0, ad, 8'h00, rw);
+                    if (rw !== ref_word(ad)) begin
+                        if (errores < 20)
+                            $display("FALLO T8-rdA addr=%h leido=%h esp=%h",
+                                     ad, rw, ref_word(ad));
+                        errores++;
+                    end
+                end
+                2'd2: begin
+                    op_b_rd(ad, rw);
+                    if (rw !== ref_word(ad)) begin
+                        if (errores < 20)
+                            $display("FALLO T8-rdB addr=%h leido=%h esp=%h",
+                                     ad, rw, ref_word(ad));
+                        errores++;
+                    end
+                end
+                default: begin
+                    op_ab({ad[21:2], 2'b00}, {ad[21:2], 2'b10}, rw, rw2);
+                    if (rw  !== ref_word({ad[21:2], 2'b00}) ||
+                        rw2 !== ref_word({ad[21:2], 2'b10})) begin
+                        if (errores < 20)
+                            $display("FALLO T8-combo addr=%h A=%h/%h B=%h/%h",
+                                     {ad[21:2], 2'b00},
+                                     rw,  ref_word({ad[21:2], 2'b00}),
+                                     rw2, ref_word({ad[21:2], 2'b10}));
+                        errores++;
+                    end
+                end
+                endcase
+            end
+        end
+        $display("T8 martilleo con readys cayendo OK");
+
         // T6: watchdog _95 — el modelo deja de responder lecturas
         dut.u_ddr3.fail_mode = 1;
         op_a(1'b0, BASE, 8'h00, rw);
@@ -236,8 +304,24 @@ module tb_ddr3_backend;
             errores++;
         end
         dut.u_ddr3.fail_mode = 0;
-        op_a(1'b0, BASE, 8'h00, rw);   // el sistema sigue vivo
-        $display("T6 watchdog OK (diag=%h)", diag_w);
+        // _132: tras el rescate, el dato rancio de la lectura abandonada
+        // llega tarde — la siguiente lectura NO debe tomarlo como suyo
+        // (anti-desincronizacion rd_pend). Leemos direcciones ESCRITAS en
+        // T4 cuyas lineas seguro NO estan en cache tras el T8 (0x28001) y
+        // comprobamos el VALOR, no solo la vida.
+        op_a(1'b0, BASE + 22'h12, 8'h00, rw);
+        if (rw !== ref_word(BASE + 22'h12)) begin
+            $display("FALLO T6b desinc post-rescate: leido=%h esp=%h",
+                     rw, ref_word(BASE + 22'h12));
+            errores++;
+        end
+        op_b_rd(BASE + 22'h14, rw);
+        if (rw !== ref_word(BASE + 22'h14)) begin
+            $display("FALLO T6c desinc post-rescate B: leido=%h esp=%h",
+                     rw, ref_word(BASE + 22'h14));
+            errores++;
+        end
+        $display("T6 watchdog + anti-desincronizacion OK (diag=%h)", diag_w);
 
         if (errores == 0) $display("*** DDR3 BACKEND: TODO OK ***");
         else              $display("*** DDR3 BACKEND: %0d FALLOS ***", errores);
