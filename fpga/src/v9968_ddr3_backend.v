@@ -129,6 +129,17 @@ always @(posedge clk_g50) begin
         wd_cnt <= 25'd0;
         wd_rst <= 1'b0;
     end
+    // _144 CADENCIA UNIFORME: al terminar el pulso de reset (256 ciclos, en
+    // wd_cnt[7:0]==0xFF dentro de la ventana bit24) rearmamos el contador a 0.
+    // Antes wd_cnt corria libre toda la vuelta de 2^25 -> el 1er intento duraba
+    // 335ms pero los siguientes 671ms (el fallo lo cazo la investigacion DDR3).
+    // Con el rearme TODOS los intentos duran 335ms (umbral YA probado bueno: el
+    // 1er intento siempre uso 335ms y calibra) -> ~2x muestreo del ojo termico,
+    // ~mitad del peor caso. NO se toca PLL/POR/settle/mDRP (respeta _129/_130).
+    else if (wd_cnt[24] && (wd_cnt[23:8] == 16'd0) && (wd_cnt[7:0] == 8'hFF)) begin
+        wd_cnt <= 25'd0;
+        wd_rst <= 1'b0;
+    end
     else begin
         wd_cnt <= wd_cnt + 25'd1;
         wd_rst <= (wd_cnt[24] && (wd_cnt[23:8] == 16'd0));

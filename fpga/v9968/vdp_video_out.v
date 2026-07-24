@@ -57,7 +57,29 @@
 //
 // -----------------------------------------------------------------------------
 
-module vdp_video_out (
+module vdp_video_out #(
+	// MSXimus _143 CENTRADO: base de la muestra fuente donde arranca el
+	// puntero de lectura del magnificador. El upscan escribe el contenido
+	// (256 px MSX x2 = 512 muestras) en las direcciones content_start..+511,
+	// donde content_start = c_left_pos - 2*(reg_display_adjust ^ 8) = 32 -
+	// 2*(adj^8). Al adjust NEUTRO (reset del registro = adj=0) content_start
+	// = 32-16 = 16. Arrancar la lectura en 0 leia borde + recortaba px por la
+	// derecha. Arrancar en 16 lee las 512 muestras de CONTENIDO puro al adjust
+	// neutro => 256 px completos, centrados, sin recorte; SET ADJUST desplaza
+	// +-1px/paso (rango -7..+8). Solo cambia la DIRECCION base de lectura: no
+	// toca h_en/hs/vs ni el span (sincronismo HDMI intacto).
+	// Verificado en tb_center (adj=0) => histograma {3:256}, 0 borde.
+	parameter [9:0]	c_read_start = 10'd16,
+	// MSXimus _143 PRIME: adelanta el arranque de la ventana ACTIVA (arranque
+	// del puntero de lectura + reset del Bresenham) respecto a h_en_start (748)
+	// para CEBAR la tuberia del magnificador (lat ~8 columnas) antes de que se
+	// abra la ventana visible. Solo mueve el INICIO de la lectura; el final
+	// (active_area_end) queda fijo en 2283 y hs/vs/display_en no se tocan.
+	// 747-16 = 731: ADV16 h_counts (8 columnas de prime) = latencia exacta de
+	// la tuberia (indep. del adjust); verificado en tb_center adj=0 (con
+	// c_read_start=16) => histograma {3:256}, 0 borde izq/der.
+	parameter [11:0] c_active_start = 12'd731
+)(
 	input				clk,						//	42.95454MHz
 	input				reset_n,
 	input		[11:0]	h_count,
@@ -84,11 +106,11 @@ module vdp_video_out (
 );
 	localparam		c_v_count_max_60	= 10'd523;
 	localparam		c_v_count_max_50	= 10'd625;
-	localparam		active_area_start	= 12'd747;
-	localparam		active_area_end		= active_area_start + 12'd1600;
+	localparam		active_area_start	= c_active_start;
+	localparam		active_area_end		= 12'd747 + 12'd1536;	//	fijo (2283)
 	localparam		clocks_per_line		= 12'd2736;
 	localparam		h_en_start			= 12'd748;
-	localparam		h_en_end			= h_en_start + 12'd1600;
+	localparam		h_en_end			= h_en_start + 12'd1536;
 	localparam		hs_start			= clocks_per_line - 1;
 	localparam		hs_end				= 12'd567;
 	localparam		v_en_start			= 10'd14;
@@ -97,7 +119,7 @@ module vdp_video_out (
 	localparam		vs_end_60hz			= c_v_count_max_60 - 10'd6;
 	localparam		vs_start_50hz		= c_v_count_max_50 - 10'd13;
 	localparam		vs_end_50hz			= c_v_count_max_50 - 10'd6;
-	localparam		c_numerator			= 576 / 4;
+	localparam		c_numerator			= 512 / 4;
 
 	wire			w_enable;
 	wire	[9:0]	w_x_position_w;
@@ -235,10 +257,10 @@ module vdp_video_out (
 	// --------------------------------------------------------------------
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
-			ff_x_position_r <= 10'd0;
+			ff_x_position_r <= c_read_start;
 		end
 		else if( h_count == active_area_start ) begin
-			ff_x_position_r <= 10'd0;
+			ff_x_position_r <= c_read_start;
 		end
 		else if( !w_enable ) begin
 			//	hold
