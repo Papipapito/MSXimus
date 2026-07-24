@@ -131,8 +131,16 @@ module msx2hdmi_v9968 (
     // 4 columnas EXACTAS, inmune a la fase de los bordes. Ventana 1066
     // centrada (~11% mas ancha que el 4:3 puro). En la _128 se decide:
     // tercera opcion de menu o sustitucion.
-    localparam XSTART          = (1280-960)/2;   // 160   (4:3 clasico)
-    localparam XSTOP           = (1280+960)/2;   // 1120  (4:3 clasico)
+    // _141 4:3 PIXEL-PERFECT x3: ventana 800 (no 960) -> el nativo del V9968
+    // (800 = 256*3 contenido + borde) se pasa 1:1 => cada pixel MSX = 3
+    // columnas EXACTAS (uniforme, la "H" con los dos palos iguales) y el
+    // contenido 768x576 = 4:3 REAL. Antes 960 daba x1.2 (columnas 4,4,4,3
+    // por celda = caracteres descuadrados). El 16:9 sigue siendo pixel-perfect
+    // x4 (1066). OJO: los modos de TEXTO de 40/80 col (240/480px de contenido)
+    // los escala el propio V9968 a 768 con factor no-entero -> ahi la
+    // uniformidad la limita el core, no este escalador (SCREEN1 256px = limpio).
+    localparam XSTART          = (1280-800)/2;   // 240   (4:3 pixel-perfect x3)
+    localparam XSTOP           = (1280+800)/2;   // 1040  (4:3 pixel-perfect x3)
     localparam XSTART_P        = (1280-1066)/2;  // 107   (pixel-perfecto)
     localparam XSTOP_P         = (1280+1066)/2;  // 1173  (pixel-perfecto)
     // _56 (16:9 estirado): ventana a pantalla completa, 720→1280
@@ -385,8 +393,8 @@ module msx2hdmi_v9968 (
     wire [11:0] wlast    = pal_x ? 12'd1979 : 12'd1649;             // W-1
     wire        xacc_en  = wide_x ? ((cx >= XSTART_P-2) && (cx < XSTOP_P-3))
                                   : ((cx >= XSTART-2)   && (cx < XSTOP-3));
-    wire [10:0] xthresh  = wide_x ? 11'd800 : 11'd960;
-    wire [10:0] xinc     = wide_x ? 11'd600 : 11'd800;     // x4/3 / x1,2
+    wire [10:0] xthresh  = wide_x ? 11'd800 : 11'd800;    // _141: 4:3 x1 (=x3 MSX)
+    wire [10:0] xinc     = wide_x ? 11'd600 : 11'd800;     // 16:9 x4/3 / 4:3 x1
     wire        xrst_now = (cx == 12'd0);
 
     always @(posedge clk_pixel) begin : scaler
