@@ -342,6 +342,13 @@ reg [31:0] cur_word;                     // acumulador de lectura / dato de escr
 reg [3:0]  cur_mask;
 reg [1:0]  cur_wbyte;                    // byte en curso de la escritura
 reg        word_pend;                    // palabra de 32b en construccion
+// _140 Punto B: estado PROPIO de la escritura multibyte suspendida. cur_addrw
+// y cur_word los reutiliza cada lectura/prefetch al lanzarse; para poder
+// PREEMPTIR una escritura a medias con un prefetch (sin corromper su
+// direccion/dato) la escritura vive en registros dedicados. cur_mask y
+// cur_wbyte ya son privados de la escritura (ninguna lectura los toca).
+reg [15:0] wr_addrw;                     // addr[17:2] de la escritura en curso
+reg [31:0] wr_word;                      // 32b a escribir (bytes por mascara)
 
 // respuesta tardia (rq) esperando hueco de salida
 reg        late_v;
@@ -362,7 +369,15 @@ reg [31:0] late_data;
 // entrada queda invalida y el siguiente fetch la rescata). La RESPUESTA
 // al consumidor (late_v) NO se descarta: el unico lector que podria ver
 // su propia escritura pendiente es la CPU, y no puede reordenarse asi.
-wire pf_dirty = (wq_vld[0] && wq[0][15:0] == cur_addrw) ||
+// _140 Punto B: ademas de las escrituras EN COLA (wq), un fill se descarta si
+// choca con la escritura multibyte SUSPENDIDA (ya sacada de wq, viva en
+// wr_addrw con word_pend): al preemptir word_pend con un prefetch, ese
+// prefetch podria leer de VRAM la palabra a medio escribir (unos bytes nuevos,
+// otros viejos) y cachearla rancia. Solo el prefetch (pfq) puede intercalarse
+// con una escritura suspendida (rq/late van por debajo de word_pend); su fill
+// queda cubierto aqui. La ESCRITURA en VRAM se completa igual (autocura).
+wire pf_dirty = (word_pend && wr_addrw == cur_addrw) ||
+                (wq_vld[0] && wq[0][15:0] == cur_addrw) ||
                 (wq_vld[1] && wq[1][15:0] == cur_addrw) ||
                 (wq_vld[2] && wq[2][15:0] == cur_addrw) ||
                 (wq_vld[3] && wq[3][15:0] == cur_addrw) ||
@@ -498,11 +513,29 @@ always @(posedge clk_vdp) begin
 end
 reg        pwqB_v;
 
-wire [21:0] sd_base = VRAM_BASE + {4'd0, cur_addrw, 2'b00};
+wire [21:0] sd_base = VRAM_BASE + {4'd0, wr_addrw, 2'b00};  // _140 Punto B: base de la escritura suspendida
 wire [15:0] nxt_w   = vram_address[17:2] + 16'd1;   // palabra siguiente (OBL)
 // primer byte habilitado que queda en la mascara de la escritura en curso
 wire [1:0]  nxt_byte = cur_mask[0] ? 2'd0 : cur_mask[1] ? 2'd1
                      : cur_mask[2] ? 2'd2 : 2'd3;
+
+// _140 WRITE-THROUGH-UPDATE de la VENTANA (raiz del miss-durante-escritura):
+// una escritura de comando que CASA una entrada viva de la ventana (mismo
+// tag) la ACTUALIZA EN SITIO en vez de invalidarla — asi el display no
+// re-fetchea la palabra recien dibujada y se mata la tormenta de re-fetch
+// (~2.7 miss/escritura medidos). wrk_addr1 comparte indice con pwq (leido
+// en el ciclo previo desde el MISMO puerto pw_ridx), asi que pwq[31:0] es el
+// contenido actual de esa entrada; se fusionan los bytes habilitados
+// (wrk_mask1 = DQM, 0 = escribir) sobre el dato viejo. El puerto de escritura
+// de pw_mem (pww) queda muxeado update-vs-fill: en colision GANA el update y
+// el fill se DESCARTA (autocura via miss->rescate, igual que pf_dirty).
+wire wu_hit = wrk_p1 && pwq_v && (pwq[41:32] == wrk_addr1[15:6]);
+wire [31:0] wu_merged = {
+    wrk_mask1[3] ? pwq[31:24] : wrk_data1[31:24],
+    wrk_mask1[2] ? pwq[23:16] : wrk_data1[23:16],
+    wrk_mask1[1] ? pwq[15:8]  : wrk_data1[15:8],
+    wrk_mask1[0] ? pwq[7:0]   : wrk_data1[7:0]
+};
 
 always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
@@ -510,7 +543,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 8'd0;
         bsy <= 0; done_d <= 0; done2_d <= 0; got_lo <= 0; got_hi <= 0;
         pwv_set_p <= 0; pwv_set_i <= 0;
-        word_pend <= 0;
+        word_pend <= 0; wr_addrw <= 0; wr_word <= 0;
         cur_kind <= 0; cur_half <= 0; cur_addrw <= 0; cur_tag <= 0;
         bk2_req <= 0; bk2_addr <= 0;
         cur_word <= 0; cur_mask <= 0; cur_wbyte <= 0;
@@ -577,10 +610,20 @@ always @(posedge clk_vdp or negedge rst_n) begin
         pipe[0] <= 38'd0;
         // (_126: el S6_hijack ya no existe — el OBL tiene su BSRAM espejo)
 
-        // ---------- write-check de la VENTANA (v4, etapa 1): invalidacion
-        // por coherencia si el tag leido de la BSRAM casa ----
-        if (wrk_p1 && pwq_v && pwq[41:32] == wrk_addr1[15:6])
-            pw_v[w_idx(wrk_addr1)] <= 1'b0;
+        // ---------- write-check de la VENTANA (v4, etapa 1) — _140:
+        // WRITE-THROUGH-UPDATE (antes: invalidacion). Si el tag leido de la
+        // BSRAM casa, se re-escribe la MISMA entrada con el dato fusionado y
+        // pw_v se MANTIENE (no se toca) -> la palabra dibujada sigue caliente
+        // y el display no la re-fetchea (mata el ~2.7 miss/escritura). El
+        // update es el usuario PRIORITARIO del puerto pww este ciclo: los
+        // fills del backend se auto-gatean con !wu_hit mas abajo. Un fill
+        // descartado se autocura por el camino miss->rescate (como pf_dirty).
+        if (wu_hit) begin
+            pww_en   <= 1'b1;
+            pww_idx  <= w_idx(wrk_addr1);
+            pww_tag  <= wrk_addr1[15:6];
+            pww_data <= wu_merged;
+        end
 
         // ---------- OBL en TRES fases (_121b) — _126: con el ESPEJO pw_tagB
         // el OBL ya no cede puerto: dispara SIEMPRE al ciclo siguiente del
@@ -851,7 +894,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 if (cur_kind == 2'd0) begin
                     // fill de ventana via registros pww (write-site BSRAM)
                     // _126: descartado si hay escritura pendiente al word
-                    if (!pf_dirty) begin
+                    // _140: y cede el puerto pww al write-through-update de
+                    // este ciclo (!wu_hit); el fill descartado se re-siembra
+                    // por el camino miss->rescate.
+                    if (!pf_dirty && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
@@ -864,8 +910,9 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     late_v    <= 1'b1;
                     late_tag  <= cur_tag;
                     late_data <= {w_hi, w_lo};
-                    // y de paso a la ventana si es bg (_126: mismo descarte)
-                    if (cur_tag[4:2] == C_BG && !pf_dirty) begin
+                    // y de paso a la ventana si es bg (_126: mismo descarte;
+                    // _140: cede pww al write-through-update, !wu_hit)
+                    if (cur_tag[4:2] == C_BG && !pf_dirty && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
@@ -887,30 +934,26 @@ always @(posedge clk_vdp or negedge rst_n) begin
 
         // ---------- backend: lanzar siguiente op ----------
         if (!bsy) begin
-            if (word_pend) begin
-                // solo ESCRITURAS (las lecturas ya no continúan: sus dos
-                // mitades salieron juntas): siguiente byte HABILITADO de la
-                // mascara (el completado ya se borro de cur_mask)
-                bsy <= 1'b1; bk_req <= 1'b1;
-                bk_we     <= 1'b1;
-                cur_wbyte <= nxt_byte;
-                bk_addr   <= sd_base | {20'd0, nxt_byte};
-                bk_wdata  <= cur_word[8*nxt_byte +: 8];
-            end
-            // _126 (definitivo): PANTALLA > ESCRITURAS > LECTURAS-DEMANDA.
-            //  1. pfq (streaming de ventana) — sagrado: el pipe de 8 ciclos
-            //     no puede esperar a la SDRAM; cada miss de ventana es
-            //     basura visible (16k/frame con wq primero = rectangulos
-            //     SC8 despedazados; medido 73 con pfq primero).
-            //  2. wq antes que rq: la coherencia write->read GLOBAL sale
-            //     gratis (un read nunca adelanta a una escritura mas
-            //     vieja). El unico que salta escrituras es el prefetch,
-            //     y su hazard lo cubre pf_dirty descartando el fill.
-            //  3. rq al final: CPU/sprite/dest-de-comando esperan lo que
-            //     haya — wq esta acotada (stall del interface a 2) y pfq
-            //     por el ritmo del display; el peor caso es ~us, igual
-            //     que los slots de CPU del VDP real en linea activa.
-            else if (!pfq_empty) begin
+            // _126/_140: PANTALLA > (escritura en curso) > ESCRITURAS-NUEVAS >
+            // LECTURAS-DEMANDA.
+            //  1. pfq (streaming de ventana) — sagrado: el pipe de 8 ciclos no
+            //     puede esperar a la SDRAM; cada miss = basura visible. _140
+            //     Punto B: pfq AHORA por ENCIMA de word_pend — antes una
+            //     escritura multibyte acaparaba canal-A hasta 4 byte-ops y
+            //     retrasaba prefetches urgentes (44/63 miss del frame de
+            //     rafaga estaban EN COLA, llegando tarde). El prefetch
+            //     preempte; la escritura conserva su estado propio
+            //     (wr_addrw/wr_word + cur_mask/cur_wbyte) y RESUME al vaciarse
+            //     pfq (hblank). Cada byte es una op de backend independiente y
+            //     su hazard con el prefetch lo cubre pf_dirty (termino
+            //     word_pend). wq no se pierde: vram_stall acota la interface.
+            //  2. word_pend: terminar la escritura en curso byte a byte.
+            //  3. wq antes que rq: coherencia write->read GLOBAL gratis (un
+            //     read nunca adelanta a una escritura mas vieja).
+            //  4. rq al final: CPU/sprite/dest-de-comando esperan; solo se
+            //     lanza con word_pend=0, asi que un rq NUNCA lee una palabra a
+            //     medio escribir (la unica que se intercala es el prefetch).
+            if (!pfq_empty) begin
                 cur_kind  <= 2'd0;
                 cur_addrw <= pfq[pfq_rp];
                 pfq_rp    <= pfq_rp + 3'd1;
@@ -920,10 +963,28 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bk2_req  <= 1'b1;
                 bk2_addr <= (VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00}) | 22'd2;
             end
+            else if (word_pend) begin
+                // continuar la ESCRITURA multibyte suspendida: siguiente byte
+                // HABILITADO de la mascara (estado en wr_*/cur_mask/cur_wbyte)
+                // _140 Punto B CRITICO: RE-AFIRMAR cur_kind=2. Antes word_pend
+                // era prioridad maxima y nada corria entre bytes, asi que
+                // cur_kind seguia en 2 toda la escritura y no hacia falta
+                // ponerlo aqui. Ahora un prefetch PREEMPTE entre bytes y deja
+                // cur_kind=0 -> sin esto, la completacion del byte se enruta al
+                // camino de LECTURA (cur_kind!=2), cur_mask no se limpia,
+                // word_pend no avanza y el byte se relanza en bucle (livelock:
+                // bkwr disparado + VRAM corrupta).
+                cur_kind  <= 2'd2;
+                bsy <= 1'b1; bk_req <= 1'b1;
+                bk_we     <= 1'b1;
+                cur_wbyte <= nxt_byte;
+                bk_addr   <= sd_base | {20'd0, nxt_byte};
+                bk_wdata  <= wr_word[8*nxt_byte +: 8];
+            end
             else if (!wq_empty) begin
                 cur_kind  <= 2'd2;
-                cur_addrw <= wq[wq_rp][15:0];
-                cur_word  <= wq[wq_rp][47:16];
+                wr_addrw  <= wq[wq_rp][15:0];
+                wr_word   <= wq[wq_rp][47:16];
                 cur_mask  <= wq[wq_rp][51:48];
                 wq_vld[wq_rp] <= 1'b0;
                 wq_rp     <= wq_rp + 3'd1;
