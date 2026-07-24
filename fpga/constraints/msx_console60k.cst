@@ -336,6 +336,18 @@ IO_PORT "ddr_dqs[1]" IO_TYPE=SSTL15D_I PULL_MODE=NONE DRIVE=8 SINGLE_RESISTOR=OF
 IO_LOC "ddr_dqs[0]" Y3,AA3;
 IO_PORT "ddr_dqs[0]" IO_TYPE=SSTL15D_I PULL_MODE=NONE DRIVE=8 SINGLE_RESISTOR=OFF BANK_VCCIO=1.5;
 
+// _145 FIJAR EL PHY DDR3 (vía B — lo que nos FALTABA vs nand2mario): sin
+// estas dos INS_LOC el placer de Gowin coloca el DLL y el PLL de la DDR3
+// donde puede, y en nuestro diseño congestionado los empuja a un mal sitio
+// => ojo de calibracion pequeno => arranque loteria + caidas termicas. Las
+// copiamos VERBATIM de nand2mario/console60k.cst, adaptando el prefijo de
+// jerarquia fb/ -> u_vddr3/ (nuestra instancia del v9968_ddr3_backend en
+// top.v; dentro: u_ddr3 = DDR3_Memory_Interface_Top, pll_ddr3_inst = pll).
+// DDRDLLM_BL = macro fisico del DLL DDR3 (bottom-left, junto al banco DDR3);
+// PLL_L[0] = PLL izquierdo. Deterministas => deberian matar la loteria.
+INS_LOC "u_vddr3/u_ddr3/gw3_top/u_ddr_phy_top/u_dll" DDRDLLM_BL;
+INS_LOC "u_vddr3/pll_ddr3_inst/PLLA_inst" PLL_L[0];
+
 // Ventilador (Console 60K): FAN_EN en AB12 (Bank 9 a 1.5V), 1 = 5V al
 // conector SH1.0. PULL_MODE=DOWN = apagado durante la configuracion.
 IO_LOC  "fan_en_o" AB12;
