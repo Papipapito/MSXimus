@@ -385,17 +385,18 @@ module msx2hdmi_v9968 (
     reg [10:0] ycnt = 11'd0;
     reg [9:0]  cy_r = 10'd0;
 
-    // _56: geometría del escalador horizontal muxeada por aspecto
-    // _127C: la posicion "wide" es ahora el modo pixel-perfecto — ventana
-    // CENTRADA como el 4:3 (la acrobacia del wrap con wlast era solo para
-    // la ventana a pantalla completa del 16:9 original; wlast se conserva
-    // para el bookkeeping de fin de linea del ring).
+    // _143 PANTALLA COMPLETA SIEMPRE (como el MSXnano): el escalador llena el
+    // 1280 entero -> 256px MSX * 5 = 1280 EXACTO => pixeles UNIFORMES y SIN
+    // marco. Se retiran el 4:3 pixel-perfect (_141, imagen pequena con marco
+    // que molestaba a Albert) y el 1066 pixel-perfect (_127C): Albert quiere
+    // UN modo full-screen como el MSXnano (que no tiene 4:3). wide_x deja de
+    // afectar a la geometria (misma ventana full-screen con wrap que el
+    // MSXnano, ajustado al nativo de 800 del V9968: xcnt+=800, umbral 1280).
     wire [11:0] wlast    = pal_x ? 12'd1979 : 12'd1649;             // W-1
-    wire        xacc_en  = wide_x ? ((cx >= XSTART_P-2) && (cx < XSTOP_P-3))
-                                  : ((cx >= XSTART-2)   && (cx < XSTOP-3));
-    wire [10:0] xthresh  = wide_x ? 11'd800 : 11'd800;    // _141: 4:3 x1 (=x3 MSX)
-    wire [10:0] xinc     = wide_x ? 11'd600 : 11'd800;     // 16:9 x4/3 / 4:3 x1
-    wire        xrst_now = (cx == 12'd0);
+    wire        xacc_en  = (cx >= wlast - 12'd1) || (cx < XSTOP_W - 12'd3);
+    wire [10:0] xthresh  = 11'd1280;                     // ventana = 1280 (full)
+    wire [10:0] xinc     = 11'd800;                       // nativo del V9968 = 800
+    wire        xrst_now = (cx == wlast - 12'd2);
 
     always @(posedge clk_pixel) begin : scaler
         reg [10:0] xcnt_next;
@@ -476,19 +477,19 @@ module msx2hdmi_v9968 (
     end
 
     // Lectura del ring: base registrada + xx; dato registrado + registro rgb.
-    wire [14:0] rd_base = (wide_x && use_tgt_r) ? (tgt_is0_r ? 15'd0 : yy720_inc_r)
-                                                : yy720_r;
+    // _143: full-screen SIEMPRE -> el wrap de fin de linea (use_tgt_r) aplica
+    // en ambos aspectos (ya no gateado por wide_x).
+    wire [14:0] rd_base = use_tgt_r ? (tgt_is0_r ? 15'd0 : yy720_inc_r)
+                                    : yy720_r;
     wire [14:0] rd_addr = rd_base + {5'd0, xx};
     reg  [17:0] rd_data = 18'd0;
     reg  [23:0] rgb     = 24'd0;
 
-    // "El PRÓXIMO ciclo está dentro de la ventana activa" del modo:
-    //  4:3:  cx+1 ∈ [160,1120) en línea activa.
-    //  16:9: cx+1 ∈ [0,1280) — en cx==W-1 el próximo píxel es el x=0 de la
-    //        LÍNEA SIGUIENTE (activa si cy<719, o cy==749 → línea 0).
-    // _127C: ventana pixel-perfecta CENTRADA (sin el caso del wrap en wlast)
-    wire win_next = wide_x ? ((cx >= XSTART_P-1) && (cx < XSTOP_P-1) && (cy < 10'd720))
-                           : ((cx >= XSTART-1) && (cx < XSTOP-1) && (cy < 10'd720));
+    // _143: ventana activa = PANTALLA COMPLETA (como el MSXnano): cx+1 ∈
+    // [0,1280); en cx==wlast el proximo pixel es el x=0 de la linea siguiente
+    // (activa si cy<719, o cy==749 -> linea 0). wide_x ya no afecta.
+    wire win_next = ((cx < XSTOP_W - 12'd1) && (cy < 10'd720)) ||
+                    ((cx == wlast) && ((cy < 10'd719) || (cy == 10'd749)));
 
     always @(posedge clk_pixel) begin
         rd_data <= mem[rd_addr];
