@@ -75,3 +75,11 @@ regenerar referencias si el upstream cambia semantica visible; luego los
 testbenches PROPIOS de HRA del arbol th9958 (test_command_cache,
 test_vdp_timing_control*, test_vdp2/3) como red extra. DEVCON.COM del
 arbol para el examen final en HW.
+
+[_142 2026-07-24] vdp_video_out.v: NEAREST-NEIGHBOR opcional del magnificador
+horizontal (ff_coeff snap a 0/63). El core de HRA usa un magnificador LCD
+BILINEAL (256->800 fraccional) que difumina los bordes de pixel => fuentes
+retro con la "H" descuadrada (un palo mas fino). El snap elige el pixel mas
+cercano sin mezcla => bordes nitidos como el V9958 del MSXnano (DISP_WIDTH=720,
+sin interpolar). Revert trivial: restaurar la linea comentada. Build de prueba
+para A/B con texto+juegos (Albert 24/07).

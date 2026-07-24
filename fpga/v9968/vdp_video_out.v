@@ -311,7 +311,15 @@ module vdp_video_out (
 			ff_coeff	<= 8'd0;
 		end
 		else if( w_enable ) begin
-			ff_coeff	<= w_normalized_numerator[14:7];					//	0 ... 63
+			// MSXimus _142 NEAREST-NEIGHBOR (fuentes nitidas, como el MSXnano
+			// V9958): el magnificador "LCD" de HRA mezclaba (bilineal) los
+			// pixeles MSX al estirarlos a 800 -> bordes difuminados, la "H"
+			// con un palo mas fino. Redondeando el coeficiente fraccional al
+			// pixel MAS CERCANO (0 = tap1 izq, 63 = tap0 dcha) se elige un
+			// solo pixel sin mezcla => bordes nitidos. Original preservado
+			// en el comentario para revertir facil.
+			//	ff_coeff <= w_normalized_numerator[14:7];					//	0 ... 63 (bilineal HRA)
+			ff_coeff	<= (w_normalized_numerator[14:7] >= 8'd32) ? 8'd63 : 8'd0;
 		end
 	end
 
