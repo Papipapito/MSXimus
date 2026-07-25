@@ -1009,11 +1009,11 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // _140: cede el puerto pww al write-through-update de
                     // este ciclo (!wu_hit); el fill descartado se re-siembra
                     // por el camino miss->rescate.
-                    if (!pf_drop && !wu_hit) begin
+                    if (!pf_dirty && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
-                        pww_data <= pf_fuse({w_hi, w_lo});
+                        pww_data <= {w_hi, w_lo};
                         pwv_set_p <= 1'b1;
                         pwv_set_i <= w_idx(cur_addrw);
                     end
@@ -1027,20 +1027,20 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     late_data <= {w_hi, w_lo};
                     // y de paso a la ventana si es bg
                     // (_140: cede pww al write-through-update, !wu_hit)
-                    if (cur_tag[4:2] == C_BG && !pf_drop && !wu_hit) begin
+                    if (cur_tag[4:2] == C_BG && !pf_dirty && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
-                        pww_data <= pf_fuse({w_hi, w_lo});
+                        pww_data <= {w_hi, w_lo};
                         pwv_set_p <= 1'b1;
                         pwv_set_i <= w_idx(cur_addrw);
                     end
                     // ...y a la CACHE (v3c: TODO consumidor de lectura
                     // rellena — bg/sprite/CPU/comando) — via fill_pend
-                    if (!pf_drop) begin
+                    if (!pf_dirty) begin
                         fill_pend <= 1'b1;
                         fill_addr <= cur_addrw;
-                        fill_word <= pf_fuse({w_hi, w_lo});
+                        fill_word <= {w_hi, w_lo};
                     end
                 end
             end
