@@ -202,7 +202,33 @@ integer npix=0, nnz=0;
 wire        x_is_sp  = u_shim.spr_p1 && (u_shim.spr_tag1[4:2] == 3'd2);
 wire        x_sp_hit = x_is_sp && u_shim.scq_v &&
                        (u_shim.scq_tag == u_shim.spr_addr1[15:12]);
+// _150: el tap de arriba mide SOLO la sc-cache (etapa 1). Con el VICTIM BUFFER
+// el miss REAL (el que va al backend) se decide en la etapa 2, asi que hace
+// falta un segundo par de taps o la cifra de miss "no se mueve" aunque el
+// rescate funcione. x_vbh = rescates del VB; x_real = miss que SI van al
+// backend. Ambos son de SOLO LECTURA sobre el DUT.
+integer x_vbh=0, x_real=0;
+wire        x_vb_hit = u_shim.vb_p2 &&  u_shim.vb_hit2 && (u_shim.vb_tag2[4:2] == 3'd2);
+wire        x_vb_mis = u_shim.vb_p2 && !u_shim.vb_hit2 && (u_shim.vb_tag2[4:2] == 3'd2);
+// CLASIFICACION por region de VRAM del setup de sprite3: bg = palabras
+// 0x0000-0x1FFF (SCREEN5 pagina 0), SPT = 0x2000-0x3FFF (0x8000 en bytes),
+// SAT = 0x4000+ (0x10000 en bytes). Sirve para ver QUIEN llena la sc-cache y
+// QUIEN falla, en vez de suponerlo.
+integer x_f_bg=0, x_f_spt=0, x_f_sat=0, x_f_otro=0;
+integer x_m_spt=0, x_m_sat=0;
 always @(posedge clk) begin
+    if (x_vb_hit) x_vbh  <= x_vbh  + 1;
+    if (x_vb_mis) x_real <= x_real + 1;
+    if (u_shim.fill_now) begin
+        if      (u_shim.fill_addr < 16'h2000) x_f_bg   <= x_f_bg + 1;
+        else if (u_shim.fill_addr < 16'h4000) x_f_spt  <= x_f_spt + 1;
+        else if (u_shim.fill_addr < 16'h4020) x_f_sat  <= x_f_sat + 1;
+        else                                  x_f_otro <= x_f_otro + 1;
+    end
+    if (x_vb_mis) begin
+        if (u_shim.vb_addr2 < 16'h4000) x_m_spt <= x_m_spt + 1;
+        else                            x_m_sat <= x_m_sat + 1;
+    end
     if (vram_valid) begin
         if (vram_write) f_wr <= f_wr + 1;
         else case (vram_tag[4:2])
@@ -233,10 +259,23 @@ always @(posedge clk) begin
                  vs_count, u_shim.c_spfet, u_shim.c_spfet - t_spfet,
                  u_shim.c_spmiss, u_shim.c_spmiss - t_spmiss, u_shim.c_miss,
                  u_shim.dbg_miss, u_shim.dbg_miss[31:16], u_shim.dbg_miss[15:0]);
+        // _150 VICTIM BUFFER: rescates y miss REAL (el que llega al backend).
+        $display("SPVB  vs=%0d | sp=%0d | scmiss=%0d (%0d.%02d%%) vbhit=%0d REAL=%0d (%0d.%02d%%) | c_vbhit=%0d",
+                 vs_count, x_sp, x_miss,
+                 (x_sp>0)? (x_miss*100)/x_sp : 0,
+                 (x_sp>0)? ((x_miss*10000)/x_sp) % 100 : 0,
+                 x_vbh, x_real,
+                 (x_sp>0)? (x_real*100)/x_sp : 0,
+                 (x_sp>0)? ((x_real*10000)/x_sp) % 100 : 0,
+                 u_shim.c_vbhit);
+        $display("SPCLS vs=%0d | FILLS bg=%0d spt=%0d sat=%0d otro=%0d | MISS_REAL spt=%0d sat=%0d",
+                 vs_count, x_f_bg, x_f_spt, x_f_sat, x_f_otro, x_m_spt, x_m_sat);
+        x_f_bg<=0; x_f_spt<=0; x_f_sat<=0; x_f_otro<=0; x_m_spt<=0; x_m_sat<=0;
         t_spfet  <= u_shim.c_spfet;
         t_spmiss <= u_shim.c_spmiss;
         f_bg<=0; f_sp<=0; f_cpu<=0; f_cmd<=0; f_wr<=0;
         x_sp<=0; x_chit<=0; x_miss<=0; npix<=0; nnz<=0;
+        x_vbh<=0; x_real<=0;
     end
 end
 reg [31:0] t_spfet = 0, t_spmiss = 0;
