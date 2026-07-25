@@ -83,3 +83,36 @@ retro con la "H" descuadrada (un palo mas fino). El snap elige el pixel mas
 cercano sin mezcla => bordes nitidos como el V9958 del MSXnano (DISP_WIDTH=720,
 sin interpolar). Revert trivial: restaurar la linea comentada. Build de prueba
 para A/B con texto+juegos (Albert 24/07).
+
+[_147 2026-07-25] vdp_video_out.v: c_active_start 731 -> 729 (una columna mas
+de prime). FIX de la REGRESION de la _144 en los modos de UNA MUESTRA POR
+PIXEL: TEXT2 (SCREEN0 W80 = el menu del MSXimus), SCREEN6 y SCREEN7.
+CADENA: el magnificador reparte 512 muestras del line buffer en 768 columnas
+nativas (2/3 -> patron 2,1,2,1) y msx2hdmi_v9968 reparte esas 768 columnas en
+los 1280 px de pantalla (xx = floor(3*cx/5) -> patron 2,2,1). Un pixel de
+2 muestras (todos los modos de 256 px y TEXT1) ocupa SIEMPRE 3 columnas
+nativas, y 3 columnas nativas consecutivas suman SIEMPRE 5 px de pantalla:
+INMUNES al alineamiento. Un pixel de 1 muestra ocupa 1 o 2 columnas y el
+reparto final depende del residuo mod 3 de la columna nativa donde empieza:
+residuo 0 -> 4,1 px (pixeles alternos CUATRO veces mas anchos = "otra fuente")
+residuo 1 o 2 -> 3,2 px (optimo, media 2,5 = 1280/512).
+El residuo lo fija QUE columna del core cae en el indice 0 del ring, y eso
+depende de `ce86` (top.v): un TOGGLE LIBRE SIN RESET ("la fase da igual" —
+NO da igual) cuya fase respecto a h_count es arbitraria. Con 731 una de las
+dos fases posibles cae en residuo 0 (fuente rota) y la otra en residuo 2
+(bien): LOTERIA por bitstream/arranque. Con 729 las dos fases caen en
+residuos 1 y 2 => 3,2 SIEMPRE.
+Coste: la ventana visible se desplaza UNA columna nativa (1,67 px de pantalla,
+sub-pixel). Los modos de 256 px siguen dando {5:*} exactos en ambas fases.
+NO se toca msx2hdmi_v9968 (ancho nativo sigue siendo 768) ni el centrado.
+Bancos nuevos: tools/v9968_sim/tb_geomfast.sv (upscan+video_out reales,
+barrido c_active_start x c_start_numerator x fase de captura, por familia de
+modo) y tools/v9968_sim/tb_textgeom.sv (pila COMPLETA vdp.v+shim, SCREEN1 /
+SCREEN0 W40 / SCREEN0 W80, sonda del line buffer + las dos fases del ring).
+PENDIENTE (medido, NO aplicado): el CENTRADO. La sonda del line buffer da
+content_start = 30 muestras en graficos de 256 px, 46 en TEXT1 y 45 en TEXT2,
+mientras el magnificador lee desde c_read_start = 16: se pierden ~14 muestras
+(7 px MSX) por la DERECHA en los modos de 256 px y el texto queda descentrado
+(borde izq 30 muestras / der 2). El valor correcto es c_read_start = 30 (con el
+que TEXT1 queda centrado exacto: 16 muestras de borde a cada lado). Se deja
+fuera de este cambio para no mezclar dos cosas en la misma build.
