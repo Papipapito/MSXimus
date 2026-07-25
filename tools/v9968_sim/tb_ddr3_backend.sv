@@ -21,7 +21,8 @@ module tb_ddr3_backend;
     // ---- lado shim (bk/bk2) ----
     logic        bk_req = 0, bk_we = 0;
     logic [21:0] bk_addr = 0;
-    logic [7:0]  bk_wdata = 0;
+    logic [31:0] bk_wdata = 0;      // _148 FIX B: escritura de PALABRA
+    logic [3:0]  bk_wmask = 0;      // _148 FIX B: 1 = escribir ese byte
     wire  [15:0] bk_rword;
     wire         bk_done_t;
 
@@ -34,7 +35,8 @@ module tb_ddr3_backend;
     wire clk_x1;
     wire a_req_w, a_we_w, b_req_w;
     wire [21:0] a_addr_w, b_addr_w;
-    wire [7:0]  a_wdata_w;
+    wire [31:0] a_wdata_w;
+    wire [3:0]  a_wmask_w;
     wire [15:0] a_dout_w, b_dout_w;
     wire a_done_w, b_done_w;
     wire ready_w;
@@ -43,18 +45,21 @@ module tb_ddr3_backend;
     v9968_sdram_bridge u_brA (
         .clk_vdp(clk_vdp), .rst_n(rst_n),
         .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr), .bk_wdata(bk_wdata),
+        .bk_wmask(bk_wmask),
         .bk_rword(bk_rword), .bk_done_t(bk_done_t),
         .clk_108m(clk_x1),
         .wv2_req(a_req_w), .wv2_we(a_we_w), .wv2_addr(a_addr_w),
-        .wv2_wdata(a_wdata_w), .wv2_dout(a_dout_w), .wv2_done(a_done_w)
+        .wv2_wdata(a_wdata_w), .wv2_wmask(a_wmask_w),
+        .wv2_dout(a_dout_w), .wv2_done(a_done_w)
     );
     v9968_sdram_bridge u_brB (
         .clk_vdp(clk_vdp), .rst_n(rst_n),
-        .bk_req(bk2_req), .bk_we(1'b0), .bk_addr(bk2_addr), .bk_wdata(8'd0),
+        .bk_req(bk2_req), .bk_we(1'b0), .bk_addr(bk2_addr), .bk_wdata(32'd0),
+        .bk_wmask(4'd0),
         .bk_rword(bk2_rword), .bk_done_t(bk2_done_t),
         .clk_108m(clk_x1),
         .wv2_req(b_req_w), .wv2_we(), .wv2_addr(b_addr_w),
-        .wv2_wdata(), .wv2_dout(b_dout_w), .wv2_done(b_done_w)
+        .wv2_wdata(), .wv2_wmask(), .wv2_dout(b_dout_w), .wv2_done(b_done_w)
     );
 
     wire [14:0] ddr_addr; wire [2:0] ddr_bank;
@@ -63,6 +68,7 @@ module tb_ddr3_backend;
 
     v9968_ddr3_backend dut (
         .a_req(a_req_w), .a_we(a_we_w), .a_addr(a_addr_w), .a_wdata(a_wdata_w),
+        .a_wmask(a_wmask_w),
         .a_dout(a_dout_w), .a_done(a_done_w),
         .b_req(b_req_w), .b_addr(b_addr_w), .b_dout(b_dout_w), .b_done(b_done_w),
         .clk_x1_out(clk_x1), .ready(ready_w), .diag(diag_w), .dbg_ops(),
@@ -80,10 +86,19 @@ module tb_ddr3_backend;
     // ---- helpers lado shim ----
     integer errores = 0;
 
+    // _148 FIX B: el shim ya solo emite PALABRAS. Una escritura de BYTE del
+    // test se traduce a palabra alineada + mascara 1-hot: misma semantica que
+    // antes y, de paso, ejercita el camino de mascara PARCIAL de punta a punta
+    // (bridge -> backend -> app_wdf_mask de la DDR3). Para mascaras arbitrarias
+    // esta op_a_word mas abajo.
     task automatic op_a(input bit we, input [21:0] ad, input [7:0] wd,
                         output [15:0] rw);
         @(posedge clk_vdp);
-        bk_we <= we; bk_addr <= ad; bk_wdata <= wd; bk_req <= 1'b1;
+        bk_we    <= we;
+        bk_addr  <= we ? {ad[21:2], 2'b00} : ad;
+        bk_wdata <= {4{wd}};
+        bk_wmask <= we ? (4'd1 << ad[1:0]) : 4'd0;
+        bk_req   <= 1'b1;
         @(posedge clk_vdp);
         bk_req <= 1'b0;
         begin : espera
@@ -94,6 +109,30 @@ module tb_ddr3_backend;
                 guard++;
                 if (guard > 400000) begin
                     $display("FALLO: op_a timeout addr=%h", ad);
+                    errores++; disable espera;
+                end
+            end
+        end
+        rw = bk_rword;
+    endtask
+
+    // _148 FIX B: escritura de PALABRA con mascara ARBITRARIA (el caso real de
+    // los comandos LMMM/HMMM/LINE, que dejan bytes sin tocar).
+    task automatic op_a_word(input [21:0] ad, input [31:0] wd, input [3:0] wm,
+                             output [15:0] rw);
+        @(posedge clk_vdp);
+        bk_we <= 1'b1; bk_addr <= {ad[21:2], 2'b00};
+        bk_wdata <= wd; bk_wmask <= wm; bk_req <= 1'b1;
+        @(posedge clk_vdp);
+        bk_req <= 1'b0;
+        begin : espera
+            automatic bit d0 = bk_done_t;
+            automatic int guard = 0;
+            while (bk_done_t == d0) begin
+                @(posedge clk_vdp);
+                guard++;
+                if (guard > 400000) begin
+                    $display("FALLO: op_a_word timeout addr=%h", ad);
                     errores++; disable espera;
                 end
             end
@@ -295,6 +334,48 @@ module tb_ddr3_backend;
             end
         end
         $display("T8 martilleo con readys cayendo OK");
+
+        // T9 (_148 FIX B): MASCARAS PARCIALES. La prueba de que el coalescing
+        // no puede corromper un byte que el VDP no pidio escribir. Se siembra
+        // una zona virgen con un patron distintivo (0xE0+i) palabra a palabra
+        // (mascara 1111), y despues se re-escribe cada palabra con las 16
+        // mascaras posibles y datos nuevos: los bytes enmascarados TIENEN que
+        // conservar el patron viejo. Se verifica leyendo (camino real).
+        begin
+            automatic logic [21:0] ad;
+            automatic logic [31:0] wd;
+            automatic int m;
+            for (i = 0; i < 16; i++) begin
+                ad = BASE + 22'h800 + i[21:0]*4;
+                wd = {8'hE0 + i[7:0], 8'hE1 + i[7:0], 8'hE2 + i[7:0], 8'hE3 + i[7:0]};
+                op_a_word(ad, wd, 4'b1111, rw);
+                ref_mem[ad+0] = wd[ 7: 0];  ref_mem[ad+1] = wd[15: 8];
+                ref_mem[ad+2] = wd[23:16];  ref_mem[ad+3] = wd[31:24];
+            end
+            for (m = 0; m < 16; m++) begin
+                ad = BASE + 22'h800 + m[21:0]*4;
+                wd = {8'h10 + m[7:0], 8'h20 + m[7:0], 8'h30 + m[7:0], 8'h40 + m[7:0]};
+                op_a_word(ad, wd, m[3:0], rw);
+                if (m[0]) ref_mem[ad+0] = wd[ 7: 0];
+                if (m[1]) ref_mem[ad+1] = wd[15: 8];
+                if (m[2]) ref_mem[ad+2] = wd[23:16];
+                if (m[3]) ref_mem[ad+3] = wd[31:24];
+            end
+            for (m = 0; m < 16; m++) begin
+                ad = BASE + 22'h800 + m[21:0]*4;
+                op_a(1'b0, ad, 8'h00, rw);
+                if (rw !== ref_word(ad)) begin
+                    $display("FALLO T9 mask=%b addr=%h lo=%h esp=%h", m[3:0], ad, rw, ref_word(ad));
+                    errores++;
+                end
+                op_b_rd(ad + 22'd2, rw);
+                if (rw !== ref_word(ad + 22'd2)) begin
+                    $display("FALLO T9 mask=%b addr=%h hi=%h esp=%h", m[3:0], ad+2, rw, ref_word(ad + 22'd2));
+                    errores++;
+                end
+            end
+        end
+        $display("T9 mascaras parciales (16/16) OK");
 
         // T6: watchdog _95 — el modelo deja de responder lecturas
         dut.u_ddr3.fail_mode = 1;

@@ -12,8 +12,10 @@
 //   * CPU (3) / COMANDOS (4): latencia libre, fuera de orden, eco de tag
 //     (el interface parcheado enruta por vram_rtag; ambos consumidores
 //     ESPERAN su rdata_en — tolerantes por diseno).
-//   * ESCRITURAS: cola de 4, byte a byte al backend (mascara 1-hot en
-//     escrituras CPU; los comandos pueden empujar hasta 4 bytes/palabra).
+//   * ESCRITURAS: cola de 8, UNA OP DE PALABRA por entrada (_148 FIX B: antes
+//     byte a byte — hasta 4 ops de backend por palabra, 3.81 medidas, que
+//     saturaban el canal A al 89% y mataban de hambre a los prefetch de
+//     pantalla). La mascara de bytes viaja con el dato (bk_wmask).
 //   * vram_refresh: IGNORADO (nuestra SDRAM ya refresca en memory.v).
 //
 // Backend (dominio clk_vdp; el CDC 85.9<->108 vive en el puerto wv2 de
@@ -44,7 +46,12 @@ module v9968_vram_shim #(
     output reg         bk_req,           // pulso 1 ciclo
     output reg         bk_we,
     output reg  [21:0] bk_addr,          // direccion de BYTE en SDRAM
-    output reg  [7:0]  bk_wdata,
+    // _148 FIX B (COALESCING DE ESCRITURA): bk_wdata pasa de 8 a 32 bits y se
+    // anade bk_wmask (1 = escribir ese byte, ya invertida respecto a la DQM del
+    // VDP). UNA operacion de backend por PALABRA en vez de hasta 4 byte-ops.
+    // En escrituras bk_addr queda alineada a palabra (addr[1:0] = 00).
+    output reg  [31:0] bk_wdata,
+    output reg  [3:0]  bk_wmask,
     input  wire [15:0] bk_rword,         // palabra 16b (addr[0] ignorado)
     input  wire        bk_done_t,        // toggle
 
@@ -58,7 +65,8 @@ module v9968_vram_shim #(
 
     // ---- control de flujo (v3d): retiene los slots de CPU/COMANDO en el
     // interface cuando las colas van calientes — las escrituras de HMMV
-    // desbordaban wq (4 plazas, backend byte-a-byte ~1.6us/palabra) y los
+    // desbordaban wq (backend byte-a-byte ~1.6us/palabra; _148 FIX B: 1 op de
+    // palabra ~0.4us, el stall salta MUCHO menos) y los
     // rectangulos salian RALLADOS. bg/sprite NO se frenan (ventana/cache).
     output wire        vram_stall,
 
@@ -98,8 +106,42 @@ reg [9:0]  pww_tag;
 reg [31:0] pww_data;
 
 // ============================================================================
-// CACHE DE TABLAS (v3): 4096 palabras de 32b (16KB) direct-mapped, indice
-// addr[13:2], tag addr[17:14]. Sirve a DOS consumidores de fase fija:
+// _148 FIX A — LA CACHE PASA A 8192 LINEAS (32KB). El indice tenia 12 bits y
+// NO contenia L[14] (=v[12]): dos direcciones separadas EXACTAMENTE 16KB caen
+// SIEMPRE en la misma linea y se desalojan a muerte. En sprites mode 3 eso es
+// mortal porque ese camino NO usa el entrelazado del V9938
+// (vdp_timing_control_screen_mode.v:208 -> los sprites direccionan plano), asi
+// que los patrones que difieren en 0x80 (p y p+8 con pattern = p*16, es decir
+// p*2048 bytes) caen a 16KB EXACTOS: medido 32.19 miss/scanline en el modelo y
+// 20.0% de miss de fetch de sprite en tb_sprite3. Con v[12] METIDO EN EL INDICE
+// como bit ALTO el modelo baja a 0.38 miss/scanline (peor caso de 13 layouts).
+// El TAG NO CAMBIA (sigue v[15:12], 4 bits): v[12] queda duplicado en indice y
+// tag, lo cual es INOFENSIVO (un bit de tag redundante) y mantiene el
+// comparador y el ancho de sc_tag intactos.
+// BIYECTIVIDAD VERIFICADA por enumeracion de las 65536 palabras de L[17:2] con
+// la funcion RTL EXACTA de abajo: 65536 claves (idx13,tag4) distintas, cero
+// colisiones. Un indice no biyectivo daria FALSOS HIT = corrupcion silenciosa.
+// COSTE: +9 bloques BSRAM de 18Kb (4 lanes de datos +2 c/u, sc_tag +1, sc_v +0).
+//
+// RESIDUO CONOCIDO (medido: 20.0% -> 0.33% de miss de sprite en tb_sprite3, NO
+// 0%). Lo que queda es UN choque de indice concreto del layout del DEVCON:
+//   SPT en 0x8000 -> palabra v = 0x2000 + p*512 + yl*32 + j  (v[14]=0, sin
+//        pliegue) => idx13 = p*512 + yl*32 + j
+//   SAT en 0x10000 -> palabra v = 0x4000 + p*2 + m  (v[14]=1 => el pliegue XOR
+//        le suma 0x800) => idx13 = 0x800 + p*2 + m
+//   El plano p=4 con linea fuente yl=0 cae en idx13 = 4*512 = 0x800..0x801,
+//   EXACTAMENTE encima de la entrada de SAT del plano 0. Como la SAT se relee
+//   en CADA scanline, esas dos lineas hacen ping-pong en las ~3 scanlines en
+//   que el sprite 4 muestra su linea 0. Es el UNICO conflicto que sobrevive
+//   (los 512 patrones son biyectivos entre si; la SAT ocupa 0x800..0x81F).
+// Matarlo del todo pide ASOCIATIVIDAD, no mas lineas: el modelo (sc_bijective.py)
+// da 0.00 miss/scanline con un victim buffer de 4 entradas sobre esta misma
+// cache de 8192. Queda como trabajo futuro: 23 miss/frame no producen NINGUNA
+// diferencia de pixel (ver el diff contra la referencia dorada), y un victim
+// buffer es logica NUEVA en el camino de 8 ciclos = riesgo de timing.
+//
+// CACHE DE TABLAS (v3): 8192 palabras de 32b (32KB) direct-mapped, indice de 13
+// bits (ver c_idx13), tag addr[17:14]. Sirve a DOS consumidores de fase fija:
 //  * SPRITES (attr/color/pattern — v2, medido: sin cache se perdia el 51%)
 //  * FONDO EN MODOS DE PATRONES (v3, leccion HW _117: la ventana OBL asume
 //    fetch LINEAL — cierto SOLO en bitmap SC5+. En SCREEN 0/1/2 el fetch
@@ -119,21 +161,22 @@ reg [31:0] pww_data;
 // lookup (fetch bg/sprite) y write-check (escritura) son mutuamente
 // exclusivos (un solo vram_valid) -> UN puerto de lectura sirve a ambos:
 // cada array queda 1R sincrono + 1W muxeado = BSRAM semi-dual limpia.
-reg [7:0]  sc_d0 [0:4095];               // lane byte 0 (BSRAM)
-reg [7:0]  sc_d1 [0:4095];
-reg [7:0]  sc_d2 [0:4095];
-reg [7:0]  sc_d3 [0:4095];
-reg [3:0]  sc_tag [0:4095];              // addr[17:14] (BSRAM)
-reg sc_v [0:4095];                       // _120d: valids EN BSRAM 4096x1 —
-                                         // los 4096 FF con su mux 4096:1 y
-                                         // el decode de CE eran el reincidente
-                                         // de placement (r2/r9/_122). sc_v es
-                                         // SET-ONLY salvo reset -> BSRAM con
-                                         // BARRIDO de limpieza post-reset
-                                         // (4096 ciclos ~48us, con miss
-                                         // forzado mientras tanto).
-reg [12:0] scv_swp;                      // contador del barrido
-wire       scv_ready = scv_swp[12];
+reg [7:0]  sc_d0 [0:8191];               // lane byte 0 (BSRAM) — _148 FIX A: 8192
+reg [7:0]  sc_d1 [0:8191];
+reg [7:0]  sc_d2 [0:8191];
+reg [7:0]  sc_d3 [0:8191];
+reg [3:0]  sc_tag [0:8191];              // addr[17:14] (BSRAM)
+reg sc_v [0:8191];                       // _120d: valids EN BSRAM 8192x1 —
+                                         // los FF con su mux y el decode de CE
+                                         // eran el reincidente de placement
+                                         // (r2/r9/_122). sc_v es SET-ONLY salvo
+                                         // reset -> BSRAM con BARRIDO de
+                                         // limpieza post-reset (_148: 8192
+                                         // ciclos ~95us, con miss forzado
+                                         // mientras tanto; el doble que antes,
+                                         // sigue siendo <2 frames de arranque).
+reg [13:0] scv_swp;                      // contador del barrido (_148: 14 bits)
+wire       scv_ready = scv_swp[13];
 
 // lecturas sincronas registradas (salidas BSRAM + valid)
 reg [7:0]  scq_d0, scq_d1, scq_d2, scq_d3;
@@ -157,6 +200,23 @@ reg        obl_pend;
 reg        obl_chk;
 reg        obl_do;                       // _121b: fase 3 (comparador registrado)
 reg [15:0] obl_w;
+// _147 PROFUNDIDAD DE PREFETCH (lookahead OBL) — HIPOTESIS REFUTADA, se queda 2.
+// Hipotesis: con el DDR3 real (191ns media, 757ns PICO = ~8 palabras a 93ns/
+// palabra) el colchon de +2 llega TARDE en los picos -> subir el lookahead
+// absorberia los 12 miss/frame de la rafaga de dibujo (menu/logo).
+// BARRIDO en el modelo DDR3 REAL (tb_menu_ddr3, obl_la = 2/4/6/8, fallos_vram=0
+// en todos): la RAFAGA EMPEORA monotona 12->13->16->18 miss/frame y el REPOSO
+// sube EXACTO con obl_la (2/4/6/8). Los miss NO son inanicion mid-stream (mas
+// profundidad no ayuda): son (a) coste de CALENTAMIENTO al rearrancar el stream
+// (obl_la palabras hasta que el buffer profundo se llena tras cada corte de
+// cadena: vblank / invalidacion) — CRECE con el lookahead; y (b) un suelo ~10
+// miss/frame INDEPENDIENTE de la profundidad, inducido por las ESCRITURAS
+// (colision fill<->escritura pendiente via pf_dirty; palabras recien escritas
+// aun no residentes). El <3/frame NO se alcanza por profundidad de prefetch; el
+// unico lever real es un write-allocate de PALABRA COMPLETA (riesgo: bytes no
+// escritos quedarian rancios) — fuera del alcance de este cambio. obl_la=2 es
+// identico al +2 historico; el knob deja el experimento documentado.
+localparam [15:0] obl_la = 16'd2;
 // _127: PREDICCION DE ZANCADA. El scroll H rompe el stream +1 DOS veces
 // por linea (arranque y wrap del ring): ~28k px rancios/frame en
 // tb_scroll (las franjas de la foto 4300). Parchear la oferta no vale
@@ -235,7 +295,8 @@ reg [2:0]  pfq_wp, pfq_rp;
 wire       pfq_empty = (pfq_wp == pfq_rp);
 wire       pfq_full  = (pfq_wp + 3'd1 == pfq_rp);
 
-// cola de escrituras (4 plazas: {mask,wdata,addr})
+// cola de escrituras (8 plazas: {mask,wdata,addr}; _148 FIX B: cada entrada
+// es UNA op de backend, no hasta 4)
 reg [51:0] wq [0:7];                     // {mask[3:0], wdata[31:0], addr[17:2]} (_120e: 8 plazas, umbral igual)
 reg [2:0]  wq_wp, wq_rp;
 reg [7:0]  wq_vld;                       // _126: bitmap de ocupacion (snoop)
@@ -308,7 +369,21 @@ integer pi;
 reg [7:0] bg_miss;
 assign diag = bg_miss;
 reg [31:0] c_miss, c_bka, c_bkb;         // _121diag
-assign dbg_miss = c_miss;
+// _148 FIX C — TELEMETRIA DE SPRITE. c_miss solo cuenta miss de FONDO: en
+// placa los sprites podian estar fallando el 20% de sus fetches y COM11 no
+// decia NADA (el DEVCON con las cabezas rayadas paso por aqui invisible).
+// c_spmiss/c_spfet son el par gemelo del camino de sprite (C_SPRITE=2):
+//   c_spfet  = fetches de sprite que llegan a la etapa 1 del lookup
+//   c_spmiss = los que fallan la sc-cache (van al backend)
+// Sano tras el FIX A: c_spmiss/c_spfet < 0.1%.
+reg [31:0] c_spmiss, c_spfet;
+// PALABRA A DE COM11 (dbg_uart.cnt_a) REEMPAQUETADA:
+//   bits [31:16] = c_spmiss[15:0]   (miss de SPRITE)
+//   bits [15: 0] = c_miss[15:0]     (miss de FONDO, como siempre pero a 16b)
+// A 60 fps y <=5 miss/frame un contador de 16 bits tarda ~3.6 min en dar la
+// vuelta: de sobra para telemetria (el lector mira la DERIVADA, no el valor).
+// dbg_audio_reader.py: word[0] -> spmiss = int(w,16)>>16, bgmiss = int(w,16)&0xFFFF.
+assign dbg_miss = {c_spmiss[15:0], c_miss[15:0]};
 assign dbg_bka  = c_bka;
 assign dbg_park = {c_pkov, c_park};
 assign dbg_bkb  = c_bkb;
@@ -338,17 +413,19 @@ reg  [1:0] cur_kind;                     // 0=pf, 1=rq, 2=wq
 reg        cur_half;                     // mitad baja(0)/alta(1) de la palabra
 reg [15:0] cur_addrw;                    // addr[17:2] de la palabra en curso
 reg [4:0]  cur_tag;                      // para rq
-reg [31:0] cur_word;                     // acumulador de lectura / dato de escr.
-reg [3:0]  cur_mask;
-reg [1:0]  cur_wbyte;                    // byte en curso de la escritura
-reg        word_pend;                    // palabra de 32b en construccion
-// _140 Punto B: estado PROPIO de la escritura multibyte suspendida. cur_addrw
-// y cur_word los reutiliza cada lectura/prefetch al lanzarse; para poder
-// PREEMPTIR una escritura a medias con un prefetch (sin corromper su
-// direccion/dato) la escritura vive en registros dedicados. cur_mask y
-// cur_wbyte ya son privados de la escritura (ninguna lectura los toca).
-reg [15:0] wr_addrw;                     // addr[17:2] de la escritura en curso
-reg [31:0] wr_word;                      // 32b a escribir (bytes por mascara)
+reg [31:0] cur_word;                     // acumulador de lectura
+// _148 FIX B — MAQUINARIA DE ESCRITURA BYTE-A-BYTE RETIRADA. Ya no existen:
+//   cur_mask / cur_wbyte / nxt_byte  (byte en curso y mascara restante)
+//   word_pend                        (palabra de 32b "en construccion")
+//   wr_addrw / wr_word / sd_base     (estado de la escritura SUSPENDIDA)
+// Con UNA op de backend por palabra, una escritura ya no puede quedarse a
+// medias: se lanza con bsy=1 y termina en su unico done. Eso jubila TAMBIEN
+// toda la maquinaria de PREEMPCION del _140 Punto B (el brazo `else if
+// (word_pend)` del lanzador, la re-afirmacion de cur_kind=2 que evitaba el
+// livelock, y el termino `word_pend && wr_addrw == cur_addrw` de pf_dirty):
+// esas defensas existian PORQUE un prefetch podia colarse entre los bytes de
+// una misma palabra. Ya no hay "entre". El orden de prioridades del lanzador
+// se conserva intacto (pfq > wq > rq > eco), simplemente sin el escalon 2.
 
 // respuesta tardia (rq) esperando hueco de salida
 reg        late_v;
@@ -369,22 +446,52 @@ reg [31:0] late_data;
 // entrada queda invalida y el siguiente fetch la rescata). La RESPUESTA
 // al consumidor (late_v) NO se descarta: el unico lector que podria ver
 // su propia escritura pendiente es la CPU, y no puede reordenarse asi.
-// _140 Punto B: ademas de las escrituras EN COLA (wq), un fill se descarta si
-// choca con la escritura multibyte SUSPENDIDA (ya sacada de wq, viva en
-// wr_addrw con word_pend): al preemptir word_pend con un prefetch, ese
-// prefetch podria leer de VRAM la palabra a medio escribir (unos bytes nuevos,
-// otros viejos) y cachearla rancia. Solo el prefetch (pfq) puede intercalarse
-// con una escritura suspendida (rq/late van por debajo de word_pend); su fill
-// queda cubierto aqui. La ESCRITURA en VRAM se completa igual (autocura).
-wire pf_dirty = (word_pend && wr_addrw == cur_addrw) ||
-                (wq_vld[0] && wq[0][15:0] == cur_addrw) ||
-                (wq_vld[1] && wq[1][15:0] == cur_addrw) ||
-                (wq_vld[2] && wq[2][15:0] == cur_addrw) ||
-                (wq_vld[3] && wq[3][15:0] == cur_addrw) ||
-                (wq_vld[4] && wq[4][15:0] == cur_addrw) ||
-                (wq_vld[5] && wq[5][15:0] == cur_addrw) ||
-                (wq_vld[6] && wq[6][15:0] == cur_addrw) ||
-                (wq_vld[7] && wq[7][15:0] == cur_addrw);
+// _148 FIX B: el termino de la escritura SUSPENDIDA (word_pend && wr_addrw ==
+// cur_addrw) DESAPARECE — con una op por palabra no existe escritura a medias
+// que un prefetch pueda atravesar (bsy serializa: mientras la escritura vuela,
+// nada mas se lanza). Quedan SOLO las 8 comparaciones contra la cola wq.
+wire [7:0] pf_dm;                         // que entradas de wq casan el word
+assign pf_dm[0] = wq_vld[0] && (wq[0][15:0] == cur_addrw);
+assign pf_dm[1] = wq_vld[1] && (wq[1][15:0] == cur_addrw);
+assign pf_dm[2] = wq_vld[2] && (wq[2][15:0] == cur_addrw);
+assign pf_dm[3] = wq_vld[3] && (wq[3][15:0] == cur_addrw);
+assign pf_dm[4] = wq_vld[4] && (wq[4][15:0] == cur_addrw);
+assign pf_dm[5] = wq_vld[5] && (wq[5][15:0] == cur_addrw);
+assign pf_dm[6] = wq_vld[6] && (wq[6][15:0] == cur_addrw);
+assign pf_dm[7] = wq_vld[7] && (wq[7][15:0] == cur_addrw);
+wire pf_dirty = |pf_dm;
+
+// _148 FIX B (extra barato): FUSIONAR en vez de DESCARTAR. Hasta ahora un fill
+// que chocaba con una escritura encolada se TIRABA y el word se recuperaba por
+// el camino miss->rescate: la clasificacion del miss residual (MISSCLS 25/07)
+// contaba filldrop_dirty=6 de 11 miss de rafaga, mas de la mitad de lo que
+// queda. El dato leido de VRAM es valido para los bytes que la escritura NO
+// toca; los que SI toca los conocemos (estan en la cola). Se fusionan igual
+// que en wu_merged, con la mascara de la entrada de wq (1 = escribir).
+// SEGURIDAD (por que solo UNA coincidencia): con dos o mas entradas al mismo
+// word habria que aplicarlas EN ORDEN DE PROGRAMA — una cadena de 8 muxes de
+// 32 bits en un shim con familias de placement cronicas, para un caso que no
+// se da (cada comando escribe cada palabra una vez). Con >=2 se DESCARTA como
+// siempre. pf_one/pf_drop son mutuamente excluyentes dentro de pf_dirty.
+wire pf_one  = pf_dirty && ((pf_dm & (pf_dm - 8'd1)) == 8'd0);
+wire pf_drop = pf_dirty && !pf_one;
+// mux one-hot de {mascara[3:0], dato[31:0]} de la entrada que casa
+wire [35:0] pf_ent = ({36{pf_dm[0]}} & wq[0][51:16]) |
+                     ({36{pf_dm[1]}} & wq[1][51:16]) |
+                     ({36{pf_dm[2]}} & wq[2][51:16]) |
+                     ({36{pf_dm[3]}} & wq[3][51:16]) |
+                     ({36{pf_dm[4]}} & wq[4][51:16]) |
+                     ({36{pf_dm[5]}} & wq[5][51:16]) |
+                     ({36{pf_dm[6]}} & wq[6][51:16]) |
+                     ({36{pf_dm[7]}} & wq[7][51:16]);
+wire [3:0]  pf_wm = pf_ent[35:32];       // 1 = ese byte lo pisa la escritura
+wire [31:0] pf_wd = pf_ent[31:0];
+function [31:0] pf_fuse(input [31:0] rd);
+    pf_fuse = { pf_wm[3] ? pf_wd[31:24] : rd[31:24],
+                pf_wm[2] ? pf_wd[23:16] : rd[23:16],
+                pf_wm[1] ? pf_wd[15: 8] : rd[15: 8],
+                pf_wm[0] ? pf_wd[ 7: 0] : rd[ 7: 0] };
+endfunction
 
 // (_126c probo un snoop rq_dirty sobre la cabeza de rq para dejar pasar
 // reads limpios por delante de las escrituras; el cono rq_rp -> mux 16:1
@@ -411,8 +518,12 @@ wire pf_dirty = (word_pend && wr_addrw == cur_addrw) ||
 function [7:0] w_idx(input [15:0] v);
     w_idx = v[7:0] ^ {v[14], 7'b0};
 endfunction
-function [11:0] c_idx(input [15:0] v);
-    c_idx = v[11:0] ^ {v[14], 11'b0};
+// _148 FIX A: indice de 13 bits. El pliegue XOR con v[14] (el bit de STREAM
+// FISICO del entrelazado, ver arriba) se CONSERVA intacto en los 12 bits bajos;
+// lo nuevo es v[12] (= L[14], el escalon de 16KB) como bit ALTO. Biyectivo con
+// tag = v[15:12] (verificado por enumeracion de las 65536 palabras).
+function [12:0] c_idx13(input [15:0] v);
+    c_idx13 = { v[12], v[11:0] ^ {v[14], 11'b0} };
 endfunction
 
 // ---- write-mux de la cache de sprites (1 solo write-site por array):
@@ -425,7 +536,7 @@ wire wrk_hit  = wrk_p1 && scq_v && (scq_tag == wrk_addr1[15:12]);
 // Efecto: con write y fill simultaneos el fill espera 1 ciclo aunque el
 // write no fuera a usar el puerto — bookkeeping, fuera del camino de 8.
 wire fill_now = fill_pend && !wrk_p1 && scv_ready;
-wire [11:0] scw_idx = wrk_hit ? c_idx(wrk_addr1) : c_idx(fill_addr);
+wire [12:0] scw_idx = wrk_hit ? c_idx13(wrk_addr1) : c_idx13(fill_addr);
 wire scw_we0 = (wrk_hit && !wrk_mask1[0]) || fill_now;
 wire scw_we1 = (wrk_hit && !wrk_mask1[1]) || fill_now;
 wire scw_we2 = (wrk_hit && !wrk_mask1[2]) || fill_now;
@@ -439,31 +550,31 @@ wire [7:0] scw_b3 = wrk_hit ? wrk_data1[31:24] : fill_word[31:24];
 // leccion _117a — nada de lecturas asincronas de arrays grandes) ----
 always @(posedge clk_vdp) begin
     if (scw_we0) sc_d0[scw_idx] <= scw_b0;
-    scq_d0 <= sc_d0[c_idx(vram_address)];
+    scq_d0 <= sc_d0[c_idx13(vram_address)];
 end
 always @(posedge clk_vdp) begin
     if (scw_we1) sc_d1[scw_idx] <= scw_b1;
-    scq_d1 <= sc_d1[c_idx(vram_address)];
+    scq_d1 <= sc_d1[c_idx13(vram_address)];
 end
 always @(posedge clk_vdp) begin
     if (scw_we2) sc_d2[scw_idx] <= scw_b2;
-    scq_d2 <= sc_d2[c_idx(vram_address)];
+    scq_d2 <= sc_d2[c_idx13(vram_address)];
 end
 always @(posedge clk_vdp) begin
     if (scw_we3) sc_d3[scw_idx] <= scw_b3;
-    scq_d3 <= sc_d3[c_idx(vram_address)];
+    scq_d3 <= sc_d3[c_idx13(vram_address)];
 end
 always @(posedge clk_vdp) begin
-    if (fill_now) sc_tag[c_idx(fill_addr)] <= fill_addr[15:12];
-    scq_tag <= sc_tag[c_idx(vram_address)];
+    if (fill_now) sc_tag[c_idx13(fill_addr)] <= fill_addr[15:12];
+    scq_tag <= sc_tag[c_idx13(vram_address)];
 end
 // _120d: puerto BSRAM de los valids (write-site unico muxeado + lectura
 // gated: durante el barrido post-reset todo se lee como invalido)
 wire        scv_we = !scv_ready || fill_now;
-wire [11:0] scv_wi = !scv_ready ? scv_swp[11:0] : c_idx(fill_addr);
+wire [12:0] scv_wi = !scv_ready ? scv_swp[12:0] : c_idx13(fill_addr);
 always @(posedge clk_vdp) begin
     if (scv_we) sc_v[scv_wi] <= scv_ready;
-    scq_v <= scv_ready ? sc_v[c_idx(vram_address)] : 1'b0;
+    scq_v <= scv_ready ? sc_v[c_idx13(vram_address)] : 1'b0;
 end
 
 // ---- BSRAM de la VENTANA (v4): 1R muxeado + 1W del backend ----
@@ -513,11 +624,8 @@ always @(posedge clk_vdp) begin
 end
 reg        pwqB_v;
 
-wire [21:0] sd_base = VRAM_BASE + {4'd0, wr_addrw, 2'b00};  // _140 Punto B: base de la escritura suspendida
+// (_148 FIX B: sd_base y nxt_byte RETIRADOS con la maquinaria byte-a-byte)
 wire [15:0] nxt_w   = vram_address[17:2] + 16'd1;   // palabra siguiente (OBL)
-// primer byte habilitado que queda en la mascara de la escritura en curso
-wire [1:0]  nxt_byte = cur_mask[0] ? 2'd0 : cur_mask[1] ? 2'd1
-                     : cur_mask[2] ? 2'd2 : 2'd3;
 
 // _140 WRITE-THROUGH-UPDATE de la VENTANA (raiz del miss-durante-escritura):
 // una escritura de comando que CASA una entrada viva de la ventana (mismo
@@ -539,19 +647,19 @@ wire [31:0] wu_merged = {
 
 always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
-        pw_v <= 256'd0; scv_swp <= 13'd0; pfq_wp <= 0; pfq_rp <= 0;
+        pw_v <= 256'd0; scv_swp <= 14'd0; pfq_wp <= 0; pfq_rp <= 0;
         wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 8'd0;
         bsy <= 0; done_d <= 0; done2_d <= 0; got_lo <= 0; got_hi <= 0;
         pwv_set_p <= 0; pwv_set_i <= 0;
-        word_pend <= 0; wr_addrw <= 0; wr_word <= 0;
         cur_kind <= 0; cur_half <= 0; cur_addrw <= 0; cur_tag <= 0;
         bk2_req <= 0; bk2_addr <= 0;
-        cur_word <= 0; cur_mask <= 0; cur_wbyte <= 0;
+        cur_word <= 0;
         late_v <= 0; late_tag <= 0; late_data <= 0;
-        bk_req <= 0; bk_we <= 0; bk_addr <= 0; bk_wdata <= 0;
+        bk_req <= 0; bk_we <= 0; bk_addr <= 0; bk_wdata <= 0; bk_wmask <= 0;
         vram_rdata <= 0; vram_rdata_en <= 0; vram_rtag <= 0;
         bg_miss <= 0;
         c_miss <= 0; c_bka <= 0; c_bkb <= 0;
+        c_spmiss <= 0; c_spfet <= 0;                  // _148 FIX C
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
@@ -580,7 +688,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         pwqB_v <= pw_v[w_idx(obl_w)];    // _126: valid del espejo OBL
         pkov_p <= 1'b0;                  // _127: pisada consumida al contador
         if (pkov_p) c_pkov <= c_pkov + 16'd1;
-        if (!scv_ready) scv_swp <= scv_swp + 13'd1;
+        if (!scv_ready) scv_swp <= scv_swp + 14'd1;
         // _120: el valid de la VENTANA se pone UN CICLO DESPUES de la
         // completacion — la media etapa negedge hace que el dato aterrice
         // en la BSRAM en T+1, y poner pw_v en T dejaba 1 ciclo de "valid
@@ -633,7 +741,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         obl_pend <= 1'b0;                       // consumido (el hit lo re-arma)
         obl_chk  <= obl_read_now;
         obl_w_c  <= obl_w;
-        wk_tgt   <= obl_w + stride - 16'd2;   // = addr_hit + stride en fase 3
+        wk_tgt   <= obl_w + stride - obl_la;  // = addr_hit + stride en fase 3 (_147: -obl_la casa con el lookahead)
         obl_do   <= obl_chk && !(pwqB_v && pwqB_tag == obl_w_c[15:6]);
         obl_w_d  <= obl_w_c;
         // _127J: caminante (ver arriba) — slot OBL ocioso + zancada => se
@@ -674,6 +782,8 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // cache (tablas residentes) -> backend. HIT -> pipe[1]: emerge a
         // 8 ciclos EXACTOS (fetch T, pipe[1] T+1, pipe[6] T+6, en T+7).
         if (spr_p1) begin
+            // _148 FIX C: denominador de la tasa de miss de sprite
+            if (spr_tag1[4:2] == C_SPRITE) c_spfet <= c_spfet + 32'd1;
             if (spr_tag1[4:2] == C_BG && pwq_v &&
                 pwq[41:32] == spr_addr1[15:6]) begin
                 // HIT de VENTANA: dato + OBL (fase 2)
@@ -693,7 +803,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 // sustitutiva fracaso: cualquier cambio de cadena abre
                 // huecos). La linea siguiente la cubre el CAMINANTE en los
                 // slots ociosos del 2o pase. Cada hit renueva su credito.
-                obl_w      <= spr_addr1 + 16'd2;
+                obl_w      <= spr_addr1 + obl_la;   // _147: lookahead profundo
                 obl_walked <= 1'b0;
             end
             else if (scq_v && scq_tag == spr_addr1[15:12])
@@ -739,6 +849,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     rq[rq_wp] <= {spr_tag1, spr_addr1};
                     rq_wp <= rq_wp + 4'd1;
                 end
+                // _148 FIX C: gemelo de c_miss para el camino de SPRITE (en el
+                // MISS de la sc-cache; los sprites no usan la ventana). Sale
+                // por COM11 en dbg_miss[31:16].
+                if (spr_tag1[4:2] == C_SPRITE) c_spmiss <= c_spmiss + 32'd1;
                 if (spr_tag1[4:2] == C_BG) begin
                     // bg: cuenta el miss y arranca el stream OBL (bitmap).
                     // _122: siembra COMPLETA de la cadena +2 — el +1 va
@@ -758,7 +872,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // vive SOLO en los hits. Con zancada en el miss, la
                     // linea 0 tras cada vblank (cadena rota) no se
                     // recuperaba: quiet 232 -> 4852.
-                    obl_w     <= spr_addr1 + 16'd2;
+                    obl_w     <= spr_addr1 + obl_la;   // _147: lookahead profundo
                     // _124: DEGRADACION ELEGANTE — el aparcamiento cura el
                     // fill posterior pero NO el guion del PRIMER miss (el
                     // consumidor muestrea a 8 ciclos fijos, pillara lo que
@@ -870,15 +984,11 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // canal (2 ops seriales de 16b con su CDC) daba ~800ns: deficit
         // estructural. Las lecturas de palabra piden ahora las DOS mitades
         // EN PARALELO: bk=baja, bk2=alta (puerto wv3 + segundo bridge).
-        // Las escrituras siguen byte a byte por bk.) ----------
+        // Las escrituras van por bk, UNA op por palabra desde _148.) --------
         if (bsy && cur_kind == 2'd2 && (bk_done_t != done_d)) begin
-            // escritura: byte hecho -> fuera de la mascara; si no queda
-            // ninguno, palabra terminada (el lanzador coge el siguiente
-            // habilitado via nxt_byte).
+            // _148 FIX B: una op = una PALABRA. El done cierra la escritura
+            // entera (antes: un done por byte habilitado, hasta 4).
             bsy <= 1'b0;
-            cur_mask[cur_wbyte] <= 1'b0;
-            if ((cur_mask & ~(4'd1 << cur_wbyte)) == 4'd0)
-                word_pend <= 1'b0;
         end
         if (bsy && cur_kind != 2'd2) begin : rd_complete
             reg lo_now, hi_now;
@@ -891,17 +1001,19 @@ always @(posedge clk_vdp or negedge rst_n) begin
             if (hi_now) begin cur_word[31:16] <= bk2_rword; got_hi <= 1'b1; end
             if ((got_lo || lo_now) && (got_hi || hi_now)) begin
                 bsy <= 1'b0;
+                // _148 FIX B: el dato que se CACHEA lleva fusionados los bytes
+                // de la escritura encolada al mismo word (pf_one). Solo se
+                // descarta con >=2 escrituras pendientes (pf_drop).
                 if (cur_kind == 2'd0) begin
                     // fill de ventana via registros pww (write-site BSRAM)
-                    // _126: descartado si hay escritura pendiente al word
-                    // _140: y cede el puerto pww al write-through-update de
+                    // _140: cede el puerto pww al write-through-update de
                     // este ciclo (!wu_hit); el fill descartado se re-siembra
                     // por el camino miss->rescate.
-                    if (!pf_dirty && !wu_hit) begin
+                    if (!pf_drop && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
-                        pww_data <= {w_hi, w_lo};
+                        pww_data <= pf_fuse({w_hi, w_lo});
                         pwv_set_p <= 1'b1;
                         pwv_set_i <= w_idx(cur_addrw);
                     end
@@ -909,24 +1021,26 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 else begin
                     late_v    <= 1'b1;
                     late_tag  <= cur_tag;
+                    // la RESPUESTA al consumidor va SIN fusionar: la lectura
+                    // se lanzo con wq vacia (rq va por debajo de wq), asi que
+                    // una escritura llegada despues es POSTERIOR a este read.
                     late_data <= {w_hi, w_lo};
-                    // y de paso a la ventana si es bg (_126: mismo descarte;
-                    // _140: cede pww al write-through-update, !wu_hit)
-                    if (cur_tag[4:2] == C_BG && !pf_dirty && !wu_hit) begin
+                    // y de paso a la ventana si es bg
+                    // (_140: cede pww al write-through-update, !wu_hit)
+                    if (cur_tag[4:2] == C_BG && !pf_drop && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
-                        pww_data <= {w_hi, w_lo};
+                        pww_data <= pf_fuse({w_hi, w_lo});
                         pwv_set_p <= 1'b1;
                         pwv_set_i <= w_idx(cur_addrw);
                     end
                     // ...y a la CACHE (v3c: TODO consumidor de lectura
                     // rellena — bg/sprite/CPU/comando) — via fill_pend
-                    // (_126: tambien descartado si el word esta sucio)
-                    if (!pf_dirty) begin
+                    if (!pf_drop) begin
                         fill_pend <= 1'b1;
                         fill_addr <= cur_addrw;
-                        fill_word <= {w_hi, w_lo};
+                        fill_word <= pf_fuse({w_hi, w_lo});
                     end
                 end
             end
@@ -938,21 +1052,17 @@ always @(posedge clk_vdp or negedge rst_n) begin
             // LECTURAS-DEMANDA.
             //  1. pfq (streaming de ventana) — sagrado: el pipe de 8 ciclos no
             //     puede esperar a la SDRAM; cada miss = basura visible. _140
-            //     Punto B: pfq AHORA por ENCIMA de word_pend — antes una
-            //     escritura multibyte acaparaba canal-A hasta 4 byte-ops y
-            //     retrasaba prefetches urgentes (44/63 miss del frame de
-            //     rafaga estaban EN COLA, llegando tarde). El prefetch
-            //     preempte; la escritura conserva su estado propio
-            //     (wr_addrw/wr_word + cur_mask/cur_wbyte) y RESUME al vaciarse
-            //     pfq (hblank). Cada byte es una op de backend independiente y
-            //     su hazard con el prefetch lo cubre pf_dirty (termino
-            //     word_pend). wq no se pierde: vram_stall acota la interface.
-            //  2. word_pend: terminar la escritura en curso byte a byte.
-            //  3. wq antes que rq: coherencia write->read GLOBAL gratis (un
+            //     Punto B lo puso por encima de la escritura en curso porque
+            //     una escritura multibyte acaparaba canal-A hasta 4 byte-ops
+            //     (44/63 miss del frame de rafaga estaban EN COLA, llegando
+            //     tarde). _148 FIX B mata el problema en la raiz: la escritura
+            //     dura UNA op, asi que ya no hay nada que preemptir — el brazo
+            //     word_pend desaparece y con el todo el estado de suspension.
+            //  2. wq antes que rq: coherencia write->read GLOBAL gratis (un
             //     read nunca adelanta a una escritura mas vieja).
-            //  4. rq al final: CPU/sprite/dest-de-comando esperan; solo se
-            //     lanza con word_pend=0, asi que un rq NUNCA lee una palabra a
-            //     medio escribir (la unica que se intercala es el prefetch).
+            //  3. rq al final: CPU/sprite/dest-de-comando esperan. Como una
+            //     escritura es atomica, un rq NUNCA lee una palabra a medio
+            //     escribir (antes hacia falta el guardia word_pend=0).
             if (!pfq_empty) begin
                 cur_kind  <= 2'd0;
                 cur_addrw <= pfq[pfq_rp];
@@ -963,43 +1073,18 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 bk2_req  <= 1'b1;
                 bk2_addr <= (VRAM_BASE + {4'd0, pfq[pfq_rp], 2'b00}) | 22'd2;
             end
-            else if (word_pend) begin
-                // continuar la ESCRITURA multibyte suspendida: siguiente byte
-                // HABILITADO de la mascara (estado en wr_*/cur_mask/cur_wbyte)
-                // _140 Punto B CRITICO: RE-AFIRMAR cur_kind=2. Antes word_pend
-                // era prioridad maxima y nada corria entre bytes, asi que
-                // cur_kind seguia en 2 toda la escritura y no hacia falta
-                // ponerlo aqui. Ahora un prefetch PREEMPTE entre bytes y deja
-                // cur_kind=0 -> sin esto, la completacion del byte se enruta al
-                // camino de LECTURA (cur_kind!=2), cur_mask no se limpia,
-                // word_pend no avanza y el byte se relanza en bucle (livelock:
-                // bkwr disparado + VRAM corrupta).
-                cur_kind  <= 2'd2;
-                bsy <= 1'b1; bk_req <= 1'b1;
-                bk_we     <= 1'b1;
-                cur_wbyte <= nxt_byte;
-                bk_addr   <= sd_base | {20'd0, nxt_byte};
-                bk_wdata  <= wr_word[8*nxt_byte +: 8];
-            end
             else if (!wq_empty) begin
+                // _148 FIX B: UNA op de PALABRA. La direccion va alineada
+                // (addr[1:0]=00) y la mascara de bytes viaja en bk_wmask
+                // (1 = escribir, ya invertida respecto a la DQM del VDP al
+                // encolar). El backend traduce a la DM de la DDR3.
                 cur_kind  <= 2'd2;
-                wr_addrw  <= wq[wq_rp][15:0];
-                wr_word   <= wq[wq_rp][47:16];
-                cur_mask  <= wq[wq_rp][51:48];
                 wq_vld[wq_rp] <= 1'b0;
                 wq_rp     <= wq_rp + 3'd1;
-                // primer byte habilitado de la mascara
-                begin : first_byte
-                    reg [1:0] fb;
-                    fb = wq[wq_rp][48] ? 2'd0 : wq[wq_rp][49] ? 2'd1
-                       : wq[wq_rp][50] ? 2'd2 : 2'd3;
-                    cur_wbyte <= fb;
-                    bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b1;
-                    bk_addr  <= VRAM_BASE + {4'd0, wq[wq_rp][15:0], 2'b00}
-                                | {20'd0, fb};
-                    bk_wdata <= wq[wq_rp][16 + 8*fb +: 8];
-                    word_pend <= |(wq[wq_rp][51:48] >> (fb + 1));
-                end
+                bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b1;
+                bk_addr  <= VRAM_BASE + {4'd0, wq[wq_rp][15:0], 2'b00};
+                bk_wdata <= wq[wq_rp][47:16];
+                bk_wmask <= wq[wq_rp][51:48];
             end
             // _135 micro-fix: !pfB_pend retiene el brazo rq UN ciclo cuando
             // hay siembra (+1 del miss / rescate OBL) aterrizando en pfq —

@@ -18,7 +18,7 @@ import serial
 port = sys.argv[1] if len(sys.argv) > 1 else "COM11"
 ser = serial.Serial(port, 115200, timeout=2)
 print(f"escuchando {port} @115200 — _127I audio debug (Ctrl+C para salir)")
-print("hora      RST  d  lock/s   pkt/s   miss/s  fan  dfr/s  ops|vumetro  estado")
+print("hora      RST  d  lock/s   pkt/s   bgmiss/s spmiss/s fan dfr/s  ops|vumetro  estado")
 prev = None
 prev_t = None
 t0 = time.time()
@@ -31,6 +31,13 @@ while True:
         miss, aud, apkt, fanw, park = (p + [0] * 5)[:5]
     except Exception:
         continue
+    # _148 FIX C: la palabra 1 ya NO es el miss de fondo a 32 bits, sino
+    #   {miss de SPRITE[31:16], miss de FONDO[15:0]}  (dbg_miss del shim).
+    # Motivo: c_miss solo contaba fondo y los sprites (el thrash de la cache
+    # que destrozo el DEVCON) no tenian NINGUNA visibilidad en placa.
+    # Sano: bg/s <= ~300 (<=5 miss/frame) y sp/s ~0 (<0.1% de los fetches).
+    bgmiss = miss & 0xFFFF
+    spmiss = (miss >> 16) & 0xFFFF
     rst  = (aud >> 16) & 0xFFFF
     lock = aud & 0xFFFF
     pkt  = apkt & 0xFFFF
@@ -49,11 +56,13 @@ while True:
         dt = now - prev_t
         d_rst  = (rst  - prev[0]) & 0xFFFF
         d_lock = (lock - prev[1]) & 0xFFFF
-        d_miss = (miss - prev[2]) & 0xFFFFFFFF
+        d_miss = (bgmiss - (prev[2] & 0xFFFF)) & 0xFFFF          # _148: 16b
+        d_spm  = (spmiss - ((prev[2] >> 16) & 0xFFFF)) & 0xFFFF   # _148: sprite
         d_pkt  = (pkt  - prev[3]) & 0xFFFF
         d_ovr  = (ovr  - prev[4]) & 0xFF
         lock_s = d_lock / dt if dt > 0 else 0
         miss_s = d_miss / dt if dt > 0 else 0
+        spm_s  = d_spm / dt if dt > 0 else 0
         pkt_s  = d_pkt / dt if dt > 0 else 0
         # _134: cnt_d = {fan_en, tear[4:0], defer[5:0], fan_dbg[19:0]}
         # defer/s ~60 = el yank del reset caia en la ventana de islands y se
@@ -74,6 +83,8 @@ while True:
             anom = "  <<<< TASA PAQUETES RARA"
         elif dt < 2 and not (24 <= lock_s <= 36):
             anom = "  <<<< LOCK RARO"
+        elif spm_s > 50:
+            anom = f"  <<<< MISS DE SPRITE {spm_s:.0f}/s (thrash de la sc-cache)"
         fan = f"{'ON' if fanw >> 31 else 'of'}"
         # _133: discriminador de build — en las builds SDRAM el byte [23:16]
         # de cnt_c es 0 (no hay diag DDR3) y la palabra 5 lleva el VUMETRO
@@ -106,7 +117,7 @@ while True:
             ops = f"rd/s={d_rd/dt:7.0f} wr/s={d_wr/dt:6.0f}"
         dfr = f"dfr/s={d_defer/dt:4.1f}" if dt > 0 else "dfr/s= ?"
         print(f"+{now - t0:6.1f}s {rst:4d} {'+' + str(d_rst) if d_rst else ' .'} "
-              f"{lock_s:6.1f}  {pkt_s:8.1f}  {miss_s:6.0f}  {fan}  {dfr}  "
+              f"{lock_s:6.1f}  {pkt_s:8.1f}  {miss_s:6.0f}/{spm_s:<5.0f} {fan}  {dfr}  "
               f"{ops}  {ddtxt}{anom}")
     prev = (rst, lock, miss, pkt, ovr, park, fanw)
     prev_t = now

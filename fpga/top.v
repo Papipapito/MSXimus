@@ -1723,7 +1723,10 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire [31:0] v68dbg_park;                           // _124: park del shim
     wire        v68bk_req, v68bk_we, v68bk_done_t;
     wire [21:0] v68bk_addr;
-    wire [7:0]  v68bk_wdata;
+    // _148 FIX B: el shim escribe PALABRAS de 32b con mascara de bytes (1 op de
+    // backend por palabra en vez de hasta 4). Ver v9968_vram_shim.v.
+    wire [31:0] v68bk_wdata;
+    wire [3:0]  v68bk_wmask;
     wire [15:0] v68bk_rword;
     wire        v68bk2_req, v68bk2_done_t;
     wire [21:0] v68bk2_addr;
@@ -1736,7 +1739,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .vram_rdata(v68_vram_rdata), .vram_rdata_en(v68_vram_rdata_en),
         .vram_rtag(v68_vram_rtag),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
-        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .bk_wdata(v68bk_wdata), .bk_wmask(v68bk_wmask),
+        .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
         .bk2_req(v68bk2_req), .bk2_addr(v68bk2_addr),
         .bk2_rword(v68bk2_rword), .bk2_done_t(v68bk2_done_t),
         .vram_stall(v68_vram_stall),
@@ -1755,7 +1759,8 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire        vddr_clk_x1;
     wire        vddr_a_req, vddr_a_we, vddr_b_req;
     wire [21:0] vddr_a_addr, vddr_b_addr;
-    wire [7:0]  vddr_a_wdata;
+    wire [31:0] vddr_a_wdata;      // _148 FIX B: palabra de 32b + mascara
+    wire [3:0]  vddr_a_wmask;
     wire [15:0] vddr_a_dout, vddr_b_dout;
     wire        vddr_a_done, vddr_b_done;
     wire        vddr_ready;
@@ -1765,23 +1770,27 @@ assign keyboard_addr = ppi_port_c[3:0];
     v9968_sdram_bridge u_v68bridge (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
-        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .bk_wdata(v68bk_wdata), .bk_wmask(v68bk_wmask),
+        .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
         .clk_108m(vddr_clk_x1),
         .wv2_req(vddr_a_req), .wv2_we(vddr_a_we), .wv2_addr(vddr_a_addr),
-        .wv2_wdata(vddr_a_wdata), .wv2_dout(vddr_a_dout), .wv2_done(vddr_a_done)
+        .wv2_wdata(vddr_a_wdata), .wv2_wmask(vddr_a_wmask),
+        .wv2_dout(vddr_a_dout), .wv2_done(vddr_a_done)
     );
     v9968_sdram_bridge u_v68bridge2 (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .bk_req(v68bk2_req), .bk_we(1'b0), .bk_addr(v68bk2_addr),
-        .bk_wdata(8'd0), .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
+        .bk_wdata(32'd0), .bk_wmask(4'd0),
+        .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
         .clk_108m(vddr_clk_x1),
         .wv2_req(vddr_b_req), .wv2_we(), .wv2_addr(vddr_b_addr),
-        .wv2_wdata(), .wv2_dout(vddr_b_dout), .wv2_done(vddr_b_done)
+        .wv2_wdata(), .wv2_wmask(), .wv2_dout(vddr_b_dout), .wv2_done(vddr_b_done)
     );
 
     v9968_ddr3_backend u_vddr3 (
         .a_req(vddr_a_req), .a_we(vddr_a_we), .a_addr(vddr_a_addr),
-        .a_wdata(vddr_a_wdata), .a_dout(vddr_a_dout), .a_done(vddr_a_done),
+        .a_wdata(vddr_a_wdata), .a_wmask(vddr_a_wmask),
+        .a_dout(vddr_a_dout), .a_done(vddr_a_done),
         .b_req(vddr_b_req), .b_addr(vddr_b_addr),
         .b_dout(vddr_b_dout), .b_done(vddr_b_done),
         .clk_x1_out(vddr_clk_x1), .ready(vddr_ready), .diag(vddr_diag),
@@ -1802,21 +1811,34 @@ assign keyboard_addr = ppi_port_c[3:0];
         .ddr_dq(ddr_dq), .ddr_dqs(ddr_dqs), .ddr_dqs_n(ddr_dqs_n)
     );
 `else
-    v9968_sdram_bridge u_v68bridge (
+    // _148 FIX B — CAMINO LEGACY (VRAM en la SDRAM compartida, respaldo _137).
+    // memory.v solo sabe escribir 1 BYTE por operacion en wv2/wv3 (SdrDat =
+    // {wdata,wdata} con la DQM sacada de addr[0]) y NO se toca. El bridge se
+    // instancia con NARROW_BYTE=1: acepta la palabra de 32b del shim y la
+    // SERIALIZA en hasta 4 round-trips hacia memory.v, devolviendo bk_done_t
+    // solo al terminar la palabra entera. Coste identico al esquema byte-a-byte
+    // que este camino ya tenia; el shim ve una escritura atomica.
+    // FAR_DW=8 mantiene el bus de datos far del ancho de memory.v (sin
+    // conexiones de anchura desigual, que Gowin resuelve mal).
+    v9968_sdram_bridge #(.NARROW_BYTE(1), .FAR_DW(8)) u_v68bridge (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
-        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .bk_wdata(v68bk_wdata), .bk_wmask(v68bk_wmask),
+        .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
         .clk_108m(clk_108m),
         .wv2_req(wv2_req), .wv2_we(wv2_we), .wv2_addr(wv2_addr),
-        .wv2_wdata(wv2_wdata), .wv2_dout(wv2_dout), .wv2_done(wv2_done)
+        .wv2_wdata(wv2_wdata), .wv2_wmask(),
+        .wv2_dout(wv2_dout), .wv2_done(wv2_done)
     );
-    v9968_sdram_bridge u_v68bridge2 (
+    v9968_sdram_bridge #(.NARROW_BYTE(1), .FAR_DW(8)) u_v68bridge2 (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .bk_req(v68bk2_req), .bk_we(1'b0), .bk_addr(v68bk2_addr),
-        .bk_wdata(8'd0), .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
+        .bk_wdata(32'd0), .bk_wmask(4'd0),
+        .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
         .clk_108m(clk_108m),
         .wv2_req(wv3_req), .wv2_we(wv3_we), .wv2_addr(wv3_addr),
-        .wv2_wdata(wv3_wdata), .wv2_dout(wv3_dout), .wv2_done(wv3_done)
+        .wv2_wdata(wv3_wdata), .wv2_wmask(),
+        .wv2_dout(wv3_dout), .wv2_done(wv3_done)
     );
 `endif
 
@@ -4359,6 +4381,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire usb_uart_tx_int;
     dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
         .clk(clk_54m), .rst_n(bus_reset_n),
+        // _148 FIX C: {miss de SPRITE[15:0], miss de FONDO[15:0]} — antes la
+        // palabra entera era el miss de fondo. Los sprites tenian CERO
+        // visibilidad en placa (el thrash del DEVCON paso desapercibido).
+        // Lectura en dbg_audio_reader.py: spmiss = w0 >> 16, bgmiss = w0 & 0xFFFF.
         .cnt_a(v68dbg_miss),
         .cnt_b({aud_rst_cnt, aud_lock_cnt}),      // _127H: {resets HDMI, toggles lock}
 `ifdef ENABLE_VRAM_DDR3

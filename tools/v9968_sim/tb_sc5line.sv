@@ -70,7 +70,8 @@ vdp u_vdpA (
 
 wire        bk_req, bk_we;
 wire [21:0] bk_addr;
-wire [7:0]  bk_wdata;
+wire [31:0] bk_wdata;      // _148 FIX B: escritura de PALABRA
+wire [3:0]  bk_wmask;      // _148 FIX B: 1 = escribir ese byte
 logic [15:0] bk_rword = 0;
 logic        bk_done_t = 0;
 wire [7:0]  shim_diag;
@@ -88,6 +89,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .vram_rtag(A_vrtag),
     .vram_stall(A_vstall),
     .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr), .bk_wdata(bk_wdata),
+    .bk_wmask(bk_wmask),
     .bk_rword(bk_rword), .bk_done_t(bk_done_t),
     .bk2_req(bk2_req), .bk2_addr(bk2_addr),
     .bk2_rword(bk2_rword), .bk2_done_t(bk2_done_t),
@@ -97,17 +99,25 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
 logic [7:0] sdram [0:4194303];
 logic        m_pend = 0, m_we;
 logic [21:0] m_addr;
-logic [7:0]  m_dat;
+logic [31:0] m_dat;
+logic [3:0]  m_msk;
 integer      m_cnt, m_lat;
 always @(posedge clk) begin
     if (bk_req && !m_pend) begin
         m_pend <= 1; m_we <= bk_we; m_addr <= bk_addr; m_dat <= bk_wdata;
+        m_msk <= bk_wmask;
         m_cnt <= 0; m_lat <= 26 + ({$random} % 18);
     end
     else if (m_pend) begin
         m_cnt <= m_cnt + 1;
         if (m_cnt == m_lat) begin
-            if (m_we) sdram[m_addr] <= m_dat;
+            // _148 FIX B: escritura de PALABRA con mascara de bytes
+            if (m_we) begin
+                if (m_msk[0]) sdram[{m_addr[21:2],2'b00}] <= m_dat[ 7: 0];
+                if (m_msk[1]) sdram[{m_addr[21:2],2'b01}] <= m_dat[15: 8];
+                if (m_msk[2]) sdram[{m_addr[21:2],2'b10}] <= m_dat[23:16];
+                if (m_msk[3]) sdram[{m_addr[21:2],2'b11}] <= m_dat[31:24];
+            end
             else begin
                 bk_rword[7:0]  <= sdram[{m_addr[21:1],1'b0}];
                 bk_rword[15:8] <= sdram[{m_addr[21:1],1'b1}];
@@ -433,8 +443,9 @@ initial begin
     $display("SHIM: wq_used=%0d rq_used=%0d pfq w/r=%0d/%0d wq_vld=%b",
              u_shim.wq_used, u_shim.rq_used, u_shim.pfq_wp, u_shim.pfq_rp,
              u_shim.wq_vld);
-    $display("SHIM: bsy=%b cur_kind=%0d word_pend=%b late_v=%b stall=%b",
-             u_shim.bsy, u_shim.cur_kind, u_shim.word_pend, u_shim.late_v,
+    // _148 FIX B: word_pend ya no existe (una op de backend por palabra)
+    $display("SHIM: bsy=%b cur_kind=%0d bk_wmask=%b late_v=%b stall=%b",
+             u_shim.bsy, u_shim.cur_kind, u_shim.bk_wmask, u_shim.late_v,
              u_shim.vram_stall);
     $display("SHIM: obl_pend=%b obl_chk=%b obl_do=%b pfB_pend=%b fill_pend=%b",
              u_shim.obl_pend, u_shim.obl_chk, u_shim.obl_do, u_shim.pfB_pend,

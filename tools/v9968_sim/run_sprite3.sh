@@ -1,4 +1,17 @@
 #!/bin/bash
+# ############################################################################
+# ⚠⚠ OBSOLETO / ROTO — NO USAR (25/07, _148 FIX 0).  USA run_sprite3_iv.sh ⚠⚠
+#
+# Este flujo VERILATOR compila y corre sin errores, pero produce CERO trafico
+# de VRAM y un frame ENTERO en negro: con la instrumentacion puesta da
+# "TOP bg=0 sp=0 cpu=0 cmd=0 wr=0" y "nonzero=0" en TODOS los frames. El
+# MISMO tb_sprite3.sv bajo Icarus (-g2012) da el trafico correcto
+# (bg=6996 sp=6709 chit=5365 miss=1344 por frame): el problema es del flujo
+# --binary --timing de Verilator sobre esta pila (core V9968 + shim + modelos
+# de memoria con $random), NO del testbench.
+# Cualquier medida sacada de aqui es un FALSO VERDE. Se conserva solo como
+# registro del intento.
+# ############################################################################
 # run_sprite3.sh — reproduce el thrashing de la cache de sprites mode3:
 # compila tb_sprite3 (shim) y tb_sprite3r (perfecta), corre las dos, y
 # compara los volcados de frame. diffs > 0 = glitch del shim reproducido.

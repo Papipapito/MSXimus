@@ -1,12 +1,13 @@
 // ============================================================================
-// tb_screen5d.sv — DEBUG del negro de tb_screen5c: pila identica (core
-// parcheado + shim + backend lento) pero carga MINIMA (4 lineas) y volcado
-// temprano (frame 3) + trazas: tag de ida de cada fetch, hit/miss del shim,
-// eco de vuelta (rtag/rdata). Para localizar donde muere el dato de pantalla.
+// tb_sprite3.sv — REPRODUCTOR del thrashing de la cache de sprites mode3 del
+// DEVCON (23/07, HW: cuerpos limpios / cabezas con rayas verticales). Pila
+// COMPLETA: core V9968 + v9968_vram_shim + SDRAM lenta. Vuelca el frame a
+// s3_frame.txt. Se compara contra tb_sprite3r (VRAM perfecta, s3r_frame.txt):
+// diffs = glitches inducidos por el shim (thrash de la cache de sprites).
 // ============================================================================
 `timescale 1ns/1ps
 
-module tb_screen5d;
+module tb_sprite3;
 
 localparam real CLK_HALF = 5.8207;
 logic reset_n = 0;
@@ -78,7 +79,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .diag(shim_diag)
 );
 
-// backend lento identico al de 5c
+// ---- SDRAM compartida modelada (300-500ns aleatoria) ----
 logic [7:0] sdram [0:4194303];
 logic        m_pend = 0, m_we;
 logic [21:0] m_addr;
@@ -112,8 +113,6 @@ always @(posedge clk) begin
         end
     end
 end
-
-// ---- canal B del backend (_120): SOLO lecturas, misma latencia ----
 logic        m2_pend = 0;
 logic [21:0] m2_addr;
 integer      m2_cnt, m2_lat;
@@ -133,7 +132,7 @@ always @(posedge clk) begin
     end
 end
 
-
+// ---- bus + helpers ----
 task bus_wr(input [2:0] a, input [7:0] d);
 begin
     @(posedge clk);
@@ -142,98 +141,121 @@ begin
     @(posedge clk);
     while (!bus_ready) @(posedge clk);
     bus_ioreq <= 0; bus_write <= 0; bus_valid <= 0;
-    repeat (20) @(posedge clk);
+    repeat (18) @(posedge clk);
 end
 endtask
 task vdp_reg(input [5:0] r, input [7:0] d);
 begin bus_wr(3'd1, d); bus_wr(3'd1, {2'b10, r}); end
 endtask
-task vdp_pal(input [3:0] idx, input [2:0] r, input [2:0] g, input [2:0] b);
+task set_wr_ptr(input [3:0] bank, input [13:0] a14);
 begin
-    vdp_reg(6'd16, {4'd0, idx});
-    bus_wr(3'd2, {1'b0, r, 1'b0, b});
-    bus_wr(3'd2, {5'd0, g});
+    vdp_reg(6'd14, {4'd0, bank});
+    bus_wr(3'd1, a14[7:0]);
+    bus_wr(3'd1, {2'b01, a14[13:8]});
+end
+endtask
+task vram_stream_b(input [7:0] d);
+begin
+    bus_wr(3'd0, d);
+    repeat (28) @(posedge clk);
 end
 endtask
 
+// ---- volcado de frame ----
 integer vs_count = 0;
-logic vs_d = 0;
+logic vs_d = 0, hs_d = 0;
+integer fd = 0;
 integer dump_state = 0;
-
-// ---------- TRAZAS ----------
-integer trc_req = 0, trc_rsp = 0;
-integer cnt_bg = 0, cnt_idle = 0, cnt_spr = 0, cnt_other = 0;
-integer rsp_bg = 0, rsp_bg_nz = 0;
-always @(posedge clk) begin
-    if (dump_state == 1) begin
-        if (vram_valid && !vram_write) begin
-            case (vram_tag[4:2])
-                3'd1: cnt_bg   <= cnt_bg + 1;
-                3'd0: cnt_idle <= cnt_idle + 1;
-                3'd2: cnt_spr  <= cnt_spr + 1;
-                default: cnt_other <= cnt_other + 1;
-            endcase
-            if (trc_req < 50) begin
-                $display("REQ  t=%0t tag=%b addr=%05x", $time, vram_tag, vram_address);
-                trc_req <= trc_req + 1;
-            end
-        end
-        if (vram_rdata_en) begin
-            if (vram_rtag[4:2] == 3'd1) begin
-                rsp_bg <= rsp_bg + 1;
-                if (vram_rdata != 0) rsp_bg_nz <= rsp_bg_nz + 1;
-            end
-            if (trc_rsp < 50) begin
-                $display("RSP  t=%0t rtag=%b data=%08x", $time, vram_rtag, vram_rdata);
-                trc_rsp <= trc_rsp + 1;
-            end
-        end
-    end
-end
-
 always @(posedge clk) begin
     vs_d <= display_vs;
+    hs_d <= display_hs;
     if (display_vs && !vs_d) begin
         vs_count <= vs_count + 1;
         if (dump_state == 1) begin
+            $fclose(fd);
             dump_state <= 2;
-            $display("FIN FRAME: bg=%0d idle=%0d spr=%0d otros=%0d | rsp_bg=%0d (no-cero=%0d) | bg_miss=%0d",
-                     cnt_bg, cnt_idle, cnt_spr, cnt_other, rsp_bg, rsp_bg_nz, shim_diag);
+            $display("FRAME VOLCADO (diag=%0d)", shim_diag);
         end
-        else if (dump_state == 0 && vs_count == 3) dump_state <= 1;
+        else if (dump_state == 0 && vs_count == 12) begin
+            fd = $fopen("s3_frame.txt", "w");
+            dump_state <= 1;
+        end
+    end
+    if (dump_state == 1 && fd != 0) begin
+        if (display_hs && !hs_d) $fdisplay(fd, "L");
+        if (display_en) $fdisplay(fd, "%02x%02x%02x", display_r, display_g, display_b);
     end
 end
 
-integer x, y;
+// ============================================================================
+// _148 FIX 0 — INSTRUMENTACION DE SPRITE (antes el TB era CIEGO: sin esto la
+// unica salida era el volcado de pixeles y no habia forma de ver si el core
+// pedia sprites siquiera). Dos taps:
+//   * TOP: clasifica los vram_valid por consumidor (vram_tag[4:2]).
+//   * XMR al shim: cuenta fetch de SPRITE y su acierto de la sc-cache
+//     (mismo comparador que usa el RTL: scq_v && scq_tag == spr_addr1[15:12]).
+// Se imprime por frame en el flanco de vs. Criterio del FIX A: miss/sp < 0.1%.
+// ============================================================================
+integer f_bg=0, f_sp=0, f_cpu=0, f_cmd=0, f_wr=0;
+integer x_sp=0, x_chit=0, x_miss=0;
+integer npix=0, nnz=0;
+wire        x_is_sp  = u_shim.spr_p1 && (u_shim.spr_tag1[4:2] == 3'd2);
+wire        x_sp_hit = x_is_sp && u_shim.scq_v &&
+                       (u_shim.scq_tag == u_shim.spr_addr1[15:12]);
+always @(posedge clk) begin
+    if (vram_valid) begin
+        if (vram_write) f_wr <= f_wr + 1;
+        else case (vram_tag[4:2])
+            3'd1: f_bg  <= f_bg + 1;
+            3'd2: f_sp  <= f_sp + 1;
+            3'd3: f_cpu <= f_cpu + 1;
+            3'd4: f_cmd <= f_cmd + 1;
+        endcase
+    end
+    if (x_is_sp) begin
+        x_sp <= x_sp + 1;
+        if (x_sp_hit) x_chit <= x_chit + 1; else x_miss <= x_miss + 1;
+    end
+    if (display_en) begin
+        npix <= npix + 1;
+        if ({display_r, display_g, display_b} != 24'd0) nnz <= nnz + 1;
+    end
+    if (display_vs && !vs_d) begin
+        $display("SPDIAG vs=%0d | TOP bg=%0d sp=%0d cpu=%0d cmd=%0d wr=%0d | XMR sp=%0d chit=%0d miss=%0d (%0d.%02d%%) | pix=%0d nonzero=%0d",
+                 vs_count, f_bg, f_sp, f_cpu, f_cmd, f_wr, x_sp, x_chit, x_miss,
+                 (x_sp>0)? (x_miss*100)/x_sp : 0,
+                 (x_sp>0)? ((x_miss*10000)/x_sp) % 100 : 0,
+                 npix, nnz);
+        // _148 FIX C: los CONTADORES DEL RTL que salen por COM11, para
+        // comprobar que dicen lo mismo que el tap del TB (deltas por frame) y
+        // que el empaquetado de dbg_miss es el documentado.
+        $display("SPTEL vs=%0d | c_spfet=%0d (+%0d) c_spmiss=%0d (+%0d) c_miss=%0d | dbg_miss=%08x -> sp=%0d bg=%0d",
+                 vs_count, u_shim.c_spfet, u_shim.c_spfet - t_spfet,
+                 u_shim.c_spmiss, u_shim.c_spmiss - t_spmiss, u_shim.c_miss,
+                 u_shim.dbg_miss, u_shim.dbg_miss[31:16], u_shim.dbg_miss[15:0]);
+        t_spfet  <= u_shim.c_spfet;
+        t_spmiss <= u_shim.c_spmiss;
+        f_bg<=0; f_sp<=0; f_cpu<=0; f_cmd<=0; f_wr<=0;
+        x_sp<=0; x_chit<=0; x_miss<=0; npix<=0; nnz<=0;
+    end
+end
+reg [31:0] t_spfet = 0, t_spmiss = 0;
+
+integer yi_s, yj_s;
 initial begin
     repeat (50) @(posedge clk);
     reset_n = 1;
     wait (vs_count >= 1);
-    vdp_pal(4'd0,  3'd0, 3'd0, 3'd0);
-    vdp_pal(4'd1,  3'd7, 3'd0, 3'd0);
-    vdp_pal(4'd15, 3'd7, 3'd4, 3'd0);
-    vdp_reg(6'd0,  8'h06);
-    vdp_reg(6'd1,  8'h40);
-    vdp_reg(6'd2,  8'h1F);
-    vdp_reg(6'd8,  8'h2A);
-    vdp_reg(6'd20, 8'h01);
-    vdp_reg(6'd7,  8'h0F);
-    vdp_reg(6'd14, 8'h00);
-    bus_wr(3'd1, 8'h00);
-    bus_wr(3'd1, 8'h40);
-    for (y = 0; y < 4; y = y + 1)
-        for (x = 0; x < 128; x = x + 1) begin
-            bus_wr(3'd0, x[7:0]);  // byte unico por posicion: delata errores de lane
-            repeat (150) @(posedge clk);
-        end
-    $display("VRAM (4 lineas) cargada en vs=%0d", vs_count);
+    `include "sprite3_setup.svh"
+    $display("SETUP mode3 cargado en vs=%0d", vs_count);
     wait (dump_state == 2);
     #1000;
+    $display("*** SPRITE3 CON SHIM: COMPLETO (vs=%0d) ***", vs_count);
     $finish;
 end
 
 initial begin
-    #130000000;
+    #900000000;
     $display("TIMEOUT vs=%0d dump=%0d", vs_count, dump_state);
     $finish;
 end

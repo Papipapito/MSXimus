@@ -41,7 +41,13 @@ module v9968_ddr3_backend (
     input  wire        a_req,         // NIVEL: se mantiene hasta ver a_done
     input  wire        a_we,
     input  wire [21:0] a_addr,        // direccion de BYTE
-    input  wire [7:0]  a_wdata,
+    // _148 FIX B (COALESCING): escritura de PALABRA de 32 bits con mascara de
+    // bytes (a_wmask, 1 = escribir). Antes 1 byte por operacion: con el menu
+    // dibujando, 130627 escrituras-byte de backend para 34272 palabras del VDP
+    // (3.81 ops/palabra) dejaban el canal A al 89% de ocupacion y las lecturas
+    // de pantalla no entraban (12 miss/frame). Ahora 1 op = 1 palabra.
+    input  wire [31:0] a_wdata,
+    input  wire [3:0]  a_wmask,
     output reg  [15:0] a_dout,        // palabra 16b (addr[0] ignorado)
     output reg         a_done,        // PULSO 1 ciclo clk_x1
 
@@ -281,7 +287,11 @@ reg op_combo;                          // esta lectura responde a A y B
 reg op_we;
 reg [21:0] op_addr;
 reg [21:0] op_baddr;                   // addr de B en un combo
-reg [7:0]  op_wdata;
+reg [31:0] op_wdata;                   // _148: palabra completa
+reg [3:0]  op_wmask;                   // _148: 1 = escribir ese byte
+
+// _148: bit del byte 0 de la palabra escrita dentro de la linea de 128b
+wire [6:0] cl_off = {op_addr[3:2], 5'b00000};   // = op_addr[3:2] * 32
 
 reg [1:0] st;
 localparam ST_IDLE = 2'd0, ST_ISSUE = 2'd1, ST_WAITRD = 2'd2;
@@ -377,7 +387,7 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
         a_done <= 1'b0; b_done <= 1'b0;
         a_dout <= 16'd0; b_dout <= 16'd0;
         op_b <= 1'b0; op_combo <= 1'b0; op_we <= 1'b0;
-        op_addr <= 22'd0; op_baddr <= 22'd0; op_wdata <= 8'd0;
+        op_addr <= 22'd0; op_baddr <= 22'd0; op_wdata <= 32'd0; op_wmask <= 4'd0;
         op_wd <= 17'd0; wd_ops <= 4'd0;
         clA_v <= 1'b0; clB_v <= 1'b0;
         clA_tag <= 18'd0; clB_tag <= 18'd0;
@@ -435,6 +445,7 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     op_we   <= a_we;
                     op_addr <= a_addr;           // payload estable: el bridge
                     op_wdata <= a_wdata;         // lo mantiene hasta el done
+                    op_wmask <= a_wmask;         // _148
                     // combo: B pendiente, lectura, misma linea de 128b
                     op_combo <= (!a_we && b_req && !b_srv && !b_hit
                                  && b_addr[21:4] == a_addr[21:4]);
@@ -444,8 +455,15 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     if (a_we) begin
                         app_cmd      <= 3'b000;
                         app_wdf_wren <= 1'b1;
-                        app_wdf_data <= {16{a_wdata}};
-                        app_wdf_mask <= ~(16'h0001 << a_addr[3:0]);
+                        // _148 FIX B: la palabra de 32b se replica en los 4
+                        // carriles de la linea de 128b y la DM deja pasar SOLO
+                        // los 4 bytes del carril que toca (a_addr[3:2]) y de
+                        // ellos SOLO los habilitados por a_wmask. La mascara
+                        // viene de la DQM del propio VDP => es IMPOSIBLE
+                        // escribir un byte que el VDP no pidiera escribir.
+                        // (DDR3: 1 = NO escribir.)
+                        app_wdf_data <= {4{a_wdata}};
+                        app_wdf_mask <= ~({12'd0, a_wmask} << {a_addr[3:2], 2'b00});
                     end
                     else app_cmd <= 3'b001;
                     st <= ST_ISSUE;
@@ -480,10 +498,21 @@ always @(posedge clk_x1 or posedge ddr_rst) begin
                     inc_wr <= 1'b1;
                     // _130: coherencia de la cache — actualizar el byte en
                     // las lineas cacheadas de AMBOS canales si el tag casa
-                    if (clA_v && op_addr[21:4] == clA_tag)
-                        clA_data[op_addr[3:0]*8 +: 8] <= op_wdata;
-                    if (clB_v && op_addr[21:4] == clB_tag)
-                        clB_data[op_addr[3:0]*8 +: 8] <= op_wdata;
+                    // _148 FIX B: ahora son HASTA 4 bytes (los de op_wmask),
+                    // en el carril op_addr[3:2] de la linea de 128 bits.
+                    // cl_off = op_addr[3:2]*32 = bit del byte 0 de la palabra.
+                    if (clA_v && op_addr[21:4] == clA_tag) begin
+                        if (op_wmask[0]) clA_data[cl_off + 7'd0  +: 8] <= op_wdata[ 7: 0];
+                        if (op_wmask[1]) clA_data[cl_off + 7'd8  +: 8] <= op_wdata[15: 8];
+                        if (op_wmask[2]) clA_data[cl_off + 7'd16 +: 8] <= op_wdata[23:16];
+                        if (op_wmask[3]) clA_data[cl_off + 7'd24 +: 8] <= op_wdata[31:24];
+                    end
+                    if (clB_v && op_addr[21:4] == clB_tag) begin
+                        if (op_wmask[0]) clB_data[cl_off + 7'd0  +: 8] <= op_wdata[ 7: 0];
+                        if (op_wmask[1]) clB_data[cl_off + 7'd8  +: 8] <= op_wdata[15: 8];
+                        if (op_wmask[2]) clB_data[cl_off + 7'd16 +: 8] <= op_wdata[23:16];
+                        if (op_wmask[3]) clB_data[cl_off + 7'd24 +: 8] <= op_wdata[31:24];
+                    end
                     st <= ST_IDLE;
                 end
                 else if (op_wd[16]) begin

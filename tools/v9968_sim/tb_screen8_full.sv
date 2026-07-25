@@ -75,7 +75,8 @@ vdp u_vdp (
 // ---------------- shim (canal dual) ----------------
 wire        bk_req, bk_we;
 wire [21:0] bk_addr;
-wire [7:0]  bk_wdata;
+wire [31:0] bk_wdata;      // _148 FIX B: escritura de PALABRA
+wire [3:0]  bk_wmask;      // _148 FIX B: 1 = escribir ese byte
 wire [15:0] bk_rword;
 wire        bk_done_t;
 wire        bk2_req;
@@ -93,6 +94,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .vram_rtag(vram_rtag),
     .vram_stall(vram_stall),
     .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr), .bk_wdata(bk_wdata),
+    .bk_wmask(bk_wmask),
     .bk_rword(bk_rword), .bk_done_t(bk_done_t),
     .bk2_req(bk2_req), .bk2_addr(bk2_addr),
     .bk2_rword(bk2_rword), .bk2_done_t(bk2_done_t),
@@ -109,21 +111,26 @@ wire [21:0] wv3_addr;
 wire [7:0]  wv3_wdata;
 wire [15:0] wv3_dout;
 
-v9968_sdram_bridge u_bridge (
+// _148 FIX B: memory.v escribe 1 BYTE por op -> NARROW_BYTE=1 (el bridge
+// serializa la palabra del shim en hasta 4 round-trips), FAR_DW=8 para que
+// el bus far conserve su ancho. Identico a top.v en el camino sin DDR3.
+v9968_sdram_bridge #(.NARROW_BYTE(1), .FAR_DW(8)) u_bridge (
     .clk_vdp(clk86), .rst_n(reset_n),
     .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr),
-    .bk_wdata(bk_wdata), .bk_rword(bk_rword), .bk_done_t(bk_done_t),
+    .bk_wdata(bk_wdata), .bk_wmask(bk_wmask),
+    .bk_rword(bk_rword), .bk_done_t(bk_done_t),
     .clk_108m(clk108),
     .wv2_req(wv2_req), .wv2_we(wv2_we), .wv2_addr(wv2_addr),
-    .wv2_wdata(wv2_wdata), .wv2_dout(wv2_dout), .wv2_done(wv2_done)
+    .wv2_wdata(wv2_wdata), .wv2_wmask(), .wv2_dout(wv2_dout), .wv2_done(wv2_done)
 );
-v9968_sdram_bridge u_bridge2 (
+v9968_sdram_bridge #(.NARROW_BYTE(1), .FAR_DW(8)) u_bridge2 (
     .clk_vdp(clk86), .rst_n(reset_n),
     .bk_req(bk2_req), .bk_we(1'b0), .bk_addr(bk2_addr),
-    .bk_wdata(8'd0), .bk_rword(bk2_rword), .bk_done_t(bk2_done_t),
+    .bk_wdata(32'd0), .bk_wmask(4'd0),
+    .bk_rword(bk2_rword), .bk_done_t(bk2_done_t),
     .clk_108m(clk108),
     .wv2_req(wv3_req), .wv2_we(wv3_we), .wv2_addr(wv3_addr),
-    .wv2_wdata(wv3_wdata), .wv2_dout(wv3_dout), .wv2_done(wv3_done)
+    .wv2_wdata(wv3_wdata), .wv2_wmask(), .wv2_dout(wv3_dout), .wv2_done(wv3_done)
 );
 
 // ---------------- memoria REAL + modelo W9825 ----------------
