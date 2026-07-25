@@ -223,13 +223,57 @@ BEGIN
                             keys(7)(1) <= '0';  -- row 7, bit1
                             FN(5)      <= '1';
 
-                        -- Remaining F6..F12 only on FN for now (without matrix),
-                        -- if you want – you can also connect them to free matrix fields.
-                        WHEN 63 => FN(6)  <= '1';  -- F6
-                        WHEN 64 => FN(7)  <= '1';  -- F7
-                        WHEN 65 => FN(8)  <= '1';  -- F8
-                        WHEN 66 => FN(9)  <= '1';  -- F9
-                        WHEN 67 => FN(10) <= '1';  -- F10
+                        -----------------------------------------------------------------
+                        -- Physical F6..F10 -> synthetic SHIFT + F1..F5
+                        --
+                        -- The MSX matrix only has five function keys; F6..F10 are
+                        -- obtained on a real machine by holding SHIFT while pressing
+                        -- F1..F5. A USB keyboard, however, does have physical F6..F10
+                        -- keys, so we make each of them assert BOTH its F(n-5) matrix
+                        -- bit AND the SHIFT bit (row 6, bit0) - exactly the combination
+                        -- the user would otherwise type by hand.
+                        --
+                        -- Why this cannot break the real SHIFT: the SHIFT bit is active
+                        -- low and is only ever driven to '0' here. The single place that
+                        -- drives it to '1' is the "all released" default at the top of
+                        -- this clocked process, which runs BEFORE both the real-SHIFT
+                        -- block (keyboard(105)/(109)) and this loop. Because in a VHDL
+                        -- process the last assignment wins, and every later assignment
+                        -- to keys(6)(0) is a '0', real SHIFT and synthetic SHIFT simply
+                        -- OR together - neither can cancel the other. Manual SHIFT+F1..F5
+                        -- therefore keeps working exactly as before.
+                        --
+                        -- Known side effect (identical to a real MSX): while F6..F10 is
+                        -- held down the SHIFT bit is active, so any OTHER key pressed at
+                        -- the same time is read as shifted. Accepted by design.
+                        --
+                        -- FN(6)..FN(10) are still asserted as before, so any internal
+                        -- core function hanging off the FN bus is unaffected.
+                        --
+                        -- F11/F12 have no MSX matrix equivalent -> FN only, unchanged.
+                        -----------------------------------------------------------------
+                        WHEN 63 =>  -- F6 = SHIFT + F1
+                            keys(6)(5) <= '0';  -- F1    (row 6, bit5)
+                            keys(6)(0) <= '0';  -- SHIFT (row 6, bit0)
+                            FN(6)      <= '1';
+                        WHEN 64 =>  -- F7 = SHIFT + F2
+                            keys(6)(6) <= '0';  -- F2    (row 6, bit6)
+                            keys(6)(0) <= '0';  -- SHIFT (row 6, bit0)
+                            FN(7)      <= '1';
+                        WHEN 65 =>  -- F8 = SHIFT + F3
+                            keys(6)(7) <= '0';  -- F3    (row 6, bit7)
+                            keys(6)(0) <= '0';  -- SHIFT (row 6, bit0)
+                            FN(8)      <= '1';
+                        WHEN 66 =>  -- F9 = SHIFT + F4
+                            keys(7)(0) <= '0';  -- F4    (row 7, bit0)
+                            keys(6)(0) <= '0';  -- SHIFT (row 6, bit0)
+                            FN(9)      <= '1';
+                        WHEN 67 =>  -- F10 = SHIFT + F5
+                            keys(7)(1) <= '0';  -- F5    (row 7, bit1)
+                            keys(6)(0) <= '0';  -- SHIFT (row 6, bit0)
+                            FN(10)     <= '1';
+
+                        -- F11/F12 stay on the FN bus only (no MSX matrix key)
                         WHEN 68 => FN(11) <= '1';  -- F11
                         WHEN 69 => FN(12) <= '1';  -- F12
 

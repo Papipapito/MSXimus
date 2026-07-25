@@ -249,6 +249,16 @@ module vdp_cpu_interface (
 	reg					ff_vram_valid;
 	reg					ff_busy;
 
+	//	MSXimus _149: BUFFER DE PRE-LECTURA DE VRAM (comportamiento del V9938 real)
+	reg					ff_pf_req;					//	hay que lanzar una pre-lectura
+	reg					ff_pf_inflight;				//	la lectura en vuelo es una PRE-lectura
+	reg					ff_pf_valid;				//	el buffer tiene un byte listo
+	reg		[7:0]		ff_pf_data;
+	wire				w_set_vram_address;
+	wire				w_set_read_address;
+	wire				w_pf_invalidate;
+	wire				w_pf_hit;
+
 	reg					ff_line_interrupt = 1'b0;
 	reg					ff_frame_interrupt = 1'b0;
 	reg					ff_command_end_interrupt = 1'b0;
@@ -314,10 +324,27 @@ module vdp_cpu_interface (
 		end
 	end
 
-	assign bus_ready	= ff_bus_ready & ~ff_busy;
+	//	MSXimus _149: mientras una PRE-lectura esta EN VUELO el puerto de VRAM
+	//	esta ocupado — se retiene al maestro igual que con ff_busy (el maestro
+	//	reintenta solo: ff_bus_ready vuelve a 1 con bus_ioreq). Sin esto, un
+	//	acceso al puerto 0 durante la pre-lectura lanzaria un SEGUNDO
+	//	ff_vram_valid y las dos respuestas se confundirian.
+	assign bus_ready	= ff_bus_ready & ~ff_busy & ~ff_pf_inflight;
 
-	assign w_write		= ff_bus_valid &  ff_bus_write & ~ff_busy;
-	assign w_read		= ff_bus_valid & ~ff_bus_write & ~ff_busy;
+	assign w_write		= ff_bus_valid &  ff_bus_write & ~ff_busy & ~ff_pf_inflight;
+	assign w_read		= ff_bus_valid & ~ff_bus_write & ~ff_busy & ~ff_pf_inflight;
+
+	//	MSXimus _149: pulsos de 1 ciclo del ajuste de direccion de VRAM
+	//	(2o acceso al puerto 1 con bit7=0; bit6 = 0 lectura / 1 escritura)
+	assign w_set_vram_address	= w_write & ff_port1 & ff_2nd_access & ~ff_bus_wdata[7];
+	assign w_set_read_address	= w_set_vram_address & ~ff_bus_wdata[6];
+	//	el buffer deja de ser valido si se re-apunta la direccion para ESCRIBIR,
+	//	si se cambia el banco (R#14) o si la CPU ESCRIBE en VRAM (el contador
+	//	avanza y el byte guardado ya no corresponde a la direccion actual)
+	assign w_pf_invalidate		= w_set_vram_address |
+								  (ff_register_write & (ff_register_num == 6'd14)) |
+								  (w_write & ff_port0);
+	assign w_pf_hit				= w_read & ff_port0 & ff_pf_valid;
 
 	// --------------------------------------------------------------------
 	//	VRAM Read/Write access
@@ -398,44 +425,83 @@ module vdp_cpu_interface (
 			ff_vram_wdata		<= 8'd0;
 			ff_vram_address_inc	<= 1'b0;
 			ff_busy				<= 1'b0;
+			ff_pf_req			<= 1'b0;
+			ff_pf_inflight		<= 1'b0;
 		end
-		else if( vram_rdata_en ) begin
-			ff_vram_address_inc	<= 1'b1;
-		end
-		else if( ff_vram_valid ) begin
-			if( vram_ready ) begin
-				ff_vram_valid		<= 1'b0;
-				if( ff_vram_write ) begin
+		else begin
+			if( vram_rdata_en ) begin
+				ff_vram_address_inc	<= 1'b1;
+				ff_pf_inflight		<= 1'b0;
+			end
+			else if( ff_vram_valid ) begin
+				if( vram_ready ) begin
+					ff_vram_valid		<= 1'b0;
+					if( ff_vram_write ) begin
+						ff_busy			<= 1'b0;
+					end
+				end
+			end
+			else if( ff_vram_address_inc ) begin
+				ff_vram_address_inc	<= 1'b0;
+				if( ff_vram_write && !vram_access_mask ) begin
+					//	Write Access
+					ff_vram_valid	<= 1'b1;
+				end
+				else begin
+					//	Read access or vram_access_mask
 					ff_busy			<= 1'b0;
 				end
 			end
-		end
-		else if( ff_vram_address_inc ) begin
-			ff_vram_address_inc	<= 1'b0;
-			if( ff_vram_write && !vram_access_mask ) begin
-				//	Write Access
-				ff_vram_valid	<= 1'b1;
+			else if( w_write && ff_port0 ) begin
+				//	VRAM write access
+				ff_vram_valid		<= 1'b0;
+				ff_vram_write		<= 1'b1;
+				ff_vram_wdata		<= ff_bus_wdata;
+				ff_vram_address_inc <= 1'b1;
+				ff_busy				<= 1'b1;
+				ff_pf_req			<= 1'b0;
 			end
-			else begin
-				//	Read access or vram_access_mask
-				ff_busy			<= 1'b0;
+			else if( w_read && ff_port0 ) begin
+				if( ff_pf_valid ) begin
+					//	MSXimus _149: ACIERTO del buffer de pre-lectura — se
+					//	responde en el MISMO ciclo (sin ff_busy, sin acceso a
+					//	VRAM) y se arma la pre-lectura del byte siguiente. La
+					//	direccion ya la adelanto la pre-lectura anterior.
+					ff_pf_req			<= 1'b1;
+				end
+				else begin
+					//	buffer vacio: lectura BLOQUEANTE como el upstream
+					ff_vram_valid		<= 1'b1;
+					ff_vram_write		<= 1'b0;
+					ff_vram_wdata		<= 8'd0;
+					ff_vram_address_inc <= 1'b0;
+					ff_busy				<= 1'b1;
+					ff_pf_req			<= 1'b1;	//	y encadena la siguiente
+				end
 			end
-		end
-		else if( w_write && ff_port0 ) begin
-			//	VRAM write access
-			ff_vram_valid		<= 1'b0;
-			ff_vram_write		<= 1'b1;
-			ff_vram_wdata		<= ff_bus_wdata;
-			ff_vram_address_inc <= 1'b1;
-			ff_busy				<= 1'b1;
-		end
-		else if( w_read && ff_port0 ) begin
-			//	VRAM read access
-			ff_vram_valid		<= 1'b1;
-			ff_vram_write		<= 1'b0;
-			ff_vram_wdata		<= 8'd0;
-			ff_vram_address_inc <= 1'b0;
-			ff_busy				<= 1'b1;
+			else if( ff_pf_req && !ff_busy && !ff_pf_valid && !w_set_vram_address ) begin
+				//	(!w_set_vram_address: si en ESTE ciclo se esta re-apuntando la
+				//	direccion, ff_vram_address todavia es la VIEJA — se espera un
+				//	ciclo para pre-leer la nueva)
+				//	MSXimus _149: lanzar la PRE-LECTURA. NO pone ff_busy: la CPU
+				//	no espera por ella; solo ff_pf_inflight retiene el puerto.
+				ff_vram_valid		<= 1'b1;
+				ff_vram_write		<= 1'b0;
+				ff_vram_wdata		<= 8'd0;
+				ff_vram_address_inc <= 1'b0;
+				ff_pf_inflight		<= 1'b1;
+				ff_pf_req			<= 1'b0;
+			end
+
+			//	el ajuste de direccion de LECTURA arma la pre-lectura, y el de
+			//	ESCRITURA / R#14 / una escritura en VRAM la cancela. Van al FINAL
+			//	para ganar a las ramas de arriba si coinciden en el mismo ciclo.
+			if( w_set_read_address ) begin
+				ff_pf_req			<= 1'b1;
+			end
+			else if( w_pf_invalidate ) begin
+				ff_pf_req			<= 1'b0;
+			end
 		end
 	end
 
@@ -782,11 +848,30 @@ module vdp_cpu_interface (
 		endcase
 	end
 
+	// --------------------------------------------------------------------
+	//	MSXimus _149: buffer de PRE-LECTURA de VRAM
+	// --------------------------------------------------------------------
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_pf_valid	<= 1'b0;
+			ff_pf_data	<= 8'd0;
+		end
+		else if( vram_rdata_en && ff_pf_inflight ) begin
+			ff_pf_data	<= vram_rdata;
+			ff_pf_valid	<= 1'b1;
+		end
+		else if( w_pf_hit || w_pf_invalidate ) begin
+			ff_pf_valid	<= 1'b0;
+		end
+	end
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_bus_rdata_en		<= 1'b0;
 		end
-		else if( vram_rdata_en ) begin
+		//	MSXimus _149: si la lectura completada era una PRE-lectura, su dato NO
+		//	va al bus (va al buffer, mas abajo) — el bus lo recoge en el IN.
+		else if( vram_rdata_en && !ff_pf_inflight ) begin
 			if( vram_access_mask ) begin
 				ff_bus_rdata		<= 8'b11111111;
 			end
@@ -797,8 +882,15 @@ module vdp_cpu_interface (
 		end
 		else if( w_read ) begin
 			if( ff_port0 ) begin
-				ff_bus_rdata	<= 8'b11111111;
-				ff_bus_rdata_en	<= 1'b0;
+				if( ff_pf_valid ) begin
+					//	MSXimus _149: ACIERTO — el byte ya estaba pre-leido
+					ff_bus_rdata	<= vram_access_mask ? 8'b11111111 : ff_pf_data;
+					ff_bus_rdata_en	<= 1'b1;
+				end
+				else begin
+					ff_bus_rdata	<= 8'b11111111;
+					ff_bus_rdata_en	<= 1'b0;
+				end
 			end
 			else if( ff_port1 ) begin
 				ff_bus_rdata	<= ff_status_register;

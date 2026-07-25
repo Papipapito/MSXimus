@@ -116,3 +116,103 @@ mientras el magnificador lee desde c_read_start = 16: se pierden ~14 muestras
 (borde izq 30 muestras / der 2). El valor correcto es c_read_start = 30 (con el
 que TEXT1 queda centrado exacto: 16 muestras de borde a cada lado). Se deja
 fuera de este cambio para no mezclar dos cosas en la misma build.
+
+[_149 2026-07-25] vdp_cpu_interface.v: BUFFER DE PRE-LECTURA DE VRAM (el del
+V9938 real). FIX del "SIMBOLO RESIDUAL JUNTO AL CURSOR" en MSX-DOS/Nextor y
+BASIC bajo SCREEN 0 WIDTH 80 (TEXT2).
+
+NO ERA EL BLINK (hipotesis descartada CON MEDIDA, ver abajo). Ground truth en
+openMSX (Philips NMS 8250, V9938) en el prompt en W80: R#12 = 0x00 y
+R#13 = 0x00 — el blink del VDP esta PARADO. El cursor de texto del MSX se
+dibuja por SOFTWARE: la BIOS escribe el CODIGO 0xFF en la celda del cursor y
+reescribe el PATRON del caracter 255 (PGT+0x7F8..0x7FF) con el COMPLEMENTO del
+glifo que hay debajo; al mover el cursor RESTAURA el codigo original, que habia
+LEIDO antes por el puerto de datos del VDP. (De paso: la tabla de blink de
+TEXT2 en 0x0800 la BIOS NUNCA la inicializa — contiene la fuente de TEXT1
+rancia, ~29% de bits a 1. Solo R#13 = 0 evita el desastre.)
+
+CAUSA: el core NO implementaba la pre-lectura del V9938. Cada IN del puerto 0
+lanzaba el acceso a VRAM EN ESE MOMENTO y frenaba a la CPU con ff_busy /
+bus_ready. Pero fpga/src/v9968_cpu_glue.v NO frena al Z80 (no hay /WAIT del
+V9968 en top.v): dispara la transaccion en el flanco de csr_n y confia en que
+bus_rdata_en llegue antes de que el T80 muestree cdi_r; si no llega, cdi_r
+conserva EL DATO DE LA LECTURA ANTERIOR (lo dice su propia cabecera). Con TEXT2
+el fondo hace 4 accesos a VRAM por PAREJA de caracteres (el doble que TEXT1) y
+la latencia se dispara. La BIOS guarda entonces un caracter EQUIVOCADO y al
+mover el cursor lo escribe DE VERDAD en la VRAM: el glifo residual es real y
+se queda para siempre (cosmetico; el editor de linea de DOS usa su buffer RAM).
+
+MEDIDA (tools/v9968_sim/tb_t2cpuread.sv: Z80 modelado + v9968_cpu_glue REAL +
+vdp.v + shim, con TEXT2 dibujando, 120 lecturas):
+  Z80 3,58 MHz: 32,5% de las lecturas devuelven el byte ANTERIOR
+  Z80 5,37 MHz: 53,3%   (presupuesto 698 / 466 ns; latencia media 492 ns,
+                         MAX 2189 ns; bimodal: acierto de cache ~14-29 ciclos,
+                         fallo ~45-70)
+  transacciones de I/O perdidas en el glue: 0 (las ESCRITURAS estan a salvo)
+
+FIX (bit-exacto para todo lo que no sea el puerto 0 de VRAM):
+  - ff_pf_req / ff_pf_inflight / ff_pf_valid / ff_pf_data.
+  - Fijar la direccion de LECTURA (2o acceso al puerto 1, bit7=0 bit6=0) arma
+    una PRE-LECTURA que se lanza sin poner ff_busy: la CPU no espera por ella.
+  - El IN del puerto 0 responde EN EL MISMO CICLO desde ff_pf_data y arma la
+    pre-lectura del byte siguiente (encadenado, como el silicio: el contador de
+    direccion va uno por delante). Si el buffer esta vacio se cae a la lectura
+    bloqueante del upstream, identica.
+  - bus_ready / w_read / w_write se retienen con ~ff_pf_inflight (el puerto de
+    VRAM esta ocupado; el maestro reintenta solo). Sin esto un acceso durante
+    la pre-lectura lanzaria un SEGUNDO ff_vram_valid.
+  - El buffer se invalida al re-apuntar la direccion, al escribir R#14 y al
+    escribir en VRAM por el puerto 0.
+  Margen que gana la BIOS: entre el SETRD y el IN pasan ~9-11 estados T
+  (2,5-3 us a 3,58 MHz) contra los 2,2 us de latencia MAXIMA medida.
+
+DESCARTADO CON MEDIDA (tools/v9968_sim/tb_t2cursor.sv, pila completa, TEXT2 con
+la tabla de blink LLENA DE BASURA como la deja la BIOS):
+  - R#13 = 0 apaga el blink por completo: 0 celdas con atributo de blink de 395.
+  - Con el blink activo, el mapeo caracter -> byte/bit de la tabla es EXACTO
+    (byte = base + char/8, bit 7 = caracter MAS A LA IZQUIERDA): confirma que
+    los parches _127E (selector 2'd0/1/2) y _127F ([7:2]) son correctos.
+  - El camino de PANTALLA lee las escrituras de la CPU al instante: tras mover
+    el cursor por el puerto CPU la celda vieja se lee restaurada y la nueva con
+    el patron reescrito. NO hay rancidez de cache en el shim.
+  - vdp_timing_control_ssg.v: el blink-timing w_10frame == 4'd9 del upstream
+    th9958 (el "plan _127G") YA ESTABA aplicado y es el CORRECTO (la unidad de
+    R#13 son 10 frames; el 4'd4 del arbol base iba al doble de velocidad).
+    Banco tools/v9968_sim/tb_ssgblink.sv (cadencia campo a campo).
+
+RIESGO PARA EL GATE: vdp_cpu_interface.v no esta en las familias cronicas de
+placement (vdp_sprite_makeup_pixel / clones syn_preserve del ssg) y el ssg NO
+se ha tocado. El cambio anade 4 FF + 8 FF de dato y un par de comparadores en
+un camino que ya era lento (bus de la CPU). PENDIENTE: verificar en HW —
+regresion obligatoria de LDIRMV/RDVRM (lecturas en bloque) y del cargador de
+ROMs, que son los grandes usuarios de lectura de VRAM.
+  ALTERNATIVA si el gate se queja del camino del bus de la CPU: en vez de los
+  tres terminos `& ~ff_pf_inflight` (bus_ready / w_read / w_write) basta con
+  poner ff_busy <= 1'b1 tambien en la rama que lanza la pre-lectura — la ruta
+  de cierre ya existe (rdata_en -> ff_vram_address_inc -> ff_busy <= 0 porque
+  !ff_vram_write) y el efecto es identico, con CERO logica combinacional nueva.
+
+VERIFICACION _149 (misma sim, MISMO banco, antes -> despues):
+  tb_t2cpuread  Z80 3,58 MHz: 32,5% de bytes malos -> 0,0%
+  tb_t2cpuread  Z80 5,37 MHz: 53,3% de bytes malos -> 0,0%
+  latencia del IN: bimodal 14..188 ciclos (163..2189 ns) -> CONSTANTE 3 ciclos
+  (35 ns) en las 120 lecturas: TODAS son acierto del buffer de pre-lectura.
+  tb_ssgblink  R#13=0x00: blink = 0 en los 25 campos, 0 cambios a mitad de
+  pantalla (el caso de MSX-DOS/BASIC en W80).
+  tb_ssgblink  R#13=0x11: blink = 0 durante 9-10 campos y luego 1, sin volver a
+  conmutar en 25 campos -> el periodo real es (N+1)*10 frames, no N*10 (la
+  recarga de ff_blink_counter se come un tic de w_10frame). Es comportamiento
+  UPSTREAM (identico en el arbol base) y COSMETICO — el blink va a la mitad de
+  velocidad de lo programado. NO tiene nada que ver con este bug (R#13=0 en
+  DOS/BASIC). Anotado por si algun dia se compara contra HW real.
+  tb_t2cursor REGRESION con el parche: salida IDENTICA a la de antes del parche
+  (mismos 4 OK: blink apagado con R#13=0, cursor visto, SIN residuo tras mover
+  el cursor por el puerto CPU, patron del caracter 255 reescrito). El camino de
+  PANTALLA no se ha tocado.
+
+PENDIENTE MENOR (encontrado de paso, NO es este bug): con el blink FORZADO
+activo, 1 de 395 celdas (fila 1 col 51 = par 25, byte 0x0810 = 0x3C, bit 4) sale
+con el bit de blink a 0 en vez de 1, y sale IGUAL en las dos corridas (es
+determinista, no ruido). Solo se muestrea la PRIMERA linea de cada fila de
+caracteres, asi que huele a una captura tardia del byte de blink en ese par
+concreto. Invisible en DOS/BASIC (R#13 = 0) y en el menu no se ha visto.
