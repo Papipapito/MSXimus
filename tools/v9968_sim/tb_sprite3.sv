@@ -280,12 +280,25 @@ always @(posedge clk) begin
 end
 reg [31:0] t_spfet = 0, t_spmiss = 0;
 
+// ---- LAYOUT REAL DE LA DEMO ru66 (-DRU66): datos por poke en t=0 ----
+`ifdef RU66
+task vram_poke(input [17:0] a, input [7:0] d);
+begin sdram[22'h280000 + a] = d; end
+endtask
+`include "ru66_preload.svh"
+initial ru66_preload();
+`endif
+
 integer yi_s, yj_s;
 initial begin
     repeat (50) @(posedge clk);
     reset_n = 1;
     wait (vs_count >= 1);
+`ifdef RU66
+    `include "sprite3_ru66_setup.svh"
+`else
     `include "sprite3_setup.svh"
+`endif
     $display("SETUP mode3 cargado en vs=%0d", vs_count);
     wait (dump_state == 2);
     #1000;

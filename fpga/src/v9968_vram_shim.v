@@ -137,6 +137,11 @@ reg [31:0] pww_data;
 // Matarlo del todo pide ASOCIATIVIDAD, no mas lineas: el modelo (sc_bijective.py)
 // da 0.00 miss/scanline con un victim buffer de 4 entradas sobre esta misma
 // cache de 8192.
+// ⚠ _151: TODO EL PARRAFO "RESIDUO CONOCIDO" DE AQUI ARRIBA DESCRIBE EL INDICE
+// VIEJO. El choque SAT<->SPT ya no existe: c_idx13 mete v[13] en el indice y
+// sube el pliegue de v[14] al bit 12 (ver el bloque _151 FIX en c_idx13). Se
+// deja el texto porque explica COMO se llego hasta aqui y porque el analisis
+// del pliegue sigue siendo la herramienta para razonar sobre esta cache.
 // _150 — RESIDUO CERRADO: el VICTIM BUFFER esta IMPLEMENTADO (16 entradas
 // asociativas en FF, ver el bloque "_150 VICTIM BUFFER" mas abajo). Va en la
 // ETAPA LIBRE de la tuberia (pipe[2] en T+2, mismo instante de salida que
@@ -530,8 +535,52 @@ endfunction
 // FISICO del entrelazado, ver arriba) se CONSERVA intacto en los 12 bits bajos;
 // lo nuevo es v[12] (= L[14], el escalon de 16KB) como bit ALTO. Biyectivo con
 // tag = v[15:12] (verificado por enumeracion de las 65536 palabras).
+//
+// _151 FIX — LAS 3 RAYAS HORIZONTALES DE LA ru66 (SAT contra SPT).
+// SINTOMA (HW _150): en la escena de los conejos de ru66-v9968-demo salen 3
+// rayas horizontales de 1 px que cruzan a los DOS conejos a la MISMA Y (mitad
+// de pantalla) y se prolongan sobre el fondo; el COM11 marcaba ~2.700 spMISS/s
+// (~45/frame) SOSTENIDOS y vbhit = 0 (el victim buffer no rescataba NADA).
+//
+// CAUSA (medida, no supuesta). Con el indice de arriba:
+//   SAT @0x10000 -> v = 0x4000 + P*2 + m ; v[14]=1 => idx13 = 2048 + P*2 + m
+//   SPT @0x08000 -> v = 0x2000 + pat[7:4]*512 + yl*32 + pat[3:0]*2 + w
+//                   v[14]=0, v[13] NO ENTRA EN EL INDICE => idx13 = (v & 0x1FFF)
+//   La fila de patron 0 (pat[7:4]=0, o sea los patrones 0x00-0x0F, LOS PRIMEROS
+//   QUE USA CUALQUIERA) cae en idx13 = yl*32 + ... => con yl = 64 y 65 aterriza
+//   EXACTAMENTE encima de la SAT (idx13 2048..2095 = planos 0..23).
+//   En la ru66 los conejos son SZ=3 (128 lineas fuente) con MGY=128 (1:1) y
+//   arrancan en Y=31 => yl=64/65 se pintan en las LINEAS DE PANTALLA 95 y 96,
+//   y el destrozo se arrastra a la 97. Los 8 planos de conejo re-leen su SAT
+//   CADA scanline y sus patrones caen sobre ella: ping-pong puro. El VB de 16
+//   entradas no puede: el conjunto en conflicto son ~32 palabras y la politica
+//   round-robin lo recicla entero DENTRO de la misma linea.
+//   Reproducido en tb_sprite3 -DRU66 con el layout REAL de la demo (SAT/SPT/
+//   26 planos/patrones sacados de devcon.c): 41-42 miss/frame sostenidos, del
+//   mismo orden que los ~45/frame del HW.
+//   El indice viejo choca con las filas de patron 0,1,2,3,4 (las MAS usadas).
+//
+// FIX: meter v[13] en el indice y subir el pliegue de v[14] al bit 12.
+//   idx13 = { v[12]^v[14], v[11]^v[13], v[10:0] }
+//   * BIYECTIVO con tag = v[15:12] (enumeracion de las 65536 palabras: 65536
+//     claves distintas; el tag da v[14] y v[13], asi que v[12] y v[11] se
+//     recuperan). El TAG NO CAMBIA: mismo ancho, mismo comparador.
+//   * COSTE: 1 XOR. Ni un FF, ni un bloque BSRAM, ni una etapa de tuberia.
+//   * REGRESION CERO POR CONSTRUCCION en 0x0000-0x1FFF (v[13]=v[14]=0): las
+//     tablas de SCREEN 0/1/2/3 y el bg de SC5 pagina 0 conservan idx13 = v[12:0]
+//     BIT A BIT (verificado por enumeracion) -> la leccion _117 queda intacta.
+//   * La SAT se muda a idx13 4096.., y el espacio de patrones que puede
+//     chocar con ella pasa a ser el de las filas 5..15 (patrones >= 0x50) con
+//     yl alto, en vez de las filas 0..4 con yl bajo. Es una MEJORA, no una
+//     garantia: en una cache direct-mapped de 8192 palabras una pagina de
+//     patrones de 8192 palabras cubre TODO el indice y siempre existe UN alias
+//     posible. La red de seguridad general sigue siendo el victim buffer.
+//   * Busqueda exhaustiva: de los 156 pliegues biyectivos de la familia
+//     {v[14]->bit i, v[13]->bit j} que respetan 0x0000-0x1FFF, este par
+//     (bits 12/11) es el UNICO que da 0 miss/frame en la escena ru66 en las
+//     4 fases de animacion de los conejos (el siguiente mejor da 20).
 function [12:0] c_idx13(input [15:0] v);
-    c_idx13 = { v[12], v[11:0] ^ {v[14], 11'b0} };
+    c_idx13 = { v[12] ^ v[14], v[11] ^ v[13], v[10:0] };
 endfunction
 
 // ---- write-mux de la cache de sprites (1 solo write-site por array):
@@ -576,6 +625,17 @@ wire [7:0] scw_b3 = wrk_hit ? wrk_data1[31:24] : fill_word[31:24];
 // _150 VICTIM BUFFER de la sc-cache — 16 entradas TOTALMENTE ASOCIATIVAS, en FF
 // y LUT (CERO BSRAM nuevos: la cache ya se come 19 macros y la presion de
 // columnas fue lo que descoloco el placement del motor de comandos en _126e).
+//
+// ⚠ _151 — LIMITE MEDIDO DE ESTE BLOQUE, LEER ANTES DE CONFIAR EN EL. El VB
+// rescata un conflicto 2-a-1 AISLADO (el caso sintetico de tb_sprite3), pero NO
+// un conflicto MASIVO: en la escena real de la ru66 (tb_sprite3 -DRU66) el
+// conjunto en pugna en las lineas 95/96 son ~32 palabras sobre 16 lineas de
+// indice, y la politica round-robin de 16 entradas se recicla ENTERA dentro de
+// la misma scanline => vbhit = 0 y 41-42 miss/frame, exactamente lo que se veia
+// en placa (~2.700 spMISS/s). Escalar el VB a 32 tampoco basta en todas las
+// fases de animacion (el modelo da 64 miss/frame en dos de las cuatro). La cura
+// real fue quitar el alias en el INDICE (ver _151 FIX en c_idx13); el VB se
+// queda como red de seguridad GENERAL, no como el remedio de este caso.
 //
 // POR QUE. El FIX A (_148, 8192 lineas) bajo el miss de sprite del 20.0% al
 // 0.33%, pero el residuo BASTA para destrozar el DEVCON: en placa (_149, COM11)

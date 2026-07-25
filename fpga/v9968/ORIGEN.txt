@@ -216,3 +216,16 @@ con el bit de blink a 0 en vez de 1, y sale IGUAL en las dos corridas (es
 determinista, no ruido). Solo se muestrea la PRIMERA linea de cada fila de
 caracteres, asi que huele a una captura tardia del byte de blink en ese par
 concreto. Invisible en DOS/BASIC (R#13 = 0) y en el menu no se ha visto.
+
+============================================================================
+[_151 2026-07-26] NOTA CRUZADA — EL CORE HRA NO SE TOCA EN ESTE FIX.
+Las "3 rayas horizontales" de la demo ru66-v9968-demo (sprites mode3, escena
+de los conejos) NO son un bug del core de HRA: el core pide sus fetches en el
+orden y las direcciones correctas. Es la sc-cache del SHIM del MSXimus la que
+las servia rancias, por un alias de indice entre la SAT (0x10000) y la tabla
+de patrones (0x8000). El fix es de UNA LINEA y vive fuera de este arbol:
+  fpga/src/v9968_vram_shim.v -> function c_idx13 (bloque "_151 FIX")
+Se anota aqui solo para que quien busque el historial de sprites mode3 en el
+sitio equivocado lo encuentre. Delta vs upstream HRA en fpga/v9968/*: NINGUNO
+nuevo. Banco de pruebas del caso real: tools/v9968_sim/tb_sprite3.sv -DRU66
+(+ sprite3_ru66_setup.svh y ru66_preload.svh, layout sacado de devcon.c).
