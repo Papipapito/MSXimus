@@ -79,10 +79,20 @@ def foto(base):
         print(f"  c{i}  [{barra(frac)}] {int(frac*100):3d}%  {nombre}{eta}")
     return fmin >= 1.0
 
+def horneada_mas_reciente():
+    # sin argumento: busca b*/bx_c1 en los scratchpads de Claude y coge el mas nuevo
+    import glob
+    cands = glob.glob(os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                      "Temp", "claude", "*", "*", "scratchpad", "b*", "bx_c1"))
+    if not cands:
+        return None
+    return os.path.dirname(max(cands, key=os.path.getctime))
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(__doc__); sys.exit(1)
-    base = sys.argv[1]
+    args = [a for a in sys.argv[1:] if a != "--once"]
+    base = args[0] if args else horneada_mas_reciente()
+    if not base:
+        print("no encuentro ninguna horneada; pasa el directorio a mano"); sys.exit(1)
     una = "--once" in sys.argv
     while True:
         listo = foto(base)
