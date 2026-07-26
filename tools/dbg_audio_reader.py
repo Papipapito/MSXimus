@@ -118,9 +118,10 @@ while True:
             d_wr = ((park & 0xFFFF) - (prev[5] & 0xFFFF)) & 0xFFFF
             ops = f"rd/s={d_rd/dt:7.0f} wr/s={d_wr/dt:6.0f}"
         dfr = f"dfr/s={d_defer/dt:4.1f}" if dt > 0 else "dfr/s= ?"
+        # _154/_155: aviso de drops SOLO si el contador no es cero (6a palabra)
+        drops_txt = f"!DROPS wq={wqdrop} pfq={s1drop}  " if (wqdrop or s1drop) else ""
         print(f"+{now - t0:6.1f}s {rst:4d} {'+' + str(d_rst) if d_rst else ' .'} "
               f"{lock_s:6.1f}  {pkt_s:8.1f}  {miss_s:7.0f} {spm_s:8.0f} {fan}  {dfr}  "
-              + (f"⚠DROPS wq={wqdrop} pfq={s1drop} " if (wqdrop or s1drop) else "")
-              f"{ops}  {ddtxt}{anom}")
+              f"{drops_txt}{ops}  {ddtxt}{anom}")
     prev = (rst, lock, miss, pkt, ovr, park, fanw)
     prev_t = now
