@@ -240,6 +240,10 @@ DDR3_Memory_Interface_Top u_ddr3 (
     .rd_data_valid   (app_rd_data_valid),
     .rd_data_end     (app_rd_data_end),
     .sr_req          (1'b0),
+    // _156: con la IP regenerada (User_Refresh=OFF) el controlador hace
+    // AUTO-REFRESH y este 0 es inocuo. Con la IP heredada de nand2mario
+    // (User_Refresh=ON) este 0 significaba CERO REFRESCOS: la DRAM se pudria
+    // en segundos salvo lo que el trafico re-activaba (caso Aleste/VRAMSOAK).
     .ref_req         (1'b0),
     .sr_ack          (),
     .ref_ack         (),
