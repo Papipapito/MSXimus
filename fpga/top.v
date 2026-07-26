@@ -56,12 +56,13 @@ module top
     // _153: WiFi por ESP32-C6 externo (Waveshare C6-LCD-1.3, fw ESP32-UNAPI-
     // Firmware rama msxnano, 859372 bps) en el CONECTOR J10 (el 2x20 libre,
     // "SDRAM1 CONN." del esquematico oficial 32001C; el modulo SDRAM del core
-    // va en el otro, J-SDRAM0). Peticion de Albert: senales SEGUIDAS para
-    // cable plano -> bloque 2x2 en pines 11-14: +5V(11) GND(12) RX(13) TX(14).
-    // El C6 se alimenta del propio pin 11 (su entrada es 5V con regulador).
+    // va en el otro). Peticion de Albert (v2, foto de la placa): los pines en
+    // FILA UNICA para cable plano de una hilera -> COLUMNA PAR, pines 12-14-16
+    // consecutivos: GND(12) TX(14=W21) RX(16=N17). El +5V (pin 11) queda en la
+    // columna impar, asi que el C6 se alimenta por su USB-C.
     // esp_rx_i PULL_UP = idle UART correcto sin modulo pinchado.
     // ⚠ Si algun dia se pincha un 2o modulo SDRAM en J10, esto se muda.
-    input  wire esp_rx_i,    // W22 = J10 pin 13 (SDRAM1_D13) <- IO16 (TX) del C6
+    input  wire esp_rx_i,    // N17 = J10 pin 16 (SDRAM1_D10) <- IO16 (TX) del C6
     output wire esp_tx_o,    // W21 = J10 pin 14 (SDRAM1_D12) -> IO17 (RX) del C6
     // Console 60K, mecánica JTAG→SPI (estilo C64Nano): jtagseln (NET_LOC
     // V_JTAGSELN) entrega los pines JTAG al fabric cuando vale 1; el BL616

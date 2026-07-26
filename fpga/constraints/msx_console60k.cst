@@ -119,14 +119,16 @@ IO_LOC  "dbg_pmod0[4]" E18; IO_PORT "dbg_pmod0[4]" IO_TYPE=LVCMOS33 DRIVE=8;
 // _153: RESUELTO el <<INCIERTO>> historico con el ESQUEMATICO OFICIAL de la
 // Console (Tang_Mega_60K_Console_32001C, hoja SDRAM): el 2x20 LIBRE es J10
 // ("SDRAM1 CONN. Close to PMOD connector"; el modulo SDRAM del core va en el
-// otro). Peticion de Albert: senales SEGUIDAS para cable plano ->
-//   J10 pin 11 = +5V   pin 12 = GND   pin 13 = W22 (RX)   pin 14 = W21 (TX)
-//   = un bloque 2x2 contiguo con alimentacion incluida; el C6 come 5V del
-//   propio pin 11 (su entrada regula a 3.3V). SIN USB.
-// (V17/pin10 descartado: es CSI_B, pin de configuracion dual.)
+// otro). Peticion de Albert v2 (foto placa): FILA UNICA para cable plano de
+// una hilera -> COLUMNA PAR, 3 pines consecutivos:
+//   J10 pin 12 = GND   pin 14 = W21 (TX)   pin 16 = N17 (RX)
+// El +5V (pin 11) esta en la columna impar -> el C6 se alimenta por su USB-C.
+// Identificacion sin serigrafia: el UNICO pin del conector con continuidad a
+// masa es el 12; sus dos vecinos de columna hacia el LADO LARGO son 14 y 16.
+// (V17/pin10 descartado: CSI_B, pin de configuracion dual.)
 // ⚠ Si algun dia se pincha un 2o modulo SDRAM en J10, mudar el ESP.
 // esp_rx_i con PULL_UP: idle UART correcto aunque no haya modulo pinchado.
-IO_LOC  "esp_rx_i" W22; IO_PORT "esp_rx_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;   // J10 p13 (SDRAM1_D13) <- IO16 (TX) del C6
+IO_LOC  "esp_rx_i" N17; IO_PORT "esp_rx_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;   // J10 p16 (SDRAM1_D10) <- IO16 (TX) del C6
 IO_LOC  "esp_tx_o" W21; IO_PORT "esp_tx_o" IO_TYPE=LVCMOS33 DRIVE=8;        // J10 p14 (SDRAM1_D12) -> IO17 (RX) del C6
 
 // ---- Memoria del CORE: SDR SDRAM (módulo Tang SDRAM, W9825G6KH, 16b/32MB) ----
