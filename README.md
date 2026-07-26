@@ -43,6 +43,7 @@ Y sigue siendo un MSX2+ normal: el software de siempre funciona igual.
 | Opcional | **Disipador** sobre el SOM | Recomendado: el core va bastante cargado |
 | Opcional | **Ventilador** de 5 V | Conector **JST SH de 1,0 mm, 2 pines**. Se gobierna solo por temperatura |
 | Opcional | Teclado y gamepad **USB** | Directos a los USB-A de la placa, sin hub |
+| Opcional | **ESP32-C6** (Waveshare C6-LCD-1.3) | Para el **WiFi**. 3 cables al conector libre de 40 pines; ver abajo |
 
 El ventilador no hace falta para funcionar. Si lo pones, el core lo controla solo: mide la temperatura del chip con un termómetro interno y solo sopla cuando toca.
 
@@ -85,6 +86,8 @@ Después, mete una microSD con tus ROMs y discos y listo — el menú de arranqu
 **Almacenamiento** · Nextor sobre microSD · megaram con Konami4, Konami-SCC, ASCII8 y ASCII16
 
 **Entrada** · Teclado USB directo sin hub, con F1–F10 físicas · gamepads USB mapeados a joystick MSX
+
+**WiFi** · UNAPI por **ESP32-C6** externo: menú de configuración (tecla `W`), descarga directa desde internet, telnet, FTP… El módulo (Waveshare ESP32-C6-LCD-1.3, con pantallita de estado) se conecta con **3 cables** al conector libre de 40 pines — GND y dos hilos de UART en pines consecutivos — y se alimenta por su USB-C. Firmware: [ESP32-UNAPI-Firmware](https://github.com/ducasp/ESP8266-UNAPI-Firmware) (port ESP32, rama `msxnano`), protocolo UNAPI de ducasp a 859372 bps. El detalle de pines está en `fpga/constraints/msx_console60k.cst`.
 
 **Extras** · Turbo Panasonic 5,37 MHz · menú de arranque propio con explorador de ficheros · logo de arranque · control de ventilador por temperatura · telemetría por puerto serie para diagnóstico
 

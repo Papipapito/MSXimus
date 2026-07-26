@@ -1747,6 +1747,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // consumen 1 palabra/730ns y un canal solo daba ~800ns.
     wire [31:0] v68dbg_miss, v68dbg_bka, v68dbg_bkb;   // _121diag → COM11
     wire [31:0] v68dbg_park;                           // _124: park del shim
+    wire [31:0] v68dbg_drops;                          // _154: {s1_pfq, wq_full} — drops reales
     wire        v68bk_req, v68bk_we, v68bk_done_t;
     wire [21:0] v68bk_addr;
     // _148 FIX B: el shim escribe PALABRAS de 32b con mascara de bytes (1 op de
@@ -1772,7 +1773,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .vram_stall(v68_vram_stall),
         .diag(),
         .dbg_miss(v68dbg_miss), .dbg_bka(v68dbg_bka), .dbg_bkb(v68dbg_bkb),
-        .dbg_park(v68dbg_park)
+        .dbg_park(v68dbg_park),
+        .dbg_drops(v68dbg_drops)
     );
 `ifdef ENABLE_VRAM_DDR3
     // ==== EXPERIMENTO _128X: la VRAM del V9968 vive en la DDR3 del SOM ====
@@ -4427,6 +4429,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 `else
         .cnt_e({amp_src, amp_hdmi}),              // _133: vumetro {fuente, hdmi}
 `endif
+        // _154: 6a palabra = drops del shim ({s1_pfq[15:0], wq_full[15:0]}).
+        // SANO = 00000000. Cualquier valor distinto en placa = escrituras o
+        // prefetches PERDIDOS de verdad — el sismografo del frente Aleste.
+        .cnt_f(v68dbg_drops),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
