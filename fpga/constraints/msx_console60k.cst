@@ -116,13 +116,18 @@ IO_LOC  "dbg_pmod0[4]" E18; IO_PORT "dbg_pmod0[4]" IO_TYPE=LVCMOS33 DRIVE=8;
 //   libre de PMOD1 (io[5]=D22) o header 2×20. Confirmar con schematic. NO inventar.
 
 // ---- WiFi ESP32-C6 externo (Waveshare C6-LCD-1.3, fw ESP32-UNAPI 859372) ----
-// _153: RESUELTO el <<INCIERTO>>. Fuente: tangconsole.cst de HRA (TangCartMSX/
-// RTL/tangconsole_step3/doc, corre en ESTA placa): B22 = PMOD0_IO7, C22 =
-// PMOD0_IO6. dbg_pmod0 solo ocupa IO1..IO5 -> IO6/IO7 LIBRES. GND en el propio
-// PMOD; el C6 se alimenta por su USB-C (3 cables: GND + 2 UART).
+// _153: RESUELTO el <<INCIERTO>> historico con el ESQUEMATICO OFICIAL de la
+// Console (Tang_Mega_60K_Console_32001C, hoja SDRAM): el 2x20 LIBRE es J10
+// ("SDRAM1 CONN. Close to PMOD connector"; el modulo SDRAM del core va en el
+// otro). Peticion de Albert: senales SEGUIDAS para cable plano ->
+//   J10 pin 11 = +5V   pin 12 = GND   pin 13 = W22 (RX)   pin 14 = W21 (TX)
+//   = un bloque 2x2 contiguo con alimentacion incluida; el C6 come 5V del
+//   propio pin 11 (su entrada regula a 3.3V). SIN USB.
+// (V17/pin10 descartado: es CSI_B, pin de configuracion dual.)
+// ⚠ Si algun dia se pincha un 2o modulo SDRAM en J10, mudar el ESP.
 // esp_rx_i con PULL_UP: idle UART correcto aunque no haya modulo pinchado.
-IO_LOC  "esp_rx_i" B22; IO_PORT "esp_rx_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;   // PMOD0_IO7 <- IO16 (TX) del C6
-IO_LOC  "esp_tx_o" C22; IO_PORT "esp_tx_o" IO_TYPE=LVCMOS33 DRIVE=8;        // PMOD0_IO6 -> IO17 (RX) del C6
+IO_LOC  "esp_rx_i" W22; IO_PORT "esp_rx_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;   // J10 p13 (SDRAM1_D13) <- IO16 (TX) del C6
+IO_LOC  "esp_tx_o" W21; IO_PORT "esp_tx_o" IO_TYPE=LVCMOS33 DRIVE=8;        // J10 p14 (SDRAM1_D12) -> IO17 (RX) del C6
 
 // ---- Memoria del CORE: SDR SDRAM (módulo Tang SDRAM, W9825G6KH, 16b/32MB) ----
 //  Decisión (docs/MEMORY_OPTIONS.md): el core va en SDR SDRAM, reusando memory.v
