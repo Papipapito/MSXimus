@@ -15,7 +15,7 @@
 // v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
 `define VIDEO720
 `define ENABLE_WIFI       // F1 (_73): WiFi UNAPI por el BL616 ONBOARD (UART en V14/U15, ver uwifi)
-`define ENABLE_WIFI_ESP32 // _153: la UART del WiFi va al ESP32-C6 externo por el conector J10 (2x20 libre, pines 13/14 = W22/W21; +5V y GND en 11/12) en vez del BL616 (sin antena/fw). Mismo wifi_lite, mismo baud 27M/31: el fw ducasp/ESP32-UNAPI a 859372 ya esta validado con este prescaler en el MSXnano.
+`define ENABLE_WIFI_ESP32 // _153: la UART del WiFi va al ESP32-C6 externo por el conector J10 (2x20 libre, fila PAR: 12=GND, 14=TX(W21), 16=RX(N17)) en vez del BL616 (sin antena/fw). Mismo wifi_lite, mismo baud 27M/31: el fw ducasp/ESP32-UNAPI a 859372 ya esta validado con este prescaler en el MSXnano.
 //`define WIFI_PMOD_TEST  // (_77diag) UART del WiFi al PMOD1 — apagado
 //`define WIFI_TAP_BL616TX  // _78diag (APAGADO en _111c: llevaba desde la _78 robandole E22 a todo; la telemetria _111 nunca salio por su culpa)
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
@@ -1551,7 +1551,7 @@ assign keyboard_addr = ppi_port_c[3:0];
 `ifdef WIFI_PMOD_TEST
         .rx_i       (uart_pmod_rx),          // TEST: RX por PMOD1 D22 (CH340 TX / PC-de-ESP)
 `elsif ENABLE_WIFI_ESP32
-        .rx_i       (esp_rx_i),              // _153: J10 pin 13 (W22) <- ESP32-C6 IO16
+        .rx_i       (esp_rx_i),              // _153c: J10 pin 16 (N17) <- ESP32-C6 IO16
 `else
         .rx_i       (bl616_jtagsel),         // onboard: V14 <- BL616 IO28 TX
 `endif
