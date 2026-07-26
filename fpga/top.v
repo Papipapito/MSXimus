@@ -15,6 +15,7 @@
 // v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
 `define VIDEO720
 `define ENABLE_WIFI       // F1 (_73): WiFi UNAPI por el BL616 ONBOARD (UART en V14/U15, ver uwifi)
+`define ENABLE_WIFI_ESP32 // _153: la UART del WiFi va al ESP32-C6 externo por PMOD0 IO6/IO7 (C22/B22) en vez del BL616 (sin antena/fw). Mismo wifi_lite, mismo baud 27M/31: el fw ducasp/ESP32-UNAPI a 859372 ya esta validado con este prescaler en el MSXnano.
 //`define WIFI_PMOD_TEST  // (_77diag) UART del WiFi al PMOD1 — apagado
 //`define WIFI_TAP_BL616TX  // _78diag (APAGADO en _111c: llevaba desde la _78 robandole E22 a todo; la telemetria _111 nunca salio por su culpa)
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
@@ -52,6 +53,12 @@ module top
     output wire spi_dir,
     input  wire spi_dat,
     output wire spi_irqn,
+    // _153: WiFi por ESP32-C6 externo (Waveshare C6-LCD-1.3, fw ESP32-UNAPI-
+    // Firmware rama msxnano, 859372 bps). PMOD0 IO6/IO7 (C22/B22, libres:
+    // dbg_pmod0 solo usa 5 lineas). esp_rx_i PULL_UP = idle UART correcto
+    // sin modulo pinchado. La ruta BL616 onboard queda debajo (sin antena/fw).
+    input  wire esp_rx_i,    // B22 = PMOD0_IO7 <- IO16 (TX) del C6
+    output wire esp_tx_o,    // C22 = PMOD0_IO6 -> IO17 (RX) del C6
     // Console 60K, mecánica JTAG→SPI (estilo C64Nano): jtagseln (NET_LOC
     // V_JTAGSELN) entrega los pines JTAG al fabric cuando vale 1; el BL616
     // reclama JTAG subiendo bl616_jtagsel (PULL_UP: sin firmware companion la
@@ -1538,6 +1545,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .rd_i       (w27_rd_n),
 `ifdef WIFI_PMOD_TEST
         .rx_i       (uart_pmod_rx),          // TEST: RX por PMOD1 D22 (CH340 TX / PC-de-ESP)
+`elsif ENABLE_WIFI_ESP32
+        .rx_i       (esp_rx_i),              // _153: PMOD0 IO7 (B22) <- ESP32-C6 IO16
 `else
         .rx_i       (bl616_jtagsel),         // onboard: V14 <- BL616 IO28 TX
 `endif
@@ -4564,7 +4573,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire joy_on   = (|joystick0[5:0]) | (|joystick1[5:0]);
     wire kbd_raw  = |keyboard;                            // any key held
 `ifdef ENABLE_WIFI
+`ifdef ENABLE_WIFI_ESP32
+    wire wifi_raw = ~bl616_uart_tx_w | ~esp_rx_i;         // WiFi UART active (idle = high; _153: enlace ESP32-C6)
+`else
     wire wifi_raw = ~bl616_uart_tx_w | ~bl616_jtagsel;    // WiFi UART active (idle = high; F1: enlace BL616)
+`endif
 `else
     wire wifi_raw = 1'b0;                                 // BASE MINIMA: WiFi fuera
 `endif
@@ -4668,6 +4681,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign spi_irqn = bl616_uart_tx_w;
 `else
     assign spi_irqn = companion_irqn_w;
+`endif
+    // _153: el TX del wifi_lite tambien sale por el PMOD0 hacia el ESP32-C6.
+    // Se emite SIEMPRE (broadcast inofensivo); sin ENABLE_WIFI queda en idle.
+`ifdef ENABLE_WIFI
+    assign esp_tx_o = bl616_uart_tx_w;
+`else
+    assign esp_tx_o = 1'b1;               // idle UART
 `endif
     fpga_companion fpga_companion_inst
     (

@@ -115,11 +115,14 @@ IO_LOC  "dbg_pmod0[4]" E18; IO_PORT "dbg_pmod0[4]" IO_TYPE=LVCMOS33 DRIVE=8;
 // <<<INCIERTO>>> ws2812_led: sin pin confirmado en el 60K. Candidato: una línea
 //   libre de PMOD1 (io[5]=D22) o header 2×20. Confirmar con schematic. NO inventar.
 
-// ---- WiFi ESP-01S UART (859372 bps fijos, firmware ducasp) ----
-// <<<INCIERTO>>> uart_rx / uart_tx del ESP-01S: el 60K no tiene conector ESP-01S
-//   dedicado; sacar 2 pines libres consecutivos por header/PMOD. Candidatos:
-//   PMOD1 io[4]=E22 / io[5]=D22, o uart_ext_rx=B22 / uart_ext_tx=C22. Decidir
-//   dónde se enchufa físicamente el ESP-01S. NO inventar par de pines.
+// ---- WiFi ESP32-C6 externo (Waveshare C6-LCD-1.3, fw ESP32-UNAPI 859372) ----
+// _153: RESUELTO el <<INCIERTO>>. Fuente: tangconsole.cst de HRA (TangCartMSX/
+// RTL/tangconsole_step3/doc, corre en ESTA placa): B22 = PMOD0_IO7, C22 =
+// PMOD0_IO6. dbg_pmod0 solo ocupa IO1..IO5 -> IO6/IO7 LIBRES. GND en el propio
+// PMOD; el C6 se alimenta por su USB-C (3 cables: GND + 2 UART).
+// esp_rx_i con PULL_UP: idle UART correcto aunque no haya modulo pinchado.
+IO_LOC  "esp_rx_i" B22; IO_PORT "esp_rx_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;   // PMOD0_IO7 <- IO16 (TX) del C6
+IO_LOC  "esp_tx_o" C22; IO_PORT "esp_tx_o" IO_TYPE=LVCMOS33 DRIVE=8;        // PMOD0_IO6 -> IO17 (RX) del C6
 
 // ---- Memoria del CORE: SDR SDRAM (módulo Tang SDRAM, W9825G6KH, 16b/32MB) ----
 //  Decisión (docs/MEMORY_OPTIONS.md): el core va en SDR SDRAM, reusando memory.v
