@@ -120,8 +120,11 @@ while True:
         dfr = f"dfr/s={d_defer/dt:4.1f}" if dt > 0 else "dfr/s= ?"
         # _154/_155: aviso de drops SOLO si el contador no es cero (6a palabra)
         drops_txt = f"!DROPS wq={wqdrop} pfq={s1drop}  " if (wqdrop or s1drop) else ""
+        # _155b: termometro RO (palabra d bits [19:0]) — cuenta ALTA = die FRIO,
+        # cuenta BAJA = die CALIENTE (~0.017%/grado). Se muestra en miles.
+        ro_cnt = fanw & 0xFFFFF
         print(f"+{now - t0:6.1f}s {rst:4d} {'+' + str(d_rst) if d_rst else ' .'} "
               f"{lock_s:6.1f}  {pkt_s:8.1f}  {miss_s:7.0f} {spm_s:8.0f} {fan}  {dfr}  "
-              f"{drops_txt}{ops}  {ddtxt}{anom}")
+              f"T={ro_cnt/1000:5.1f}k {drops_txt}{ops}  {ddtxt}{anom}")
     prev = (rst, lock, miss, pkt, ovr, park, fanw)
     prev_t = now
