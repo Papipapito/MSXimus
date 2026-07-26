@@ -282,57 +282,6 @@ reg [15:0] obl_w_c, obl_w_d;             // _123: la direccion VIAJA con la
                                          // con la fase 3 aun en vuelo: se
                                          // perdia una direccion y se duplicaba
                                          // otra = agujero en la cadena)
-// ===========================================================================
-// _152 RE-APUNTADO DOBLE DEL SLOT OBL EN EL CRUCE DE PAGINA (SP2, R#25 bit1)
-//      *** VERSION RETIMADA (_152R) — ver nota de TIMING al final ***
-// ---------------------------------------------------------------------------
-// RADIOGRAFIA: con SP2, al final de cada scanline el V9968 pide un RABO CORTO
-// de palabras de la pagina B (C, C+1, C+2...). Las DOS PRIMERAS no las produce
-// NADIE (el +2 lineal del OBL, el caminante y el eco de arranque emiten todos
-// dentro de la pagina A), y de C+2 en adelante la cadena +2 se autocura.
-// Resultado: EXACTAMENTE 1 miss por linea activa = 191/frame.
-// MECANISMO: los DOS ultimos fetches de pagina A de cada linea son slots de
-// CAMINANTE cuya emision addr+stride es REDUNDANTE (la cadena +2 de la linea
-// siguiente vuelve a producir esas palabras). A esos dos slots se les cambia
-// el VALOR de la direccion, no la condicion: CERO trafico nuevo.
-// APRENDIZAJE POR FLUJO: el cruce se reconoce como un fetch de fondo cuyo bit
-// de pagina de 32KB (v[13]) difiere del anterior SIN venir del hueco de hblank
-// (bg_quiet[8]). Se re-sincroniza CADA LINEA, que es lo que hace falta con el
-// scroll animado del logo.
-// ---------------------------------------------------------------------------
-// NOTA DE TIMING (_152R). La version _152 original escribia
-//     rama HIT  : obl_w <= xg_pre ? xg_nxt : (spr_addr1 + obl_la);
-//     rama MISS : obl_w <= spr_addr1 + obl_la;
-// Al DEJAR DE SER IGUALES las dos patas, el selector de la rama (hitA, que es
-// el DO de la BSRAM pw_mem) se convertia en el SELECT de un mux de 16 bits:
-// +16 cargas de llegada tardia sobre el cono pw_mem DO = una de las tres
-// familias quemadas de placement. Aqui las dos patas vuelven a escribir EL
-// MISMO net (obl_w_nx), asi que `s ? x : x` colapsa y hitA recupera su forma
-// factorizada (habilitacion, no seleccion de dato). El mux 2:1 que queda vive
-// FUERA del cono de la BSRAM: select = xg_pre (FF), datos = xg_nxt (FF) y
-// spr_addr1+obl_la (el sumador que YA existia en el base). Coste neto: UN
-// nivel de LUT extra sobre un camino que ya salia de FF.
-// (Se evita a proposito la variante "precalcular obl_w_pre en el ciclo T con
-//  vram_address + obl_la": eso colgaria un sumador de 16 bits y 16 cargas mas
-//  del net de MAYOR FANOUT del shim. Esta version no toca vram_address.)
-reg [15:0] bgh0, bgh1;                   // ultimas 2 direcciones de fetch bg
-reg [15:0] xg_trig;                      // fetch que dispara el 1er re-apuntado
-reg [15:0] xg_cross;                     // 1a palabra de pagina B de la linea
-reg [15:0] xg_nxt;                       // direccion a emitir en el proximo tiro
-reg        xg_snd;                       // hay un SEGUNDO tiro pendiente
-reg [1:0]  xg_cnt;                       // confianza (arma con 2 cruces vistos)
-wire       xg_arm = xg_cnt[1];           // armado con >= 2
-reg        xg_pre;                       // disparo ADELANTADO (ciclo 0)
-reg [31:0] c_xg;                         // telemetria: re-apuntados emitidos
-// COLAPSO DE PATAS: valor UNICO de obl_w para las DOS ramas de spr_p1.
-wire [15:0] obl_w_nx = xg_pre ? xg_nxt : (spr_addr1 + obl_la);
-reg [15:0] bgh2;                         // _152R-B: 3er fetch bg hacia atras
-reg        xg_hot;                       // _152R-B: "el proximo fetch bg es el
-                                         // objetivo" — sustituye al comparador
-                                         // de 16 bits contra vram_address
-`ifdef SHIM_RT_TELEM
-reg [31:0] c_xgm;                        // re-apuntados que cayeron en el MISS
-`endif
 reg        pfB_pend;                     // _123b: semilla del fetch (miss +1 o
 reg [15:0] pfB_wr;                       // rescate) REGISTRADA — el push desde
                                          // el ciclo del compare colgaba pfq del
@@ -934,13 +883,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
         ecq_wp <= 0; ecq_rp <= 0; bg_quiet <= 0;      // _135
         ec_cred0 <= 0; ec_cred1 <= 0;
         pfB_pend <= 0; pfB_wr <= 0;
-        bgh0 <= 0; bgh1 <= 0;                         // _152R
-        xg_trig <= 0; xg_cross <= 0; xg_nxt <= 0; xg_snd <= 0;
-        xg_cnt <= 0; xg_pre <= 0; c_xg <= 0;
-        bgh2 <= 0; xg_hot <= 0;
-`ifdef SHIM_RT_TELEM
-        c_xgm <= 0;
-`endif
         fill_pend <= 0; fill_addr <= 0; fill_word <= 0; fill_sp <= 0;
         pwq_v <= 0;
         pww_en <= 0; pww_idx <= 0; pww_tag <= 0; pww_data <= 0;
@@ -1067,13 +1009,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // hit (obl_pend se consume solo). La direccion sigue viajando en
         // sombras (obl_w_c/_d) para que un hit nuevo pise obl_w sin
         // corromper la fase en vuelo.
-        // _152R-B: disparo ADELANTADO, pero SIN comparador de 16 bits colgado
-        // de vram_address: xg_hot ya trae registrado el veredicto (se armo en
-        // el fetch de fondo ANTERIOR, comparando el spr_addr1 REGISTRADO).
-        // Aqui solo quedan AND de FFs + el gate de validez que ya existia.
-        xg_pre <= vram_valid && !vram_write && (vram_tag[4:2] == C_BG)
-                  && (xg_hot || xg_snd);
-
         obl_pend <= 1'b0;                       // consumido (el hit lo re-arma)
         obl_chk  <= obl_read_now;
         obl_w_c  <= obl_w;
@@ -1097,39 +1032,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // ---------- _127: aprendizaje de la zancada (wrap POR STREAM) ----
         if (spr_p1 && spr_tag1[4:2] == C_BG) begin : stride_learn
             reg [15:0] d;
-            // _152R: historial de fetches de fondo
-            bgh0 <= spr_addr1; bgh1 <= bgh0; bgh2 <= bgh1;
-            // _152R (a) secuenciador de los DOS tiros
-            if (xg_pre) begin
-                c_xg <= c_xg + 32'd1;
-                if (!xg_snd) begin
-                    xg_snd <= 1'b1;
-                    xg_nxt <= xg_cross + 16'd1;
-                end
-                else xg_snd <= 1'b0;
-                xg_hot <= 1'b0;          // consumido
-            end
-            // _152R-B ARMADO DEL DISPARO, un fetch ANTES y contra el registro:
-            // xg_trig guarda ahora la direccion del fetch 3-antes-del-cruce de
-            // la linea siguiente; el objetivo real (2-antes) es el fetch de
-            // fondo INMEDIATAMENTE posterior. Dentro de la linea los fetches
-            // van +1, asi que es el MISMO fetch que elegia la comparacion
-            // contra vram_address — pero el comparador ya no cuelga del net de
-            // mayor fanout del shim, sino de spr_addr1 (FF -> FF, un ciclo
-            // entero de holgura).
-            if (xg_arm && (spr_addr1 == xg_trig)) xg_hot <= 1'b1;
-            // _152R (b) APRENDIZAJE POR FLUJO. Cruce A->B = cambia v[13]
-            // frente al fetch anterior y NO venimos del hueco de hblank
-            // (bg_quiet[8] separa el cruce de mitad de linea del retorno B->A
-            // del arranque). Gana a (a) porque va DESPUES.
-            if ((spr_addr1[13] != bgh0[13]) && !bg_quiet[8] && stride != 16'd0) begin
-                xg_cross <= spr_addr1 + stride;
-                xg_nxt   <= spr_addr1 + stride;
-                xg_trig  <= bgh2 + stride;      // tres fetches antes del cruce
-                xg_hot   <= 1'b0;
-                xg_snd   <= 1'b0;
-                if (xg_cnt != 2'd3) xg_cnt <= xg_cnt + 2'd1;
-            end
             d = spr_addr1 - (spr_addr1[14] ? bg_prev1 : bg_prev0);
             if (spr_addr1[14]) bg_prev1 <= spr_addr1;
             else               bg_prev0 <= spr_addr1;
@@ -1172,10 +1074,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 // sustitutiva fracaso: cualquier cambio de cadena abre
                 // huecos). La linea siguiente la cubre el CAMINANTE en los
                 // slots ociosos del 2o pase. Cada hit renueva su credito.
-                // _152R RE-APUNTADO. MISMO net que la pata del MISS (abajo):
-                // `hitA ? obl_w_nx : obl_w_nx` colapsa y el DO de la BSRAM
-                // vuelve a ser HABILITACION, no seleccion de dato.
-                obl_w      <= obl_w_nx;             // _147: lookahead profundo
+                obl_w      <= spr_addr1 + obl_la;   // _147: lookahead profundo
                 obl_walked <= 1'b0;
             end
             else if (scq_v && scq_tag == spr_addr1[15:12])
@@ -1217,11 +1116,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // vive SOLO en los hits. Con zancada en el miss, la
                     // linea 0 tras cada vblank (cadena rota) no se
                     // recuperaba: quiet 232 -> 4852.
-                    // _152R: MISMO net que la pata del HIT (colapso de patas).
-                    obl_w     <= obl_w_nx;             // _147: lookahead profundo
-`ifdef SHIM_RT_TELEM
-                    if (xg_pre) c_xgm <= c_xgm + 32'd1;
-`endif
+                    obl_w     <= spr_addr1 + obl_la;   // _147: lookahead profundo
                     // _124: DEGRADACION ELEGANTE — el aparcamiento cura el
                     // fill posterior pero NO el guion del PRIMER miss (el
                     // consumidor muestrea a 8 ciclos fijos, pillara lo que
