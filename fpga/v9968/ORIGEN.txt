@@ -7,6 +7,58 @@ Ficheros parcheados para el MSXimus (marcados "MSXimus:" en el codigo):
   - vdp.v                 (plumbing de vram_tag/vram_rtag al top del core)
 El resto, INTACTO. Regen/diff contra upstream: proyectosAI/msx/V9968_Cartridge
 
+################################################################################
+[CORRECCION 2026-07-26] EL SENTIDO DE LA MIGRACION ESTABA INVERTIDO EN ESTE DOC
+################################################################################
+th9958 NO es una evolucion posterior de v9968, ni una linea paralela:
+**es EL MISMO ARBOL con el NOMBRE VIEJO.**
+  Prueba: hra1129/V9968_Cartridge commit 17455ac (2026-06-02 19:05 +0900)
+  "Rename th9958 to v9968 / フォルダー名変更 th9958 → v9968"
+  El diff es literalmente src/{th9958 => v9968}/... : renombrado puro, 0 cambios.
+
+  - TangCartMSX/RTL/.../src/th9958  -> CONGELADO. Ultimo commit que lo toca:
+    d4f8561, 2026-01-28. Los 2 commits posteriores del repo no tocan la carpeta.
+  - hra1129/V9968_Cartridge         -> LA LINEA VIVA, hasta 5978d18 (2026-07-09).
+
+Consecuencia: las notas de abajo que hablan de "TOMAR UPSTREAM LIMPIO (deriva N —
+evolucion HRA)" tienen el sentido AL REVES. Los numeros de deriva (154, 20, 6, 2...)
+son CORRECTOS, pero el lado "th9958" es el VIEJO, no el nuevo. Alinearse con
+th9958 es RETROCEDER ~5 meses.
+
+FIXES DEL UPSTREAM QUE NOS FALTAN (git log de V9968_Cartridge posterior al
+snapshot th9958). Verificados uno a uno contra el repo:
+  9e3eb6d 2026-02-23  Bugfix LRMM command  <-- APLICADO YA en _152, ver
+                      w_sy_active en vdp_command.v (+ ff_command == c_lrmm)
+  eebc87f 2026-02-23  Bugfix VR bit on S#2 (el bit VR subia tarde; la MSX
+                      Diagnostics Cartridge detectaba TMS9918)
+  18b4594 2026-06-02  Bugfix rotacion LRMM (quita c_lrmm de sx_active — OJO:
+                      sx_active debe seguir SIN LRMM, es intencionado)
+  0683e7e 2026-06-02  **Register R#20, R#21 Modified** (ver abajo)
+  167b7cf 2026-06-03  Sprite Mode2 con PaletteSet# cuando EPAL=1 (FEATURE nueva;
+                      es el delta de 154 lineas de vdp_sprite_makeup_pixel.v)
+  4148742 2026-06-03  Bugfix direccion de la tabla de blink + periodo
+  55e0632 2026-06-05  Bugfix BLINK en SCREEN0 WIDTH80 (TEXT2)
+  7298638 2026-06-26  Bugfix: leer S#10 borraba el interrupt de fin de comando
+  5978d18 2026-07-09  clone FF para relajar violaciones de timing (HRA hizo el
+                      MISMO truco que nosotros)
+
+EL CAMBIO DE R#20/R#21 (0683e7e) — y por que hay dos DEVCON.COM:
+  ANTES (th9958, = NOSOTROS):
+      R#20[5]=ECOM   R#20[6]=EVR
+      R#21[0]=fakeID R#21[6]=flat_interlace  R#21[7]=CEIE
+  DESPUES (v9968, upstream vivo):
+      R#20[5]=flat_interlace   R#20[6]=command_end_interrupt_enable
+      R#21[0]=v9958_mode
+      reg_ext_command_mode = ~ff_v9958_mode ;  reg_vram256k_mode = ~ff_v9958_mode
+  ⚠️ EL COMENTARIO "R#20 = [S16][EVR][ECOM][EPAL][SCOL][ILNS][SVNS][HS]" NO SE
+  ACTUALIZO EN EL UPSTREAM: en el arbol nuevo MIENTE. En el nuestro aun es cierto.
+  Los dos DEVCON.COM difieren en UN byte, y es exactamente ese (tabla reg/valor,
+  entrada "14"=R#20): 0xFF = RTL VIEJA (th9958, la nuestra), 0x9F = RTL NUEVA.
+  devcon.c NUNCA cambio: HRA parcheo el binario a mano. Por eso el .c dice 0xFF.
+  => La nota del README de la ru66 ("con RTL reciente cambiar 0xff a 0x9f") es
+  CORRECTA y NO contradice nada. No hay misterio.
+################################################################################
+
 [PARCHE _120 2026-07-18] TIMING (bit-exacto, sin cambio semantico): la resta
 del scroll horizontal para los sprites (screen_pos_x - horizontal_offset_l,
 antes combinacional en vdp_timing_control_sprite.v:158) se traslada al SSG al

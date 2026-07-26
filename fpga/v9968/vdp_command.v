@@ -708,7 +708,17 @@ module vdp_command (
 	assign w_dx_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmmc || ff_command == c_hmmc || 
 							   ff_command == c_lmmv || ff_command == c_hmmv || ff_command == c_lrmm || ff_command == c_lfmc || ff_command == c_lfmm ||
 							   ff_command == c_line);
-	assign w_sy_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmcm);
+	//	_152: + c_lrmm — BUGFIX UPSTREAM QUE NOS FALTABA (hra1129/V9968_Cartridge
+	//	commit 9e3eb6d, 2026-02-23; doc/history.txt: "LRMMコマンドで、SYが進まなく
+	//	なっていたバグを修正"). Sin este termino ff_sy_active vale 0 durante todo un
+	//	LRMM, el bloque de ff_sy cae en el "hold" de la linea 480 y el codigo
+	//	especifico de LRMM (lineas 484-496) es INALCANZABLE: ff_sy queda congelada
+	//	y toda la rotacion lee la misma fila fuente.
+	//	Upstream vivo: vdp_command.v:694 lo tiene. Nuestro arbol venia del snapshot
+	//	th9958 (congelado 2026-01-28), anterior al fix. Ver ORIGEN.txt.
+	//	OJO: w_sx_active NO lleva c_lrmm — upstream lo excluye A PROPOSITO
+	//	("LRMM は意図的に外してある"). No "corregir" tambien esa linea.
+	assign w_sy_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmcm || ff_command == c_lrmm);
 	assign w_dy_active		= (ff_command == c_lmmm || ff_command == c_hmmm || ff_command == c_ymmm || ff_command == c_lmmc || ff_command == c_hmmc || 
 							   ff_command == c_lmmv || ff_command == c_hmmv || ff_command == c_lrmm || ff_command == c_lfmc || ff_command == c_lfmm ||
 							   ff_command == c_line);

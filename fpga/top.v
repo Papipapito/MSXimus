@@ -298,7 +298,19 @@ end
     //  _123: la frecuencia depende del placement). Modo RELATIVO con la K
     //  real medida (K_ON=2/1024 = -0.195%, el punto de Albert era -0.26%)
     //  + garantia por tiempo: fan FIJO a los 6 min si no ha disparado.
-    fan_ctrl #(.WIN_CYC(32'd262144), .K_ON(10'd2), .K_OFF(10'd1),
+    // _152: ventilador ~5 grados MAS TARDE + EL DOBLE DE HISTERESIS.
+    // Albert reporto DOS cosas: que arranca pronto y que "se enciende y apaga
+    // bastante" (ciclado audible, visible en el COM11: la columna fan alterna
+    // ON/of cada pocos segundos). Lo segundo es histeresis corta, no umbral.
+    // Un paso de K vale 1/1024 = 0.0977% de la cuenta del anillo; con la
+    // pendiente REAL medida en placa (~0.0167%/grado, ver cabecera de
+    // fan_ctrl.v: 6x menor que la teorica de 0.1%/grado) eso son ~5.9 grados.
+    // Subiendo SOLO K_ON se arreglan las dos a la vez: el arranque sube ~5.9
+    // grados y la banda pasa de 1 a 2 unidades (~5.9 -> ~11.7 grados), asi que
+    // una vez encendido sopla el doble antes de parar y cicla la mitad.
+    //   K_ON  2->3 : arranca a ~17.5 grados sobre el frio (antes ~11.7)
+    //   K_OFF 1    : para    a  ~5.9 grados sobre el frio (SIN CAMBIO)
+    fan_ctrl #(.WIN_CYC(32'd262144), .K_ON(10'd3), .K_OFF(10'd1),
                .FORCE_ON_SEC(32'd360)) u_fanctrl (
         .clk        (clk_27m),
         .reset_n    (clock_locked),
