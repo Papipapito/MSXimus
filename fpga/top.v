@@ -64,6 +64,11 @@ module top
     // ⚠ Si algun dia se pincha un 2o modulo SDRAM en J10, esto se muda.
     input  wire esp_rx_i,    // N17 = J10 pin 16 (SDRAM1_D10) <- IO16 (TX) del C6
     output wire esp_tx_o,    // W21 = J10 pin 14 (SDRAM1_D12) -> IO17 (RX) del C6
+    // _156: indicador de TURBO en la pantalla del C6 (mismo esquema que el
+    // nano: turbo_status pin 29 -> GPIO3, Display.ino TURBO_PIN con pulldown).
+    // J10 pin 18 = el siguiente par del bloque => cable plano de 4 seguidos:
+    // 12=GND 14=TX 16=RX 18=TURBO. Cablear al GPIO3 del C6. Peticion de Albert.
+    output wire esp_turbo_o, // N13 = J10 pin 18 (SDRAM1_D8) -> GPIO3 del C6
     // Console 60K, mecánica JTAG→SPI (estilo C64Nano): jtagseln (NET_LOC
     // V_JTAGSELN) entrega los pines JTAG al fabric cuando vale 1; el BL616
     // reclama JTAG subiendo bl616_jtagsel (PULL_UP: sin firmware companion la
@@ -4699,6 +4704,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign esp_tx_o = bl616_uart_tx_w;
 `else
     assign esp_tx_o = 1'b1;               // idle UART
+`endif
+    // _156: estado de turbo hacia el C6 (turbo_eff = el que consume el FSM de
+    // waits; cuasi-estatico, sin CDC que valga la pena)
+`ifdef ENABLE_TURBO
+    assign esp_turbo_o = turbo_eff;
+`else
+    assign esp_turbo_o = 1'b0;
 `endif
     fpga_companion fpga_companion_inst
     (

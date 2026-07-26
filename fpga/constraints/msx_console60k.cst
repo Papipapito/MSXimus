@@ -130,6 +130,9 @@ IO_LOC  "dbg_pmod0[4]" E18; IO_PORT "dbg_pmod0[4]" IO_TYPE=LVCMOS33 DRIVE=8;
 // esp_rx_i con PULL_UP: idle UART correcto aunque no haya modulo pinchado.
 IO_LOC  "esp_rx_i" N17; IO_PORT "esp_rx_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;   // J10 p16 (SDRAM1_D10) <- IO16 (TX) del C6
 IO_LOC  "esp_tx_o" W21; IO_PORT "esp_tx_o" IO_TYPE=LVCMOS33 DRIVE=8;        // J10 p14 (SDRAM1_D12) -> IO17 (RX) del C6
+// _156: indicador de turbo (esquema del nano: drive suave; el C6 lo lee en
+// GPIO3 con pulldown => sin cable = "Normal", sin destellos en frio)
+IO_LOC  "esp_turbo_o" N13; IO_PORT "esp_turbo_o" IO_TYPE=LVCMOS33 DRIVE=4;   // J10 p18 (SDRAM1_D8) -> GPIO3 del C6
 
 // ---- Memoria del CORE: SDR SDRAM (módulo Tang SDRAM, W9825G6KH, 16b/32MB) ----
 //  Decisión (docs/MEMORY_OPTIONS.md): el core va en SDR SDRAM, reusando memory.v
