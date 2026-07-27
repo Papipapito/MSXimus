@@ -366,7 +366,12 @@ module vdp_timing_control_ssg (
 		end
 	end
 
-	assign w_10frame			= (ff_blink_base == 4'd9);
+	//	upstream 4148742: tick del blink cada 5 frames (no 10). Interactua con
+	//	el off-by-one de la recarga de ff_blink_counter (la recarga se come un
+	//	tic): cada fase dura (N+1) tics. Con 4'd4, R#13=0x11 da fases de 10
+	//	frames EXACTOS (= datasheet 166,9 ms/unidad y openMSX); con el 4'd9
+	//	anterior daban 20 (mitad de velocidad). Medido en tb_ssgblink.
+	assign w_10frame			= (ff_blink_base == 4'd4);
 	assign w_next_blink_counter	= ff_interleaving_page ? reg_blink_period[7:4]: reg_blink_period[3:0];
 
 	always @( posedge clk ) begin
