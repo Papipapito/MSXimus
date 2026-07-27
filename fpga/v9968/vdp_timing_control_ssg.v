@@ -281,16 +281,20 @@ module vdp_timing_control_ssg (
 
 	assign w_v_count_end_line	= reg_212lines_mode ? 10'd211: 10'd191;
 
+	//	upstream eebc87f ("Bugfix VR bit on S#2"): el VR subia al FINAL de la
+	//	linea 211/191 (~56 us DESPUES del intr_frame) y la MSX Diagnostics
+	//	Cartridge detectaba un TMS9918. Ahora sube en el MISMO evento
+	//	w_intr_frame_timing; el clear pasa de 3FE a 3FF (fin de la linea -1).
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_vsync <= 1'b1;
 		end
+		else if( w_intr_frame_timing ) begin
+			ff_vsync <= 1'b1;
+		end
 		else if( w_h_count_end ) begin
-			if( ff_v_count[0] == 1'b1 && w_screen_pos_y == 10'h3FE ) begin
+			if( ff_v_count[0] == 1'b1 && w_screen_pos_y == 10'h3FF ) begin
 				ff_vsync <= 1'b0;
-			end
-			else if( ff_v_count[0] == 1'b1 && ((reg_212lines_mode && (w_screen_pos_y == 10'd211)) || (!reg_212lines_mode && (w_screen_pos_y == 10'd191))) ) begin
-				ff_vsync <= 1'b1;
 			end
 			else if( w_v_count_end ) begin
 				ff_vsync <= 1'b1;
