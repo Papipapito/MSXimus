@@ -934,10 +934,9 @@ module vdp_cpu_interface (
 				//	Clear line interrupt flag
 				ff_line_interrupt <= 1'b0;
 			end
-			else if( ff_status_register_pointer == 4'd10 ) begin
-				//	Clear line interrupt flag
-				ff_command_end_interrupt <= 1'b0;
-			end
+			//	upstream 7298638: quedaba una rama legada que borraba el
+			//	interrupt de FIN DE COMANDO al leer S#10. El unico clear
+			//	legitimo es la escritura en el puerto 4 con bit2=1.
 		end
 		else if( w_write && ff_port4 ) begin
 			if( ff_bus_wdata[0] == 1'b1 ) begin
@@ -949,7 +948,7 @@ module vdp_cpu_interface (
 				ff_line_interrupt <= 1'b0;
 			end
 			if( ff_bus_wdata[2] == 1'b1 ) begin
-				//	Clear line interrupt flag
+				//	Clear command end interrupt flag
 				ff_command_end_interrupt <= 1'b0;
 			end
 		end
