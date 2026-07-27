@@ -95,7 +95,7 @@ Después, mete una microSD con tus ROMs y discos y listo — el menú de arranqu
 
 Esta versión se ha validado en hardware con la batería de tests del V9968 de HRA!, la demo DEVCON, Metal Gear 2, Aleste 2 y el software MSX2+ habitual. No es perfecta, y prefiero contarlo:
 
-- **El logo de arranque del MSX2+** (el que sale al entrar en BASIC) muestra glitches durante medio segundo. Está diagnosticado y hay arreglo preparado, pendiente de validar en placa.
+- **El logo de arranque del MSX2+** (el que sale al entrar en BASIC) muestra glitches durante medio segundo, probablemente ligados al entrelazado de su animación. Está diagnosticado; el arreglo conocido penaliza el rutado del chip y está aparcado — es puramente cosmético.
 - **Quedan líneas sueltas** en las escenas más exigentes de las demos del V9968 — del orden de 4 a 10 fallos de caché por frame. No afecta a los juegos.
 - El **scroll de dos páginas en SCREEN 7 y 8**, y el scroll hacia atrás, todavía no están finos.
 - El core está alineado con el V9968 tal como estaba en **enero de 2026**. HRA! ha seguido trabajando desde entonces y los arreglos posteriores se van portando uno a uno; el detalle está en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
