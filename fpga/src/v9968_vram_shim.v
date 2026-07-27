@@ -477,37 +477,16 @@ assign pf_dm[6] = wq_vld[6] && (wq[6][15:0] == cur_addrw);
 assign pf_dm[7] = wq_vld[7] && (wq[7][15:0] == cur_addrw);
 wire pf_dirty = |pf_dm;
 
-// _148 FIX B (extra barato): FUSIONAR en vez de DESCARTAR. Hasta ahora un fill
-// que chocaba con una escritura encolada se TIRABA y el word se recuperaba por
-// el camino miss->rescate: la clasificacion del miss residual (MISSCLS 25/07)
-// contaba filldrop_dirty=6 de 11 miss de rafaga, mas de la mitad de lo que
-// queda. El dato leido de VRAM es valido para los bytes que la escritura NO
-// toca; los que SI toca los conocemos (estan en la cola). Se fusionan igual
-// que en wu_merged, con la mascara de la entrada de wq (1 = escribir).
-// SEGURIDAD (por que solo UNA coincidencia): con dos o mas entradas al mismo
-// word habria que aplicarlas EN ORDEN DE PROGRAMA — una cadena de 8 muxes de
-// 32 bits en un shim con familias de placement cronicas, para un caso que no
-// se da (cada comando escribe cada palabra una vez). Con >=2 se DESCARTA como
-// siempre. pf_one/pf_drop son mutuamente excluyentes dentro de pf_dirty.
-wire pf_one  = pf_dirty && ((pf_dm & (pf_dm - 8'd1)) == 8'd0);
-wire pf_drop = pf_dirty && !pf_one;
-// mux one-hot de {mascara[3:0], dato[31:0]} de la entrada que casa
-wire [35:0] pf_ent = ({36{pf_dm[0]}} & wq[0][51:16]) |
-                     ({36{pf_dm[1]}} & wq[1][51:16]) |
-                     ({36{pf_dm[2]}} & wq[2][51:16]) |
-                     ({36{pf_dm[3]}} & wq[3][51:16]) |
-                     ({36{pf_dm[4]}} & wq[4][51:16]) |
-                     ({36{pf_dm[5]}} & wq[5][51:16]) |
-                     ({36{pf_dm[6]}} & wq[6][51:16]) |
-                     ({36{pf_dm[7]}} & wq[7][51:16]);
-wire [3:0]  pf_wm = pf_ent[35:32];       // 1 = ese byte lo pisa la escritura
-wire [31:0] pf_wd = pf_ent[31:0];
-function [31:0] pf_fuse(input [31:0] rd);
-    pf_fuse = { pf_wm[3] ? pf_wd[31:24] : rd[31:24],
-                pf_wm[2] ? pf_wd[23:16] : rd[23:16],
-                pf_wm[1] ? pf_wd[15: 8] : rd[15: 8],
-                pf_wm[0] ? pf_wd[ 7: 0] : rd[ 7: 0] };
-endfunction
+// [niquelado B, bug #15 del informe] AQUI VIVIO el "_148 FIX B" (fusionar el
+// fill con la escritura encolada al mismo word en vez de descartarlo — la
+// clasificacion MISSCLS 25/07 lo justificaba: 6 de 11 miss de rafaga eran
+// filldrop_dirty). Se descubrio que NUNCA SE CABLEO: pf_one/pf_fuse no tenian
+// ni un consumidor y las guardas reales siguieron siendo `!pf_dirty` a secas,
+// asi que el netlist jamas llevo la mejora. Se retira el codigo muerto; si
+// algun dia se quiere DE VERDAD, la receta esta en el informe del niquelado
+// (guardas `!pf_drop`, dato `pf_fuse({w_hi,w_lo})`, validar en tb_menu_ddr3 y
+// tb_vbcoh). El comportamiento real de hoy: fill que choca con escritura
+// pendiente se DESCARTA y el word se autocura por el camino miss->rescate.
 
 // (_126c probo un snoop rq_dirty sobre la cabeza de rq para dejar pasar
 // reads limpios por delante de las escrituras; el cono rq_rp -> mux 16:1
@@ -1309,9 +1288,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
             if (hi_now) begin cur_word[31:16] <= bk2_rword; got_hi <= 1'b1; end
             if ((got_lo || lo_now) && (got_hi || hi_now)) begin
                 bsy <= 1'b0;
-                // _148 FIX B: el dato que se CACHEA lleva fusionados los bytes
-                // de la escritura encolada al mismo word (pf_one). Solo se
-                // descarta con >=2 escrituras pendientes (pf_drop).
+                // Colision fill<->escritura pendiente: el fill se DESCARTA
+                // (guarda !pf_dirty de abajo) y el word se autocura por
+                // miss->rescate. (La "fusion _148 FIX B" nunca se cableo —
+                // ver la nota junto a pf_dirty.)
                 if (cur_kind == 2'd0) begin
                     // fill de ventana via registros pww (write-site BSRAM)
                     // _140: cede el puerto pww al write-through-update de
