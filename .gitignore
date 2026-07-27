@@ -32,3 +32,6 @@ ruvector.db
 # Artefactos de simulacion (regenerables)
 *.vvp
 *.vcd
+
+# --- Carpeta personal de Albert (release lista para flashear, NO subir) ---
+mi_release/
