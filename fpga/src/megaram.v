@@ -115,8 +115,6 @@ module megaram_scc(
     reg [7:0] megaram_reg1;
     reg [7:0] megaram_reg2;
     reg [7:0] megaram_reg3;
-    reg megaram_reg_H;
-    reg megaram_reg_L;
     reg [7:0] megaram_mode_a;
     reg [7:0] megaram_mode_b;
     reg [3:0] sram_en;              // SRAM mapeada por ventana 8K (4000/6000/8000/A000)
@@ -222,9 +220,13 @@ module megaram_scc(
                         end
                         //ASC16K / 6000-67FFh (ventana 4000-7FFF = regs internos 0+1)
                         else if (bus_addr[11] == 0) begin
-                            megaram_reg_L <= cpu_dout[6];
-                            megaram_reg0 <= { cpu_dout[7], cpu_dout[5:0], 1'b0 };
-                            megaram_reg1 <= { cpu_dout[7], cpu_dout[5:0], 1'b1 };
+                            // v2.0.1 (bug #24 + Aleste2 2MB en placa): el banco
+                            // 8K se formaba con {bit7, bits5:0} DESCARTANDO el
+                            // bit 6 (iba a un registro sin lectores) => bancos
+                            // 16K >=64 (el 2o MB) aliasaban sobre el 1o. Ahora
+                            // {bits6:0, mitad} = 2MB completos (el limite fisico).
+                            megaram_reg0 <= { cpu_dout[6:0], 1'b0 };
+                            megaram_reg1 <= { cpu_dout[6:0], 1'b1 };
                             //SRAM ASCII16 (Hydlide2/A-Train): valor exacto 0x10
                             if ( sram_cfg != 8'h00 && cpu_dout == 8'h10 ) begin
                                 sram_en[1:0] <= 2'b11;
@@ -250,9 +252,9 @@ module megaram_scc(
                         end
                         //ASC16K / 7000-77FFh (ventana 8000-BFFF = regs internos 2+3)
                         else if (bus_addr[11] == 0) begin
-                            megaram_reg_H <= cpu_dout[6];
-                            megaram_reg2 <= { cpu_dout[7], cpu_dout[5:0], 1'b0 };
-                            megaram_reg3 <= { cpu_dout[7], cpu_dout[5:0], 1'b1 };
+                            // v2.0.1: mismo fix del bit 6 que en la ventana 6000h
+                            megaram_reg2 <= { cpu_dout[6:0], 1'b0 };
+                            megaram_reg3 <= { cpu_dout[6:0], 1'b1 };
                             if ( sram_cfg != 8'h00 && cpu_dout == 8'h10 ) begin
                                 sram_en[3:2] <= 2'b11;
                             end
