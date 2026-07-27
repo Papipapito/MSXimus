@@ -31,16 +31,34 @@ snapshot th9958). Verificados uno a uno contra el repo:
                       w_sy_active en vdp_command.v (+ ff_command == c_lrmm)
   eebc87f 2026-02-23  Bugfix VR bit on S#2 (el bit VR subia tarde; la MSX
                       Diagnostics Cartridge detectaba TMS9918)
+                      <-- APLICADO _157 (2940569): delta 4832 ciclos -> 1
   18b4594 2026-06-02  Bugfix rotacion LRMM (quita c_lrmm de sx_active — OJO:
                       sx_active debe seguir SIN LRMM, es intencionado)
+                      <-- VERIFICADO NO-OP _157: nuestro estado neto (sy CON
+                      c_lrmm, sx SIN) ya coincide termino a termino
   0683e7e 2026-06-02  **Register R#20, R#21 Modified** (ver abajo)
+                      <-- INVESTIGADO 27/07: cambio A MEJOR con permanencia
+                      ALTA (spec+RTL+demos atomico, tag v0.6, un solo bit V58
+                      conmuta ID+comandos+256K; coste de migrar = 26 lineas
+                      RTL + 2 bytes de software: DEVCON.COM off 14883 y
+                      V9968DM.COM off 0x377). DECISION Albert: mapa viejo en
+                      v2.0; migracion prevista para v2.1 con demos parcheadas
   167b7cf 2026-06-03  Sprite Mode2 con PaletteSet# cuando EPAL=1 (FEATURE nueva;
                       es el delta de 154 lineas de vdp_sprite_makeup_pixel.v)
   4148742 2026-06-03  Bugfix direccion de la tabla de blink + periodo
+                      <-- APLICADO _157 (4754da3) SOLO el periodo (el hunk de
+                      direccion = nuestro _127F identico). Ver correccion de
+                      la nota _149 mas abajo
   55e0632 2026-06-05  Bugfix BLINK en SCREEN0 WIDTH80 (TEXT2)
+                      <-- YA LO TENIAMOS: identico a nuestro _127E
   7298638 2026-06-26  Bugfix: leer S#10 borraba el interrupt de fin de comando
+                      <-- APLICADO _157 (cc776e5) adaptado a nuestra
+                      generacion (CEIE=R#21[7]); banco 13/13 OK
   5978d18 2026-07-09  clone FF para relajar violaciones de timing (HRA hizo el
                       MISMO truco que nosotros)
+                      <-- NO PORTADO: nuestros clones _120/_125b cubren todo
+                      lo suyo salvo el registro de intr_line (reserva anotada
+                      por si el gate vuelve a quejarse de ese camino)
 
 EL CAMBIO DE R#20/R#21 (0683e7e) — y por que hay dos DEVCON.COM:
   ANTES (th9958, = NOSOTROS):
@@ -257,6 +275,14 @@ VERIFICACION _149 (misma sim, MISMO banco, antes -> despues):
   UPSTREAM (identico en el arbol base) y COSMETICO — el blink va a la mitad de
   velocidad de lo programado. NO tiene nada que ver con este bug (R#13=0 en
   DOS/BASIC). Anotado por si algun dia se compara contra HW real.
+  [CORRECCION _157, commit 4754da3] La conclusion "4'd9 es el correcto" de
+  arriba (_127G/_149) estaba EQUIVOCADA: precisamente POR el off-by-one de la
+  recarga ((N+1) tics), el tick de 5 frames del upstream (4'd4) es el que da
+  fases de 10 campos EXACTOS con R#13=0x11, igual que el datasheet y openMSX;
+  con 4'd9 salian 20 (mitad de velocidad). HRA compenso un error con el otro
+  a proposito. Medido A/B en tb_ssgblink; residual honesto: con N>=2 la fase
+  da (2N+1)*5 en vez de 2N*10 (p.ej. 15 vs 20 campos) — cosmético y mejor
+  que antes en todos los casos.
   tb_t2cursor REGRESION con el parche: salida IDENTICA a la de antes del parche
   (mismos 4 OK: blink apagado con R#13=0, cursor visto, SIN residuo tras mover
   el cursor por el puerto CPU, patron del caracter 255 reescrito). El camino de
