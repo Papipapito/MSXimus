@@ -3488,11 +3488,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         + {{3{jt2413_wav[15]}}, jt2413_wav} + {{3{y8950_wav[15]}}, y8950_wav}
         + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
         + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term[15]}}, opl4pcm_term};
-    // _127H: TONO DE TEST — activado por el toggle "Sprite Limit" del menu
-    // (config2[3], LIBRE con el V9968: el SPMAXSPR murio). 440Hz cuadrada a
-    // -12dB directa al puente, PUENTEANDO el mezclador entero. Discriminador
-    // del bug #14: si el TONO tambien se corta -> HDMI/receptor; si el tono
-    // aguanta limpio mientras la musica se corta -> mezclador/fuentes.
+    // _127H: TONO DE TEST del bug #14 (440Hz cuadrada -12dB directa al puente,
+    // puenteando el mezclador). DESARMADO en release (niquelado B, bug #4 del
+    // informe): iba colgado del toggle "Sprite Limit" del menu (config2[3]) y
+    // cualquier usuario lo pisaba — y persistia en flash. Para reactivarlo en
+    // una build de diagnostico: `define DEBUG_TONE_440 (el discriminador
+    // sigue siendo valido: tono limpio con musica cortada -> mezclador;
+    // tono cortado tambien -> HDMI/receptor).
+`ifdef DEBUG_TONE_440
     reg [14:0] tone_cnt = 15'd0;
     reg        tone_sq  = 1'b0;
     always @ (posedge clk_27m) begin
@@ -3503,14 +3506,18 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             tone_cnt <= tone_cnt + 15'd1;
     end
     wire [15:0] tone_smp = tone_sq ? 16'd4096 : 16'hF000;   // +-4096 (-12dB)
+`endif
 
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
+`ifdef DEBUG_TONE_440
             if (config_enable_8sprites == 1) begin
                 audio_sample   <= tone_smp;
                 audio_sample_r <= tone_smp;
             end
-            else if (config_enable_stereo == 1) begin
+            else
+`endif
+            if (config_enable_stereo == 1) begin
                 audio_sample   <= sat16(mixL_st);
                 audio_sample_r <= sat16(mixR_st);
             end
