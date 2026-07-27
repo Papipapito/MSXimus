@@ -69,7 +69,13 @@ module vdp_video_out #(
 	// +-1px/paso (rango -7..+8). Solo cambia la DIRECCION base de lectura: no
 	// toca h_en/hs/vs ni el span (sincronismo HDMI intacto).
 	// Verificado en tb_center (adj=0) => histograma {3:256}, 0 borde.
-	parameter [9:0]	c_read_start = 10'd16,
+	// [v2.0.1, bug del borde derecho en SCREEN1 — Albert 27/07] 16 -> 30: la
+	// sonda del line buffer (_147, ORIGEN.txt) midio content_start = 30 muestras
+	// en los modos de 256px (46 TEXT1 / 45 TEXT2); leer desde 16 regalaba 14
+	// muestras (~7 px MSX) al borde IZQUIERDO y se comia el DERECHO. Con 30,
+	// TEXT1 queda centrado exacto (16 muestras de borde por lado). SET ADJUST
+	// (+-8) sigue montado encima sin cambios.
+	parameter [9:0]	c_read_start = 10'd30,
 	// MSXimus _143 PRIME: adelanta el arranque de la ventana ACTIVA (arranque
 	// del puntero de lectura + reset del Bresenham) respecto a h_en_start (748)
 	// para CEBAR la tuberia del magnificador (lat ~8 columnas) antes de que se
