@@ -18,14 +18,12 @@ create_clock -name clk_86 -period 11.640 [get_pins {pll86_vdp/PLLA_inst/CLKOUT0}
 #  ver nota abajo — sus "clocks" del SDC clasico no existen aqui)
 set_clock_groups -asynchronous -group [get_clocks {clk_86}] -group [get_clocks {clk_in clk_108m clk_54m clk_27m clk_135m eng_clk375}] -group [get_clocks {clk27_video clk_hdmi clk_hdmi5}]
 
-# clk_audio del puente V9968 (divisor a 44.1 kHz, FF clk_audio_s0 en dominio
-# clk_hdmi; el handshake del packet_picker de hdl-util es tolerante a fase =
-# mismo caso que el clasico). El get_nets del estilo clasico dio match vacio
-# aqui (TA2003); el PIN del FF SI casa (verificado VERBATIM en el informe de
-# timing del PnR _117: u_msx2hdmi68/clk_audio_s0/Q).
-# El CLOCK_LOC LOCAL_CLOCK del .cst (leccion _45) se parchea via sed del clon.
-create_clock -name clock_audio68 -period 22675.737 [get_pins {u_msx2hdmi68/clk_audio_s0/Q}] -add
-set_clock_groups -asynchronous -group [get_clocks {clock_audio68}] -group [get_clocks {clk27_video clk_hdmi clk_hdmi5}]
+# _127I (bug #14): el reloj de fabric clk_audio YA NO EXISTE — el audio del
+# puente V9968 corre con clock-enable (audio_ce) sincrono a clk_pixel. El
+# create_clock clock_audio68 sobre clk_audio_s0/Q y su grupo asincrono quedan
+# RETIRADOS (aquel FF era la CAUSA del bug: LOCAL_CLOCK => skew => CTS
+# corrupto => el monitor re-enganchaba su PLL de audio cada ~3s). Todo el
+# camino de audio se analiza ahora como logica normal del dominio clk_hdmi.
 
 # NOTA dh/dl: en el build V9968 el divisor libre ÷8/÷16 vive EN clk_108m y
 # dh/dl entran a mem1 como DATOS single-cycle del mismo dominio — no son

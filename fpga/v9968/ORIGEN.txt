@@ -7,6 +7,76 @@ Ficheros parcheados para el MSXimus (marcados "MSXimus:" en el codigo):
   - vdp.v                 (plumbing de vram_tag/vram_rtag al top del core)
 El resto, INTACTO. Regen/diff contra upstream: proyectosAI/msx/V9968_Cartridge
 
+################################################################################
+[CORRECCION 2026-07-26] EL SENTIDO DE LA MIGRACION ESTABA INVERTIDO EN ESTE DOC
+################################################################################
+th9958 NO es una evolucion posterior de v9968, ni una linea paralela:
+**es EL MISMO ARBOL con el NOMBRE VIEJO.**
+  Prueba: hra1129/V9968_Cartridge commit 17455ac (2026-06-02 19:05 +0900)
+  "Rename th9958 to v9968 / フォルダー名変更 th9958 → v9968"
+  El diff es literalmente src/{th9958 => v9968}/... : renombrado puro, 0 cambios.
+
+  - TangCartMSX/RTL/.../src/th9958  -> CONGELADO. Ultimo commit que lo toca:
+    d4f8561, 2026-01-28. Los 2 commits posteriores del repo no tocan la carpeta.
+  - hra1129/V9968_Cartridge         -> LA LINEA VIVA, hasta 5978d18 (2026-07-09).
+
+Consecuencia: las notas de abajo que hablan de "TOMAR UPSTREAM LIMPIO (deriva N —
+evolucion HRA)" tienen el sentido AL REVES. Los numeros de deriva (154, 20, 6, 2...)
+son CORRECTOS, pero el lado "th9958" es el VIEJO, no el nuevo. Alinearse con
+th9958 es RETROCEDER ~5 meses.
+
+FIXES DEL UPSTREAM QUE NOS FALTAN (git log de V9968_Cartridge posterior al
+snapshot th9958). Verificados uno a uno contra el repo:
+  9e3eb6d 2026-02-23  Bugfix LRMM command  <-- APLICADO YA en _152, ver
+                      w_sy_active en vdp_command.v (+ ff_command == c_lrmm)
+  eebc87f 2026-02-23  Bugfix VR bit on S#2 (el bit VR subia tarde; la MSX
+                      Diagnostics Cartridge detectaba TMS9918)
+                      <-- APLICADO _157 (2940569): delta 4832 ciclos -> 1
+  18b4594 2026-06-02  Bugfix rotacion LRMM (quita c_lrmm de sx_active — OJO:
+                      sx_active debe seguir SIN LRMM, es intencionado)
+                      <-- VERIFICADO NO-OP _157: nuestro estado neto (sy CON
+                      c_lrmm, sx SIN) ya coincide termino a termino
+  0683e7e 2026-06-02  **Register R#20, R#21 Modified** (ver abajo)
+                      <-- INVESTIGADO 27/07: cambio A MEJOR con permanencia
+                      ALTA (spec+RTL+demos atomico, tag v0.6, un solo bit V58
+                      conmuta ID+comandos+256K; coste de migrar = 26 lineas
+                      RTL + 2 bytes de software: DEVCON.COM off 14883 y
+                      V9968DM.COM off 0x377). DECISION Albert: mapa viejo en
+                      v2.0; migracion prevista para v2.1 con demos parcheadas
+  167b7cf 2026-06-03  Sprite Mode2 con PaletteSet# cuando EPAL=1 (FEATURE nueva;
+                      es el delta de 154 lineas de vdp_sprite_makeup_pixel.v)
+  4148742 2026-06-03  Bugfix direccion de la tabla de blink + periodo
+                      <-- APLICADO _157 (4754da3) SOLO el periodo (el hunk de
+                      direccion = nuestro _127F identico). Ver correccion de
+                      la nota _149 mas abajo
+  55e0632 2026-06-05  Bugfix BLINK en SCREEN0 WIDTH80 (TEXT2)
+                      <-- YA LO TENIAMOS: identico a nuestro _127E
+  7298638 2026-06-26  Bugfix: leer S#10 borraba el interrupt de fin de comando
+                      <-- APLICADO _157 (cc776e5) adaptado a nuestra
+                      generacion (CEIE=R#21[7]); banco 13/13 OK
+  5978d18 2026-07-09  clone FF para relajar violaciones de timing (HRA hizo el
+                      MISMO truco que nosotros)
+                      <-- NO PORTADO: nuestros clones _120/_125b cubren todo
+                      lo suyo salvo el registro de intr_line (reserva anotada
+                      por si el gate vuelve a quejarse de ese camino)
+
+EL CAMBIO DE R#20/R#21 (0683e7e) — y por que hay dos DEVCON.COM:
+  ANTES (th9958, = NOSOTROS):
+      R#20[5]=ECOM   R#20[6]=EVR
+      R#21[0]=fakeID R#21[6]=flat_interlace  R#21[7]=CEIE
+  DESPUES (v9968, upstream vivo):
+      R#20[5]=flat_interlace   R#20[6]=command_end_interrupt_enable
+      R#21[0]=v9958_mode
+      reg_ext_command_mode = ~ff_v9958_mode ;  reg_vram256k_mode = ~ff_v9958_mode
+  ⚠️ EL COMENTARIO "R#20 = [S16][EVR][ECOM][EPAL][SCOL][ILNS][SVNS][HS]" NO SE
+  ACTUALIZO EN EL UPSTREAM: en el arbol nuevo MIENTE. En el nuestro aun es cierto.
+  Los dos DEVCON.COM difieren en UN byte, y es exactamente ese (tabla reg/valor,
+  entrada "14"=R#20): 0xFF = RTL VIEJA (th9958, la nuestra), 0x9F = RTL NUEVA.
+  devcon.c NUNCA cambio: HRA parcheo el binario a mano. Por eso el .c dice 0xFF.
+  => La nota del README de la ru66 ("con RTL reciente cambiar 0xff a 0x9f") es
+  CORRECTA y NO contradice nada. No hay misterio.
+################################################################################
+
 [PARCHE _120 2026-07-18] TIMING (bit-exacto, sin cambio semantico): la resta
 del scroll horizontal para los sprites (screen_pos_x - horizontal_offset_l,
 antes combinacional en vdp_timing_control_sprite.v:158) se traslada al SSG al
@@ -27,3 +97,213 @@ PARCHE 3 (_120f, 2026-07-19) - vdp_command.v: comparadores de ventana LRMM
   aritmetico) se calculan en paralelo (w_wsy_lt_n/lt_s/gt_n/gt_s, syn_keep)
   y el decode solo elige el bit final (w_wsy_lt/gt). Mismo resultado ciclo a
   ciclo; el camino desde ff_command pasa de 15 niveles a ~3.
+
+============================================================================
+[MIGRACION th9958 — PLAN, 2026-07-21] Directiva de Albert: pasar al arbol
+th9958 de hra1129/TangCartMSX (clon en proyectosAI/msx/TangCartMSX, ruta
+RTL/tangnano20k_vdp_cartridge_rev2_step1/src/th9958) y re-aplicar nuestros
+parches. Los 21 .v tienen los MISMOS nombres. Rama: th9958.
+
+Ficheros SIN deriva upstream (se quedan igual): color_palette (¡ojo
+BLKANDNBLK!), command_cache, select_visible_planes, paletas, upscan, ssg2.
+
+TOMAR UPSTREAM LIMPIO (sin parche local segun este ORIGEN):
+  - vdp_sprite_makeup_pixel.v      (deriva 154 — evolucion HRA)
+  - vdp_sprite_info_collect.v      (20)
+  - vdp_timing_control_screen_mode.v (6)
+  - vdp_video_out.v                (2, solo comentario DVI->LCD)
+
+RE-APLICAR NUESTROS PARCHES SOBRE UPSTREAM:
+  - vdp_vram_interface.v: deriva upstream CERO -> COPIAR EL NUESTRO tal
+    cual (tag+eco). Trivial.
+  - vdp.v: puertos vram_tag/vram_rtag/vram_stall (plumbing) sobre el
+    upstream. OJO: upstream ELIMINO reg_ext_palette_mode (estaba en el
+    base 5978d18) — investigar a donde movio HRA la palette extendida
+    antes de re-cablear.
+  - vdp_cpu_interface.v: VR-carry (el gate !ff_vram_type del acarreo
+    SIGUE en el th9958 -> nuestro fix sigue haciendo falta) + mascara PAL
+    (ff_50hz_mode <= 1'b0). ESTRUCTURA NUEVA: ff_v9958_mode->ff_fakeID,
+    nuevos ff_ext_command_mode/ff_vram256k_mode (bits de control movidos,
+    el acarreo ahora gated por ff_vram256k_mode), status pointer 4'd10.
+    Releer el registro de control antes de tocar.
+  - vdp_command.v: syn_maxfan de ff_command + ff_screen_mode(_clone)
+    (_125b) + espejo ff_ny_b (_124d — REGENERAR desde el always de ff_ny
+    del upstream, que cambio: LRMM ya no esta en sy_active y la ventana
+    LRMM compara w_sy post-incremento SIN la variante >>1 de xhr) +
+    comparadores _120f SOLO si el timing vuelve a quejarse (el codigo
+    base de esa zona cambio de forma).
+  - vdp_timing_control_ssg.v: clones ff_v_count/_clone y
+    ff_screen_pos_x/_clone/_sprite (syn_preserve) + resta del scroll _120
+    (ff_screen_pos_x_sprite con reg_horizontal_offset_l) sobre el
+    upstream. OJO upstream arreglo vsync (3FE + set en 211/191) y el
+    blink (w_10frame == 4'd9): TOMAR su semantica.
+  - vdp_timing_control.v: plumbing de los puertos clone/sprite.
+  - vdp_timing_control_sprite.v: puerto screen_pos_x_ofs (_120).
+
+VERIFICACION: bateria run_battery.sh (sc8cmd_full + sc5line + bulk) —
+regenerar referencias si el upstream cambia semantica visible; luego los
+testbenches PROPIOS de HRA del arbol th9958 (test_command_cache,
+test_vdp_timing_control*, test_vdp2/3) como red extra. DEVCON.COM del
+arbol para el examen final en HW.
+
+[_142 2026-07-24] vdp_video_out.v: NEAREST-NEIGHBOR opcional del magnificador
+horizontal (ff_coeff snap a 0/63). El core de HRA usa un magnificador LCD
+BILINEAL (256->800 fraccional) que difumina los bordes de pixel => fuentes
+retro con la "H" descuadrada (un palo mas fino). El snap elige el pixel mas
+cercano sin mezcla => bordes nitidos como el V9958 del MSXnano (DISP_WIDTH=720,
+sin interpolar). Revert trivial: restaurar la linea comentada. Build de prueba
+para A/B con texto+juegos (Albert 24/07).
+
+[_147 2026-07-25] vdp_video_out.v: c_active_start 731 -> 729 (una columna mas
+de prime). FIX de la REGRESION de la _144 en los modos de UNA MUESTRA POR
+PIXEL: TEXT2 (SCREEN0 W80 = el menu del MSXimus), SCREEN6 y SCREEN7.
+CADENA: el magnificador reparte 512 muestras del line buffer en 768 columnas
+nativas (2/3 -> patron 2,1,2,1) y msx2hdmi_v9968 reparte esas 768 columnas en
+los 1280 px de pantalla (xx = floor(3*cx/5) -> patron 2,2,1). Un pixel de
+2 muestras (todos los modos de 256 px y TEXT1) ocupa SIEMPRE 3 columnas
+nativas, y 3 columnas nativas consecutivas suman SIEMPRE 5 px de pantalla:
+INMUNES al alineamiento. Un pixel de 1 muestra ocupa 1 o 2 columnas y el
+reparto final depende del residuo mod 3 de la columna nativa donde empieza:
+residuo 0 -> 4,1 px (pixeles alternos CUATRO veces mas anchos = "otra fuente")
+residuo 1 o 2 -> 3,2 px (optimo, media 2,5 = 1280/512).
+El residuo lo fija QUE columna del core cae en el indice 0 del ring, y eso
+depende de `ce86` (top.v): un TOGGLE LIBRE SIN RESET ("la fase da igual" —
+NO da igual) cuya fase respecto a h_count es arbitraria. Con 731 una de las
+dos fases posibles cae en residuo 0 (fuente rota) y la otra en residuo 2
+(bien): LOTERIA por bitstream/arranque. Con 729 las dos fases caen en
+residuos 1 y 2 => 3,2 SIEMPRE.
+Coste: la ventana visible se desplaza UNA columna nativa (1,67 px de pantalla,
+sub-pixel). Los modos de 256 px siguen dando {5:*} exactos en ambas fases.
+NO se toca msx2hdmi_v9968 (ancho nativo sigue siendo 768) ni el centrado.
+Bancos nuevos: tools/v9968_sim/tb_geomfast.sv (upscan+video_out reales,
+barrido c_active_start x c_start_numerator x fase de captura, por familia de
+modo) y tools/v9968_sim/tb_textgeom.sv (pila COMPLETA vdp.v+shim, SCREEN1 /
+SCREEN0 W40 / SCREEN0 W80, sonda del line buffer + las dos fases del ring).
+PENDIENTE (medido, NO aplicado): el CENTRADO. La sonda del line buffer da
+content_start = 30 muestras en graficos de 256 px, 46 en TEXT1 y 45 en TEXT2,
+mientras el magnificador lee desde c_read_start = 16: se pierden ~14 muestras
+(7 px MSX) por la DERECHA en los modos de 256 px y el texto queda descentrado
+(borde izq 30 muestras / der 2). El valor correcto es c_read_start = 30 (con el
+que TEXT1 queda centrado exacto: 16 muestras de borde a cada lado). Se deja
+fuera de este cambio para no mezclar dos cosas en la misma build.
+
+[_149 2026-07-25] vdp_cpu_interface.v: BUFFER DE PRE-LECTURA DE VRAM (el del
+V9938 real). FIX del "SIMBOLO RESIDUAL JUNTO AL CURSOR" en MSX-DOS/Nextor y
+BASIC bajo SCREEN 0 WIDTH 80 (TEXT2).
+
+NO ERA EL BLINK (hipotesis descartada CON MEDIDA, ver abajo). Ground truth en
+openMSX (Philips NMS 8250, V9938) en el prompt en W80: R#12 = 0x00 y
+R#13 = 0x00 — el blink del VDP esta PARADO. El cursor de texto del MSX se
+dibuja por SOFTWARE: la BIOS escribe el CODIGO 0xFF en la celda del cursor y
+reescribe el PATRON del caracter 255 (PGT+0x7F8..0x7FF) con el COMPLEMENTO del
+glifo que hay debajo; al mover el cursor RESTAURA el codigo original, que habia
+LEIDO antes por el puerto de datos del VDP. (De paso: la tabla de blink de
+TEXT2 en 0x0800 la BIOS NUNCA la inicializa — contiene la fuente de TEXT1
+rancia, ~29% de bits a 1. Solo R#13 = 0 evita el desastre.)
+
+CAUSA: el core NO implementaba la pre-lectura del V9938. Cada IN del puerto 0
+lanzaba el acceso a VRAM EN ESE MOMENTO y frenaba a la CPU con ff_busy /
+bus_ready. Pero fpga/src/v9968_cpu_glue.v NO frena al Z80 (no hay /WAIT del
+V9968 en top.v): dispara la transaccion en el flanco de csr_n y confia en que
+bus_rdata_en llegue antes de que el T80 muestree cdi_r; si no llega, cdi_r
+conserva EL DATO DE LA LECTURA ANTERIOR (lo dice su propia cabecera). Con TEXT2
+el fondo hace 4 accesos a VRAM por PAREJA de caracteres (el doble que TEXT1) y
+la latencia se dispara. La BIOS guarda entonces un caracter EQUIVOCADO y al
+mover el cursor lo escribe DE VERDAD en la VRAM: el glifo residual es real y
+se queda para siempre (cosmetico; el editor de linea de DOS usa su buffer RAM).
+
+MEDIDA (tools/v9968_sim/tb_t2cpuread.sv: Z80 modelado + v9968_cpu_glue REAL +
+vdp.v + shim, con TEXT2 dibujando, 120 lecturas):
+  Z80 3,58 MHz: 32,5% de las lecturas devuelven el byte ANTERIOR
+  Z80 5,37 MHz: 53,3%   (presupuesto 698 / 466 ns; latencia media 492 ns,
+                         MAX 2189 ns; bimodal: acierto de cache ~14-29 ciclos,
+                         fallo ~45-70)
+  transacciones de I/O perdidas en el glue: 0 (las ESCRITURAS estan a salvo)
+
+FIX (bit-exacto para todo lo que no sea el puerto 0 de VRAM):
+  - ff_pf_req / ff_pf_inflight / ff_pf_valid / ff_pf_data.
+  - Fijar la direccion de LECTURA (2o acceso al puerto 1, bit7=0 bit6=0) arma
+    una PRE-LECTURA que se lanza sin poner ff_busy: la CPU no espera por ella.
+  - El IN del puerto 0 responde EN EL MISMO CICLO desde ff_pf_data y arma la
+    pre-lectura del byte siguiente (encadenado, como el silicio: el contador de
+    direccion va uno por delante). Si el buffer esta vacio se cae a la lectura
+    bloqueante del upstream, identica.
+  - bus_ready / w_read / w_write se retienen con ~ff_pf_inflight (el puerto de
+    VRAM esta ocupado; el maestro reintenta solo). Sin esto un acceso durante
+    la pre-lectura lanzaria un SEGUNDO ff_vram_valid.
+  - El buffer se invalida al re-apuntar la direccion, al escribir R#14 y al
+    escribir en VRAM por el puerto 0.
+  Margen que gana la BIOS: entre el SETRD y el IN pasan ~9-11 estados T
+  (2,5-3 us a 3,58 MHz) contra los 2,2 us de latencia MAXIMA medida.
+
+DESCARTADO CON MEDIDA (tools/v9968_sim/tb_t2cursor.sv, pila completa, TEXT2 con
+la tabla de blink LLENA DE BASURA como la deja la BIOS):
+  - R#13 = 0 apaga el blink por completo: 0 celdas con atributo de blink de 395.
+  - Con el blink activo, el mapeo caracter -> byte/bit de la tabla es EXACTO
+    (byte = base + char/8, bit 7 = caracter MAS A LA IZQUIERDA): confirma que
+    los parches _127E (selector 2'd0/1/2) y _127F ([7:2]) son correctos.
+  - El camino de PANTALLA lee las escrituras de la CPU al instante: tras mover
+    el cursor por el puerto CPU la celda vieja se lee restaurada y la nueva con
+    el patron reescrito. NO hay rancidez de cache en el shim.
+  - vdp_timing_control_ssg.v: el blink-timing w_10frame == 4'd9 del upstream
+    th9958 (el "plan _127G") YA ESTABA aplicado y es el CORRECTO (la unidad de
+    R#13 son 10 frames; el 4'd4 del arbol base iba al doble de velocidad).
+    Banco tools/v9968_sim/tb_ssgblink.sv (cadencia campo a campo).
+
+RIESGO PARA EL GATE: vdp_cpu_interface.v no esta en las familias cronicas de
+placement (vdp_sprite_makeup_pixel / clones syn_preserve del ssg) y el ssg NO
+se ha tocado. El cambio anade 4 FF + 8 FF de dato y un par de comparadores en
+un camino que ya era lento (bus de la CPU). PENDIENTE: verificar en HW —
+regresion obligatoria de LDIRMV/RDVRM (lecturas en bloque) y del cargador de
+ROMs, que son los grandes usuarios de lectura de VRAM.
+  ALTERNATIVA si el gate se queja del camino del bus de la CPU: en vez de los
+  tres terminos `& ~ff_pf_inflight` (bus_ready / w_read / w_write) basta con
+  poner ff_busy <= 1'b1 tambien en la rama que lanza la pre-lectura — la ruta
+  de cierre ya existe (rdata_en -> ff_vram_address_inc -> ff_busy <= 0 porque
+  !ff_vram_write) y el efecto es identico, con CERO logica combinacional nueva.
+
+VERIFICACION _149 (misma sim, MISMO banco, antes -> despues):
+  tb_t2cpuread  Z80 3,58 MHz: 32,5% de bytes malos -> 0,0%
+  tb_t2cpuread  Z80 5,37 MHz: 53,3% de bytes malos -> 0,0%
+  latencia del IN: bimodal 14..188 ciclos (163..2189 ns) -> CONSTANTE 3 ciclos
+  (35 ns) en las 120 lecturas: TODAS son acierto del buffer de pre-lectura.
+  tb_ssgblink  R#13=0x00: blink = 0 en los 25 campos, 0 cambios a mitad de
+  pantalla (el caso de MSX-DOS/BASIC en W80).
+  tb_ssgblink  R#13=0x11: blink = 0 durante 9-10 campos y luego 1, sin volver a
+  conmutar en 25 campos -> el periodo real es (N+1)*10 frames, no N*10 (la
+  recarga de ff_blink_counter se come un tic de w_10frame). Es comportamiento
+  UPSTREAM (identico en el arbol base) y COSMETICO — el blink va a la mitad de
+  velocidad de lo programado. NO tiene nada que ver con este bug (R#13=0 en
+  DOS/BASIC). Anotado por si algun dia se compara contra HW real.
+  [CORRECCION _157, commit 4754da3] La conclusion "4'd9 es el correcto" de
+  arriba (_127G/_149) estaba EQUIVOCADA: precisamente POR el off-by-one de la
+  recarga ((N+1) tics), el tick de 5 frames del upstream (4'd4) es el que da
+  fases de 10 campos EXACTOS con R#13=0x11, igual que el datasheet y openMSX;
+  con 4'd9 salian 20 (mitad de velocidad). HRA compenso un error con el otro
+  a proposito. Medido A/B en tb_ssgblink; residual honesto: con N>=2 la fase
+  da (2N+1)*5 en vez de 2N*10 (p.ej. 15 vs 20 campos) — cosmético y mejor
+  que antes en todos los casos.
+  tb_t2cursor REGRESION con el parche: salida IDENTICA a la de antes del parche
+  (mismos 4 OK: blink apagado con R#13=0, cursor visto, SIN residuo tras mover
+  el cursor por el puerto CPU, patron del caracter 255 reescrito). El camino de
+  PANTALLA no se ha tocado.
+
+PENDIENTE MENOR (encontrado de paso, NO es este bug): con el blink FORZADO
+activo, 1 de 395 celdas (fila 1 col 51 = par 25, byte 0x0810 = 0x3C, bit 4) sale
+con el bit de blink a 0 en vez de 1, y sale IGUAL en las dos corridas (es
+determinista, no ruido). Solo se muestrea la PRIMERA linea de cada fila de
+caracteres, asi que huele a una captura tardia del byte de blink en ese par
+concreto. Invisible en DOS/BASIC (R#13 = 0) y en el menu no se ha visto.
+
+============================================================================
+[_151 2026-07-26] NOTA CRUZADA — EL CORE HRA NO SE TOCA EN ESTE FIX.
+Las "3 rayas horizontales" de la demo ru66-v9968-demo (sprites mode3, escena
+de los conejos) NO son un bug del core de HRA: el core pide sus fetches en el
+orden y las direcciones correctas. Es la sc-cache del SHIM del MSXimus la que
+las servia rancias, por un alias de indice entre la SAT (0x10000) y la tabla
+de patrones (0x8000). El fix es de UNA LINEA y vive fuera de este arbol:
+  fpga/src/v9968_vram_shim.v -> function c_idx13 (bloque "_151 FIX")
+Se anota aqui solo para que quien busque el historial de sprites mode3 en el
+sitio equivocado lo encuentre. Delta vs upstream HRA en fpga/v9968/*: NINGUNO
+nuevo. Banco de pruebas del caso real: tools/v9968_sim/tb_sprite3.sv -DRU66
+(+ sprite3_ru66_setup.svh y ru66_preload.svh, layout sacado de devcon.c).

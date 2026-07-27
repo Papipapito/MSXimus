@@ -14,7 +14,9 @@ module packet_picker
 )
 (
     input logic clk_pixel,
-    input logic clk_audio,
+    // _127I (bug #14): audio_ce sustituye al reloj de fabric clk_audio —
+    // pulso de 1 ciclo @fs sincrono a clk_pixel (ver nota en el ACR).
+    input logic audio_ce,
     input logic reset,
     input logic video_field_end,
     input logic packet_enable,
@@ -22,7 +24,11 @@ module packet_picker
     input logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word [1:0],
     input logic aspect_16_9,
     output logic [23:0] header,
-    output logic [55:0] sub [3:0]
+    output logic [55:0] sub [3:0],
+    // _127I telemetria bug #14: pulso por paquete de audio despachado y por
+    // overrun del doble buffer (el productor pisa un buffer sin consumir)
+    output logic audio_pkt_pulse,
+    output logic audio_ovr_pulse = 1'b0
 );
 
 // Connect the current packet type's data to the output.
@@ -49,7 +55,7 @@ assign subs[0][3] = 56'dX;
 
 // Audio Clock Regeneration Packet
 logic clk_audio_counter_wrap;
-audio_clock_regeneration_packet #(.VIDEO_RATE(VIDEO_RATE), .AUDIO_RATE(AUDIO_RATE)) audio_clock_regeneration_packet (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .clk_audio_counter_wrap(clk_audio_counter_wrap), .header(headers[1]), .sub(subs[1]));
+audio_clock_regeneration_packet #(.VIDEO_RATE(VIDEO_RATE), .AUDIO_RATE(AUDIO_RATE)) audio_clock_regeneration_packet (.clk_pixel(clk_pixel), .audio_ce(audio_ce), .clk_audio_counter_wrap(clk_audio_counter_wrap), .header(headers[1]), .sub(subs[1]));
 
 // Audio Sample packet
 localparam bit [3:0] SAMPLING_FREQUENCY = AUDIO_RATE == 32000 ? 4'b0011
@@ -66,10 +72,13 @@ localparam bit WORD_LENGTH_LIMIT = AUDIO_BIT_WIDTH <= 20 ? 1'b0 : 1'b1;
 
 logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word_transfer [1:0];
 logic audio_sample_word_transfer_control = 1'd0;
-always_ff @(posedge clk_audio)
+always_ff @(posedge clk_pixel)
 begin
-    audio_sample_word_transfer <= audio_sample_word;
-    audio_sample_word_transfer_control <= !audio_sample_word_transfer_control;
+    if (audio_ce)
+    begin
+        audio_sample_word_transfer <= audio_sample_word;
+        audio_sample_word_transfer_control <= !audio_sample_word_transfer_control;
+    end
 end
 
 logic [1:0] audio_sample_word_transfer_control_synchronizer_chain = 2'd0;
@@ -90,6 +99,13 @@ end
 
 logic sample_buffer_used = 1'b0;
 logic sample_buffer_ready = 1'b0;
+
+// _127I: sample_buffer_used ya es un pulso de 1 ciclo exactamente cuando se
+// despacha un paquete de muestras (packet_type 0x02) — se exporta tal cual.
+assign audio_pkt_pulse = sample_buffer_used;
+always_ff @(posedge clk_pixel)
+    audio_ovr_pulse <= (audio_sample_word_transfer_control_synchronizer_chain[0] ^ audio_sample_word_transfer_control_synchronizer_chain[1])
+                       && samples_remaining == 2'd3 && sample_buffer_ready && !sample_buffer_used;
 
 always_ff @(posedge clk_pixel)
 begin

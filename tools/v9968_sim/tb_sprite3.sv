@@ -4,16 +4,6 @@
 // COMPLETA: core V9968 + v9968_vram_shim + SDRAM lenta. Vuelca el frame a
 // s3_frame.txt. Se compara contra tb_sprite3r (VRAM perfecta, s3r_frame.txt):
 // diffs = glitches inducidos por el shim (thrash de la cache de sprites).
-//
-// ⚠️ ESTADO (24/07 madrugada): ARNES OK (compila y corre) pero el setup
-// mode3 de sprite3_setup.svh renderiza 0 sprites (sonda: sp_fetch=0, el core
-// no activa el pipeline de sprites). Registros calcados de sp3test.asm de
-// HRA (R#8=08, R#20=19, SAT@0x7600, SPT@0x8000). PENDIENTE finalizar la
-// activacion: bisecar contra el setup de sprites ESTANDAR de tb_screen5f
-// (que SI renderiza en este mismo arnes) para aislar si es un detalle de
-// mode3 o de la carga de la SAT via banking (R#14). Es tarea acotada; el
-// analisis (cache_model2.py) ya prueba que el fix NO es hash-fold sino
-// asociatividad/buffer dedicado — ver [[msx-msximus-devcon]].
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -63,7 +53,8 @@ vdp u_vdp (
 
 wire        bk_req, bk_we;
 wire [21:0] bk_addr;
-wire [7:0]  bk_wdata;
+wire [31:0] bk_wdata;      // _148 FIX B: escritura de PALABRA
+wire [3:0]  bk_wmask;      // _148 FIX B: 1 = escribir ese byte
 logic [15:0] bk_rword = 0;
 logic        bk_done_t = 0;
 wire [7:0]  shim_diag;
@@ -81,6 +72,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .vram_rtag(vram_rtag),
     .vram_stall(vram_stall),
     .bk_req(bk_req), .bk_we(bk_we), .bk_addr(bk_addr), .bk_wdata(bk_wdata),
+    .bk_wmask(bk_wmask),
     .bk_rword(bk_rword), .bk_done_t(bk_done_t),
     .bk2_req(bk2_req), .bk2_addr(bk2_addr),
     .bk2_rword(bk2_rword), .bk2_done_t(bk2_done_t),
@@ -91,19 +83,27 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
 logic [7:0] sdram [0:4194303];
 logic        m_pend = 0, m_we;
 logic [21:0] m_addr;
-logic [7:0]  m_dat;
+logic [31:0] m_dat;
+logic [3:0]  m_msk;
 integer      m_cnt, m_lat;
 integer vi;
 initial for (vi = 0; vi < 4194304; vi = vi + 1) sdram[vi] = 8'h00;
 always @(posedge clk) begin
     if (bk_req && !m_pend) begin
         m_pend <= 1; m_we <= bk_we; m_addr <= bk_addr; m_dat <= bk_wdata;
+        m_msk <= bk_wmask;
         m_cnt <= 0; m_lat <= 26 + ({$random} % 18);
     end
     else if (m_pend) begin
         m_cnt <= m_cnt + 1;
         if (m_cnt == m_lat) begin
-            if (m_we) sdram[m_addr] <= m_dat;
+            // _148 FIX B: escritura de PALABRA con mascara de bytes
+            if (m_we) begin
+                if (m_msk[0]) sdram[{m_addr[21:2],2'b00}] <= m_dat[ 7: 0];
+                if (m_msk[1]) sdram[{m_addr[21:2],2'b01}] <= m_dat[15: 8];
+                if (m_msk[2]) sdram[{m_addr[21:2],2'b10}] <= m_dat[23:16];
+                if (m_msk[3]) sdram[{m_addr[21:2],2'b11}] <= m_dat[31:24];
+            end
             else begin
                 bk_rword[7:0]  <= sdram[{m_addr[21:1],1'b0}];
                 bk_rword[15:8] <= sdram[{m_addr[21:1],1'b1}];
@@ -187,12 +187,118 @@ always @(posedge clk) begin
     end
 end
 
+// ============================================================================
+// _148 FIX 0 — INSTRUMENTACION DE SPRITE (antes el TB era CIEGO: sin esto la
+// unica salida era el volcado de pixeles y no habia forma de ver si el core
+// pedia sprites siquiera). Dos taps:
+//   * TOP: clasifica los vram_valid por consumidor (vram_tag[4:2]).
+//   * XMR al shim: cuenta fetch de SPRITE y su acierto de la sc-cache
+//     (mismo comparador que usa el RTL: scq_v && scq_tag == spr_addr1[15:12]).
+// Se imprime por frame en el flanco de vs. Criterio del FIX A: miss/sp < 0.1%.
+// ============================================================================
+integer f_bg=0, f_sp=0, f_cpu=0, f_cmd=0, f_wr=0;
+integer x_sp=0, x_chit=0, x_miss=0;
+integer npix=0, nnz=0;
+wire        x_is_sp  = u_shim.spr_p1 && (u_shim.spr_tag1[4:2] == 3'd2);
+wire        x_sp_hit = x_is_sp && u_shim.scq_v &&
+                       (u_shim.scq_tag == u_shim.spr_addr1[15:12]);
+// _150: el tap de arriba mide SOLO la sc-cache (etapa 1). Con el VICTIM BUFFER
+// el miss REAL (el que va al backend) se decide en la etapa 2, asi que hace
+// falta un segundo par de taps o la cifra de miss "no se mueve" aunque el
+// rescate funcione. x_vbh = rescates del VB; x_real = miss que SI van al
+// backend. Ambos son de SOLO LECTURA sobre el DUT.
+integer x_vbh=0, x_real=0;
+wire        x_vb_hit = u_shim.vb_p2 &&  u_shim.vb_hit2 && (u_shim.vb_tag2[4:2] == 3'd2);
+wire        x_vb_mis = u_shim.vb_p2 && !u_shim.vb_hit2 && (u_shim.vb_tag2[4:2] == 3'd2);
+// CLASIFICACION por region de VRAM del setup de sprite3: bg = palabras
+// 0x0000-0x1FFF (SCREEN5 pagina 0), SPT = 0x2000-0x3FFF (0x8000 en bytes),
+// SAT = 0x4000+ (0x10000 en bytes). Sirve para ver QUIEN llena la sc-cache y
+// QUIEN falla, en vez de suponerlo.
+integer x_f_bg=0, x_f_spt=0, x_f_sat=0, x_f_otro=0;
+integer x_m_spt=0, x_m_sat=0;
+always @(posedge clk) begin
+    if (x_vb_hit) x_vbh  <= x_vbh  + 1;
+    if (x_vb_mis) x_real <= x_real + 1;
+    if (u_shim.fill_now) begin
+        if      (u_shim.fill_addr < 16'h2000) x_f_bg   <= x_f_bg + 1;
+        else if (u_shim.fill_addr < 16'h4000) x_f_spt  <= x_f_spt + 1;
+        else if (u_shim.fill_addr < 16'h4020) x_f_sat  <= x_f_sat + 1;
+        else                                  x_f_otro <= x_f_otro + 1;
+    end
+    if (x_vb_mis) begin
+        if (u_shim.vb_addr2 < 16'h4000) x_m_spt <= x_m_spt + 1;
+        else                            x_m_sat <= x_m_sat + 1;
+    end
+    if (vram_valid) begin
+        if (vram_write) f_wr <= f_wr + 1;
+        else case (vram_tag[4:2])
+            3'd1: f_bg  <= f_bg + 1;
+            3'd2: f_sp  <= f_sp + 1;
+            3'd3: f_cpu <= f_cpu + 1;
+            3'd4: f_cmd <= f_cmd + 1;
+        endcase
+    end
+    if (x_is_sp) begin
+        x_sp <= x_sp + 1;
+        if (x_sp_hit) x_chit <= x_chit + 1; else x_miss <= x_miss + 1;
+    end
+    if (display_en) begin
+        npix <= npix + 1;
+        if ({display_r, display_g, display_b} != 24'd0) nnz <= nnz + 1;
+    end
+    if (display_vs && !vs_d) begin
+        $display("SPDIAG vs=%0d | TOP bg=%0d sp=%0d cpu=%0d cmd=%0d wr=%0d | XMR sp=%0d chit=%0d miss=%0d (%0d.%02d%%) | pix=%0d nonzero=%0d",
+                 vs_count, f_bg, f_sp, f_cpu, f_cmd, f_wr, x_sp, x_chit, x_miss,
+                 (x_sp>0)? (x_miss*100)/x_sp : 0,
+                 (x_sp>0)? ((x_miss*10000)/x_sp) % 100 : 0,
+                 npix, nnz);
+        // _148 FIX C: los CONTADORES DEL RTL que salen por COM11, para
+        // comprobar que dicen lo mismo que el tap del TB (deltas por frame) y
+        // que el empaquetado de dbg_miss es el documentado.
+        $display("SPTEL vs=%0d | c_spfet=%0d (+%0d) c_spmiss=%0d (+%0d) c_miss=%0d | dbg_miss=%08x -> sp=%0d bg=%0d",
+                 vs_count, u_shim.c_spfet, u_shim.c_spfet - t_spfet,
+                 u_shim.c_spmiss, u_shim.c_spmiss - t_spmiss, u_shim.c_miss,
+                 u_shim.dbg_miss, u_shim.dbg_miss[31:16], u_shim.dbg_miss[15:0]);
+        // _150 VICTIM BUFFER: rescates y miss REAL (el que llega al backend).
+        $display("SPVB  vs=%0d | sp=%0d | scmiss=%0d (%0d.%02d%%) vbhit=%0d REAL=%0d (%0d.%02d%%) | c_vbhit=%0d",
+                 vs_count, x_sp, x_miss,
+                 (x_sp>0)? (x_miss*100)/x_sp : 0,
+                 (x_sp>0)? ((x_miss*10000)/x_sp) % 100 : 0,
+                 x_vbh, x_real,
+                 (x_sp>0)? (x_real*100)/x_sp : 0,
+                 (x_sp>0)? ((x_real*10000)/x_sp) % 100 : 0,
+                 u_shim.c_vbhit);
+        $display("SPCLS vs=%0d | FILLS bg=%0d spt=%0d sat=%0d otro=%0d | MISS_REAL spt=%0d sat=%0d",
+                 vs_count, x_f_bg, x_f_spt, x_f_sat, x_f_otro, x_m_spt, x_m_sat);
+        x_f_bg<=0; x_f_spt<=0; x_f_sat<=0; x_f_otro<=0; x_m_spt<=0; x_m_sat<=0;
+        t_spfet  <= u_shim.c_spfet;
+        t_spmiss <= u_shim.c_spmiss;
+        f_bg<=0; f_sp<=0; f_cpu<=0; f_cmd<=0; f_wr<=0;
+        x_sp<=0; x_chit<=0; x_miss<=0; npix<=0; nnz<=0;
+        x_vbh<=0; x_real<=0;
+    end
+end
+reg [31:0] t_spfet = 0, t_spmiss = 0;
+
+// ---- LAYOUT REAL DE LA DEMO ru66 (-DRU66): datos por poke en t=0 ----
+`ifdef RU66
+task vram_poke(input [17:0] a, input [7:0] d);
+begin sdram[22'h280000 + a] = d; end
+endtask
+`include "ru66_preload.svh"
+initial ru66_preload();
+`endif
+
 integer yi_s, yj_s;
 initial begin
     repeat (50) @(posedge clk);
     reset_n = 1;
     wait (vs_count >= 1);
+`ifdef RU66
+    `include "sprite3_ru66_setup.svh"
+`else
     `include "sprite3_setup.svh"
+`endif
     $display("SETUP mode3 cargado en vs=%0d", vs_count);
     wait (dump_state == 2);
     #1000;

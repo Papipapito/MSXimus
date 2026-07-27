@@ -138,25 +138,36 @@ always @(posedge clk) begin
     end
 end
 
-// sonda: cuenta fetches de sprite (tag=2) y pixeles no-negros
-integer sp_fetch = 0, nonblack = 0;
-always @(posedge clk) begin
-    if (vram_valid && !vram_write && vram_tag[4:2] == 3'd2) sp_fetch <= sp_fetch + 1;
-    if (dump_state == 1 && display_en && {display_r,display_g,display_b} != 24'd0)
-        nonblack <= nonblack + 1;
+// ---- LAYOUT REAL DE LA DEMO ru66 (-DRU66): datos por poke en t=0 ----
+`ifdef RU66
+task vram_poke(input [17:0] a, input [7:0] d);
+begin
+    case (a[1:0])
+    2'd0: vram_mem[a[17:2]][ 7: 0] = d;
+    2'd1: vram_mem[a[17:2]][15: 8] = d;
+    2'd2: vram_mem[a[17:2]][23:16] = d;
+    2'd3: vram_mem[a[17:2]][31:24] = d;
+    endcase
 end
+endtask
+`include "ru66_preload.svh"
+initial ru66_preload();
+`endif
 
 integer yi_s, yj_s;
 initial begin
     repeat (50) @(posedge clk);
     reset_n = 1;
     wait (vs_count >= 1);
+`ifdef RU66
+    `include "sprite3_ru66_setup.svh"
+`else
     `include "sprite3_setup.svh"
-    $display("SETUP mode3 cargado en vs=%0d (sp_fetch hasta ahora=%0d)", vs_count, sp_fetch);
+`endif
+    $display("SETUP mode3 cargado en vs=%0d", vs_count);
     wait (dump_state == 2);
     #1000;
-    $display("*** SPRITE3 REFERENCIA: COMPLETO (vs=%0d) sp_fetch=%0d nonblack=%0d ***",
-             vs_count, sp_fetch, nonblack);
+    $display("*** SPRITE3 REFERENCIA: COMPLETO (vs=%0d) ***", vs_count);
     $finish;
 end
 

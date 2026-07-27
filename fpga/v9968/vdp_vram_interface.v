@@ -318,11 +318,21 @@ module vdp_vram_interface (
 		end
 		else if( vram_rdata_en ) begin
 			//	MSXimus: enruta por el TAG ecoado por el shim
+			//	FIX skip1 (+1 de VRAMSOK2): los strobes de CPU/COMANDO se
+			//	RE-EVALUAN cada ciclo con respuesta — antes solo se limpiaban
+			//	en el else (vram_rdata_en=0), asi que una respuesta CPU
+			//	(late_v del shim) seguida EN EL CICLO SIGUIENTE de una de bg
+			//	(pipe[6]) dejaba ff_cpu_vram_rdata_en ALTO 2 CICLOS: el core
+			//	veia dos rdata_en => doble autoincremento del puntero y
+			//	re-publicacion del dato al bus (pf_inflight ya bajado) que
+			//	machacaba cdi_r del glue => el Z80 se lleva el byte de dir+1.
+			ff_cpu_vram_rdata_en		<= (vram_rtag[4:2] == c_cpu);
+			ff_command_vram_rdata_en	<= (vram_rtag[4:2] == c_command);
 			case( vram_rtag[4:2] )
 			c_bg:		begin ff_screen_mode_vram_rdata		<= vram_rdata; end
 			c_sprite:	begin ff_sprite_vram_rdata			<= vram_rdata;	ff_sprite_vram_rdata8 <= w_rdata8;	end
-			c_cpu:		begin ff_cpu_vram_rdata				<= w_rdata8;	ff_cpu_vram_rdata_en <= 1'b1;		end
-			c_command:	begin ff_command_vram_rdata			<= vram_rdata;	ff_command_vram_rdata_en <= 1'b1;	end
+			c_cpu:		begin ff_cpu_vram_rdata				<= w_rdata8;	end
+			c_command:	begin ff_command_vram_rdata			<= vram_rdata;	end
 			endcase
 		end
 		else begin

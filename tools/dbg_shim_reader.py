@@ -41,15 +41,20 @@ while True:
     if park is not None:
         # _124: palabra 5 = {pisadas_park[15:0], drenajes_park[15:0]}
         fan += f"  pkov={park >> 16} pkok={park & 0xFFFF}"
+    # _148 FIX C: la palabra 1 es {miss de SPRITE[31:16], miss de FONDO[15:0]}
+    # (antes: solo fondo, a 32 bits). Los sprites eran INVISIBLES en placa.
+    bgm = miss & 0xFFFF
+    spm = (miss >> 16) & 0xFFFF
     if prev is not None:
         dt = now - prev_t
-        dm = (miss - prev[0]) & 0xFFFFFFFF
+        dm = (bgm - (prev[0] & 0xFFFF)) & 0xFFFF
+        ds = (spm - ((prev[0] >> 16) & 0xFFFF)) & 0xFFFF
         da = (bka - prev[1]) & 0xFFFFFFFF
         db = (bkb - prev[2]) & 0xFFFFFFFF
-        print(f"miss={miss:10d} (+{dm/dt:9.0f}/s)  "
+        print(f"bgmiss={bgm:6d} (+{dm/dt:8.0f}/s)  spmiss={spm:6d} (+{ds/dt:8.0f}/s)  "
               f"bkA={bka:10d} (+{da/dt:9.0f}/s)  "
               f"bkB={bkb:10d} (+{db/dt:9.0f}/s){fan}")
     else:
-        print(f"miss={miss} bkA={bka} bkB={bkb}{fan} (primera muestra)")
+        print(f"bgmiss={bgm} spmiss={spm} bkA={bka} bkB={bkb}{fan} (primera muestra)")
     prev = (miss, bka, bkb)
     prev_t = now

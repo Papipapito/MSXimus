@@ -122,6 +122,13 @@ module vdp_command_cache (
 	assign w_cache3_hit		= ff_cache3_data_en && (ff_cache3_address == cache_vram_address[17:2]);
 	assign cache_flush_end	= (ff_flush_state == 3'd1) ? ~ff_vram_valid: 1'b0;
 
+	//	FIX ABORTO: hay palabras de ESCRITURA aun no emitidas a VRAM
+	wire w_dirty_any =
+		(ff_cache0_data_en && ff_cache0_data_mask != 4'b1111) ||
+		(ff_cache1_data_en && ff_cache1_data_mask != 4'b1111) ||
+		(ff_cache2_data_en && ff_cache2_data_mask != 4'b1111) ||
+		(ff_cache3_data_en && ff_cache3_data_mask != 4'b1111);
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_cache0_address		<= 16'd0;
@@ -156,17 +163,31 @@ module vdp_command_cache (
 			ff_flush_state			<= 3'd0;
 		end
 		else if( start ) begin
-			//	Clear cache
-			ff_cache0_data_en		<= 1'b0;
-			ff_cache1_data_en		<= 1'b0;
-			ff_cache2_data_en		<= 1'b0;
-			ff_cache3_data_en		<= 1'b0;
+			//	FIX ABORTO: un comando nuevo (o STOP) con palabras SUCIAS en
+			//	la cache las FLUSHEA en vez de descartarlas. Antes: clear sin
+			//	flush => bytes ya consumidos por el motor no llegaban NUNCA a
+			//	la VRAM (bloque rancio persistente). El comando nuevo espera:
+			//	w_vram_ready=0 mientras ff_flush_state != 0 (ver abajo).
 			ff_update_target		<= 2'd0;
-			ff_vram_valid			<= 1'b0;
 			ff_prewrite_read		<= 1'b0;
-			ff_busy					<= 1'b0;
 			ff_after_read			<= 1'b0;
-			ff_flush_state			<= 3'd0;
+			if( w_dirty_any || ff_flush_state != 3'd0 ) begin
+				//	la ESCRITURA en vuelo se conserva; la lectura se cancela
+				ff_vram_valid		<= ff_vram_valid && ff_vram_write;
+				ff_busy				<= 1'b1;
+				if( ff_flush_state == 3'd0 )
+					ff_flush_state	<= 3'd5;
+			end
+			else begin
+				//	sin suciedad: el clear de siempre
+				ff_cache0_data_en	<= 1'b0;
+				ff_cache1_data_en	<= 1'b0;
+				ff_cache2_data_en	<= 1'b0;
+				ff_cache3_data_en	<= 1'b0;
+				ff_vram_valid		<= 1'b0;
+				ff_busy				<= 1'b0;
+				ff_flush_state		<= 3'd0;
+			end
 		end
 		else if( cache_flush_start ) begin
 			//	キャッシュフラッシュの開始
@@ -728,7 +749,11 @@ module vdp_command_cache (
 	// --------------------------------------------------------------------
 	//	VRAM Access
 	// --------------------------------------------------------------------
-	assign w_vram_ready				= ~(ff_vram_valid | ff_busy);
+	//	FIX ABORTO: durante un flush ff_busy puede caer al aceptarse cada
+	//	palabra (linea ~181) — sin el termino ff_flush_state el comando nuevo
+	//	veria ready=1 a mitad de flush y su peticion se PERDERIA (el motor
+	//	baja valid al ver ready sin que la cache la haya procesado).
+	assign w_vram_ready				= ~(ff_vram_valid | ff_busy | (ff_flush_state != 3'd0));
 	assign cache_vram_ready			= w_vram_ready;
 	assign cache_vram_rdata			= ff_cache_vram_rdata;
 	assign cache_vram_rdata_en		= ff_cache_vram_rdata_en;

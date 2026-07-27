@@ -115,11 +115,24 @@ IO_LOC  "dbg_pmod0[4]" E18; IO_PORT "dbg_pmod0[4]" IO_TYPE=LVCMOS33 DRIVE=8;
 // <<<INCIERTO>>> ws2812_led: sin pin confirmado en el 60K. Candidato: una línea
 //   libre de PMOD1 (io[5]=D22) o header 2×20. Confirmar con schematic. NO inventar.
 
-// ---- WiFi ESP-01S UART (859372 bps fijos, firmware ducasp) ----
-// <<<INCIERTO>>> uart_rx / uart_tx del ESP-01S: el 60K no tiene conector ESP-01S
-//   dedicado; sacar 2 pines libres consecutivos por header/PMOD. Candidatos:
-//   PMOD1 io[4]=E22 / io[5]=D22, o uart_ext_rx=B22 / uart_ext_tx=C22. Decidir
-//   dónde se enchufa físicamente el ESP-01S. NO inventar par de pines.
+// ---- WiFi ESP32-C6 externo (Waveshare C6-LCD-1.3, fw ESP32-UNAPI 859372) ----
+// _153: RESUELTO el <<INCIERTO>> historico con el ESQUEMATICO OFICIAL de la
+// Console (Tang_Mega_60K_Console_32001C, hoja SDRAM): el 2x20 LIBRE es J10
+// ("SDRAM1 CONN. Close to PMOD connector"; el modulo SDRAM del core va en el
+// otro). Peticion de Albert v2 (foto placa): FILA UNICA para cable plano de
+// una hilera -> COLUMNA PAR, 3 pines consecutivos:
+//   J10 pin 12 = GND   pin 14 = W21 (TX)   pin 16 = N17 (RX)
+// El +5V (pin 11) esta en la columna impar -> el C6 se alimenta por su USB-C.
+// Identificacion sin serigrafia: el UNICO pin del conector con continuidad a
+// masa es el 12; sus dos vecinos de columna hacia el LADO LARGO son 14 y 16.
+// (V17/pin10 descartado: CSI_B, pin de configuracion dual.)
+// ⚠ Si algun dia se pincha un 2o modulo SDRAM en J10, mudar el ESP.
+// esp_rx_i con PULL_UP: idle UART correcto aunque no haya modulo pinchado.
+IO_LOC  "esp_rx_i" N17; IO_PORT "esp_rx_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;   // J10 p16 (SDRAM1_D10) <- IO16 (TX) del C6
+IO_LOC  "esp_tx_o" W21; IO_PORT "esp_tx_o" IO_TYPE=LVCMOS33 DRIVE=8;        // J10 p14 (SDRAM1_D12) -> IO17 (RX) del C6
+// _156: indicador de turbo (esquema del nano: drive suave; el C6 lo lee en
+// GPIO3 con pulldown => sin cable = "Normal", sin destellos en frio)
+IO_LOC  "esp_turbo_o" N13; IO_PORT "esp_turbo_o" IO_TYPE=LVCMOS33 DRIVE=4;   // J10 p18 (SDRAM1_D8) -> GPIO3 del C6
 
 // ---- Memoria del CORE: SDR SDRAM (módulo Tang SDRAM, W9825G6KH, 16b/32MB) ----
 //  Decisión (docs/MEMORY_OPTIONS.md): el core va en SDR SDRAM, reusando memory.v
@@ -180,12 +193,12 @@ IO_LOC "usb1_dn" G13; IO_PORT "usb1_dn" IO_TYPE=LVCMOS33;
 IO_LOC "usb2_dp" M15; IO_PORT "usb2_dp" IO_TYPE=LVCMOS33;
 IO_LOC "usb2_dn" M16; IO_PORT "usb2_dn" IO_TYPE=LVCMOS33;
 
-// ===== v3.5: la red PRIMARY estaba SATURADA (8/8) — clk_audio (44.1 kHz del
-// puente, ~20 FFs, periodo 22700 ns) NO necesita carril global. Degradarlo
-// libera un PRIMARY y ESTABILIZA la asignacion de relojes entre builds (la
-// reasignacion aleatoria con la red llena mato el bitstream _45: build con
-// timing limpio y logs identicos pero muerto en placa).
-CLOCK_LOC "vdp4/u_msx2hdmi/clk_audio" LOCAL_CLOCK;
+// ===== v3.5: la red PRIMARY estaba SATURADA (8/8) — se degrado clk_audio a
+// LOCAL_CLOCK para liberar un carril. _127I: ese LOCAL_CLOCK resulto ser LA
+// CAUSA del bug #14 (skew del reloj de fabric => CTS corrupto => cortes de
+// audio en el monitor). El reloj de fabric YA NO EXISTE: el audio corre con
+// clock-enable sincrono a clk_pixel (ver msx2hdmi*.sv). Constraint retirada;
+// el carril PRIMARY sigue libre porque ya no hay reloj de audio que asignar.
 
 // ============ P1: endurecimiento anti-loteria de strobes (2026-07-11) ============
 // Los samplers negedge de RD/WR del T80 y su primer LUT se FIJAN en el centroide
@@ -335,6 +348,18 @@ IO_LOC "ddr_dqs[1]" V9,V8;
 IO_PORT "ddr_dqs[1]" IO_TYPE=SSTL15D_I PULL_MODE=NONE DRIVE=8 SINGLE_RESISTOR=OFF BANK_VCCIO=1.5;
 IO_LOC "ddr_dqs[0]" Y3,AA3;
 IO_PORT "ddr_dqs[0]" IO_TYPE=SSTL15D_I PULL_MODE=NONE DRIVE=8 SINGLE_RESISTOR=OFF BANK_VCCIO=1.5;
+
+// _145 FIJAR EL PHY DDR3 (vía B — lo que nos FALTABA vs nand2mario): sin
+// estas dos INS_LOC el placer de Gowin coloca el DLL y el PLL de la DDR3
+// donde puede, y en nuestro diseño congestionado los empuja a un mal sitio
+// => ojo de calibracion pequeno => arranque loteria + caidas termicas. Las
+// copiamos VERBATIM de nand2mario/console60k.cst, adaptando el prefijo de
+// jerarquia fb/ -> u_vddr3/ (nuestra instancia del v9968_ddr3_backend en
+// top.v; dentro: u_ddr3 = DDR3_Memory_Interface_Top, pll_ddr3_inst = pll).
+// DDRDLLM_BL = macro fisico del DLL DDR3 (bottom-left, junto al banco DDR3);
+// PLL_L[0] = PLL izquierdo. Deterministas => deberian matar la loteria.
+INS_LOC "u_vddr3/u_ddr3/gw3_top/u_ddr_phy_top/u_dll" DDRDLLM_BL;
+INS_LOC "u_vddr3/pll_ddr3_inst/PLLA_inst" PLL_L[0];
 
 // Ventilador (Console 60K): FAN_EN en AB12 (Bank 9 a 1.5V), 1 = 5V al
 // conector SH1.0. PULL_MODE=DOWN = apagado durante la configuracion.

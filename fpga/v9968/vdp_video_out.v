@@ -1,6 +1,6 @@
 //
 //	vdp_video_out.v
-//	 DVI 800x480 horizontal magnifier.
+//	 LCD 800x480 horizontal magnifier.
 //
 //	Copyright (C) 2025 Takayuki Hara.
 //	All rights reserved.
@@ -57,7 +57,59 @@
 //
 // -----------------------------------------------------------------------------
 
-module vdp_video_out (
+module vdp_video_out #(
+	// MSXimus _143 CENTRADO: base de la muestra fuente donde arranca el
+	// puntero de lectura del magnificador. El upscan escribe el contenido
+	// (256 px MSX x2 = 512 muestras) en las direcciones content_start..+511,
+	// donde content_start = c_left_pos - 2*(reg_display_adjust ^ 8) = 32 -
+	// 2*(adj^8). Al adjust NEUTRO (reset del registro = adj=0) content_start
+	// = 32-16 = 16. Arrancar la lectura en 0 leia borde + recortaba px por la
+	// derecha. Arrancar en 16 lee las 512 muestras de CONTENIDO puro al adjust
+	// neutro => 256 px completos, centrados, sin recorte; SET ADJUST desplaza
+	// +-1px/paso (rango -7..+8). Solo cambia la DIRECCION base de lectura: no
+	// toca h_en/hs/vs ni el span (sincronismo HDMI intacto).
+	// Verificado en tb_center (adj=0) => histograma {3:256}, 0 borde.
+	parameter [9:0]	c_read_start = 10'd16,
+	// MSXimus _143 PRIME: adelanta el arranque de la ventana ACTIVA (arranque
+	// del puntero de lectura + reset del Bresenham) respecto a h_en_start (748)
+	// para CEBAR la tuberia del magnificador (lat ~8 columnas) antes de que se
+	// abra la ventana visible. Solo mueve el INICIO de la lectura; el final
+	// (active_area_end) queda fijo en 2283 y hs/vs/display_en no se tocan.
+	// 747-16 = 731 (ADV16, 8 columnas de prime) era el valor _143; _147 lo pasa
+	// a 729 (ADV18, 9 columnas de prime) — ver abajo.
+	//
+	// MSXimus _147 FIX DE LA REGRESION DE TEXT2/SCREEN6/7 (menu "con otra
+	// fuente" tras la _144).  Cadena de escalado: el magnificador reparte 512
+	// muestras en 768 columnas nativas (2/3 => patron 2,1,2,1) y el escalador
+	// HDMI (msx2hdmi_v9968) reparte esas 768 columnas en los 1280 px de la
+	// pantalla (xx = floor(3*cx/5) => patron 2,2,1).  En los modos de DOS
+	// muestras por pixel MSX (todos los de 256 px y TEXT1) el pixel ocupa
+	// SIEMPRE 3 columnas nativas y 3 columnas nativas consecutivas suman
+	// SIEMPRE 5 px de pantalla, sea cual sea su alineamiento => inmunes.
+	// En los modos de UNA muestra por pixel (TEXT2 = SCREEN0 W80, SCREEN6,
+	// SCREEN7) el pixel ocupa 1 o 2 columnas nativas y el reparto final
+	// depende del residuo mod 3 de la columna nativa en la que empieza:
+	//     residuo 0 -> 4,1 px  (CATASTROFICO: pixeles alternos x4)
+	//     residuo 1 -> 3,2 px  (optimo: media 2,5)
+	//     residuo 2 -> 3,2 px  (optimo)
+	// Ese residuo lo fija que columna del core cae en el indice 0 del ring, y
+	// eso depende de `ce86` (top.v), un TOGGLE LIBRE SIN RESET que muestrea el
+	// core (1 pixel cada 2 ciclos): su fase respecto a h_count es arbitraria
+	// (cambia con el arranque/PLL/placement) => con c_active_start=731 una de
+	// las dos fases posibles cae en residuo 0 = la fuente rota.  Con 729 (una
+	// columna mas de prime) las dos fases posibles caen en residuos 1 y 2 =>
+	// TEXT2/SCREEN6/7 salen 3,2 SIEMPRE, sin depender de la fase del ce.
+	// Coste: la ventana visible se desplaza UNA columna nativa (1,67 px de
+	// pantalla, sub-pixel) y los modos de 256 px siguen dando {5:*} exactos.
+	// Verificado en tools/v9968_sim/tb_geomfast.sv (barrido de
+	// c_active_start x c_start_numerator x fase de captura) y en
+	// tools/v9968_sim/tb_textgeom.sv (pila completa, ambas fases).
+	parameter [11:0] c_active_start = 12'd729,
+	// Fase inicial del acumulador Bresenham. NO es el lever del fix (con 64 se
+	// invierte que fase del ce es la mala, no se arregla); se deja parametrizado
+	// porque el barrido de _147 lo uso como segunda dimension. Dejar en 0.
+	parameter [7:0]	c_start_numerator = 8'd0
+)(
 	input				clk,						//	42.95454MHz
 	input				reset_n,
 	input		[11:0]	h_count,
@@ -84,11 +136,11 @@ module vdp_video_out (
 );
 	localparam		c_v_count_max_60	= 10'd523;
 	localparam		c_v_count_max_50	= 10'd625;
-	localparam		active_area_start	= 12'd747;
-	localparam		active_area_end		= active_area_start + 12'd1600;
+	localparam		active_area_start	= c_active_start;
+	localparam		active_area_end		= 12'd747 + 12'd1536;	//	fijo (2283)
 	localparam		clocks_per_line		= 12'd2736;
 	localparam		h_en_start			= 12'd748;
-	localparam		h_en_end			= h_en_start + 12'd1600;
+	localparam		h_en_end			= h_en_start + 12'd1536;
 	localparam		hs_start			= clocks_per_line - 1;
 	localparam		hs_end				= 12'd567;
 	localparam		v_en_start			= 10'd14;
@@ -97,7 +149,7 @@ module vdp_video_out (
 	localparam		vs_end_60hz			= c_v_count_max_60 - 10'd6;
 	localparam		vs_start_50hz		= c_v_count_max_50 - 10'd13;
 	localparam		vs_end_50hz			= c_v_count_max_50 - 10'd6;
-	localparam		c_numerator			= 576 / 4;
+	localparam		c_numerator			= 512 / 4;
 
 	wire			w_enable;
 	wire	[9:0]	w_x_position_w;
@@ -235,10 +287,10 @@ module vdp_video_out (
 	// --------------------------------------------------------------------
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
-			ff_x_position_r <= 10'd0;
+			ff_x_position_r <= c_read_start;
 		end
 		else if( h_count == active_area_start ) begin
-			ff_x_position_r <= 10'd0;
+			ff_x_position_r <= c_read_start;
 		end
 		else if( !w_enable ) begin
 			//	hold
@@ -258,10 +310,10 @@ module vdp_video_out (
 
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
-			ff_numerator <= 8'b0;
+			ff_numerator <= c_start_numerator;
 		end
 		else if( h_count == active_area_start ) begin
-			ff_numerator <= 8'b0;
+			ff_numerator <= c_start_numerator;
 		end
 		else if( !w_enable ) begin
 			//	hold
@@ -311,7 +363,15 @@ module vdp_video_out (
 			ff_coeff	<= 8'd0;
 		end
 		else if( w_enable ) begin
-			ff_coeff	<= w_normalized_numerator[14:7];					//	0 ... 63
+			// MSXimus _142 NEAREST-NEIGHBOR (fuentes nitidas, como el MSXnano
+			// V9958): el magnificador "LCD" de HRA mezclaba (bilineal) los
+			// pixeles MSX al estirarlos a 800 -> bordes difuminados, la "H"
+			// con un palo mas fino. Redondeando el coeficiente fraccional al
+			// pixel MAS CERCANO (0 = tap1 izq, 63 = tap0 dcha) se elige un
+			// solo pixel sin mezcla => bordes nitidos. Original preservado
+			// en el comentario para revertir facil.
+			//	ff_coeff <= w_normalized_numerator[14:7];					//	0 ... 63 (bilineal HRA)
+			ff_coeff	<= (w_normalized_numerator[14:7] >= 8'd32) ? 8'd63 : 8'd0;
 		end
 	end
 

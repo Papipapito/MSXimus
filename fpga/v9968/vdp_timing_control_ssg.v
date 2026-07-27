@@ -63,7 +63,7 @@ module vdp_timing_control_ssg (
 	output		[ 9:0]	v_count,
 
 	output		[13:0]	screen_pos_x,			//	signed   (Coordinates not affected by scroll register)
-	output		[13:0]	screen_pos_x_clone,		//	signed   (Coordinates not affected by scroll register)
+	output		[13:0]	screen_pos_x_clone,		//	MSXimus: sin scroll (para timing_control)
 	output		[13:0]	screen_pos_x_sprite,	//	MSXimus _120: con la resta del scroll YA hecha (para u_sprite)
 	output		[ 9:0]	screen_pos_y,			//	signed   (Coordinates not affected by scroll register)
 	output		[ 8:0]	pixel_pos_x,			//	unsigned (Coordinates affected by scroll register)
@@ -124,7 +124,7 @@ module vdp_timing_control_ssg (
 	wire		[ 7:0]	w_pixel_pos_y;
 	reg			[13:0]	ff_screen_pos_x;			/* synthesis syn_preserve = 1 */
 	reg			[13:0]	ff_screen_pos_x_clone;		/* synthesis syn_preserve = 1 */
-	reg			[13:0]	ff_screen_pos_x_sprite;		/* synthesis syn_preserve = 1 */
+	reg			[13:0]	ff_screen_pos_x_sprite;		/* synthesis syn_preserve = 1 syn_maxfan = 8 */	// _127B: familia reincidente (3/5 dados)
 	reg			[ 9:0]	ff_screen_pos_y;
 	reg			[ 8:0]	ff_pixel_pos_x;
 	reg			[ 7:0]	ff_pixel_pos_y;
@@ -146,7 +146,6 @@ module vdp_timing_control_ssg (
 	reg					ff_hsync;
 	reg					ff_vsync;
 	reg					ff_clear_line_interrupt;
-	reg					ff_intr_line;
 
 	assign w_half_line_shift	= ff_field & (reg_interlace_mode | reg_flat_interlace_mode);
 
@@ -236,7 +235,7 @@ module vdp_timing_control_ssg (
 				ff_v_count_clone	<= 10'd0;
 			end
 			else begin
-				ff_v_count			<= ff_v_count + 10'd1;	
+				ff_v_count			<= ff_v_count + 10'd1;
 				ff_v_count_clone	<= ff_v_count_clone + 10'd1;
 			end
 		end
@@ -282,6 +281,10 @@ module vdp_timing_control_ssg (
 
 	assign w_v_count_end_line	= reg_212lines_mode ? 10'd211: 10'd191;
 
+	//	upstream eebc87f ("Bugfix VR bit on S#2"): el VR subia al FINAL de la
+	//	linea 211/191 (~56 us DESPUES del intr_frame) y la MSX Diagnostics
+	//	Cartridge detectaba un TMS9918. Ahora sube en el MISMO evento
+	//	w_intr_frame_timing; el clear pasa de 3FE a 3FF (fin de la linea -1).
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_vsync <= 1'b1;
@@ -363,6 +366,11 @@ module vdp_timing_control_ssg (
 		end
 	end
 
+	//	upstream 4148742: tick del blink cada 5 frames (no 10). Interactua con
+	//	el off-by-one de la recarga de ff_blink_counter (la recarga se come un
+	//	tic): cada fase dura (N+1) tics. Con 4'd4, R#13=0x11 da fases de 10
+	//	frames EXACTOS (= datasheet 166,9 ms/unidad y openMSX); con el 4'd9
+	//	anterior daban 20 (mitad de velocidad). Medido en tb_ssgblink.
 	assign w_10frame			= (ff_blink_base == 4'd4);
 	assign w_next_blink_counter	= ff_interleaving_page ? reg_blink_period[7:4]: reg_blink_period[3:0];
 
@@ -423,9 +431,8 @@ module vdp_timing_control_ssg (
 		//	Era el peor camino de TODA la matriz de rutados con CLS al 84%.
 		ff_screen_pos_x_sprite	<= { w_screen_pos_x[13:4] - { 7'd0, reg_horizontal_offset_l }, w_screen_pos_x[3:0] };
 		ff_screen_pos_y			<= w_screen_pos_y;
-		ff_pixel_pos_x			<= w_pixel_pos_x[8:0];
-		ff_pixel_pos_y			<= w_pixel_pos_y;
-		ff_intr_line			<= ( (w_intr_line_y == { 2'd0, reg_interrupt_line }) && ff_line_interrupt_mask ) ? w_intr_line_timing: 1'b0;
+		ff_pixel_pos_x	<= w_pixel_pos_x[8:0];
+		ff_pixel_pos_y	<= w_pixel_pos_y;
 	end
 
 	assign h_count				= ff_h_count;
@@ -436,7 +443,7 @@ module vdp_timing_control_ssg (
 	assign screen_pos_y			= ff_screen_pos_y;
 	assign pixel_pos_x			= ff_pixel_pos_x[8:0];
 	assign pixel_pos_y			= ff_pixel_pos_y;
-	assign intr_line			= ff_intr_line;
+	assign intr_line			= ( (w_intr_line_y == { 2'd0, reg_interrupt_line }) && ff_line_interrupt_mask ) ? w_intr_line_timing: 1'b0;
 	assign intr_frame			= w_intr_frame_timing;
 	assign screen_v_active		= ff_v_active;
 	assign dot_phase			= ff_half_count[0];

@@ -65,23 +65,32 @@ module vdp_video_ram_line_buffer (
 );
 	reg		[23:0]	ff_imem [0:1023];
 	reg		[23:0]	ff_q;
+	reg				ff_re_d;
 	reg		[23:0]	ff_q_out;
 
+	//	Parche MSXimus _139 (migracion Gowin 1.9.12): el original asignaba
+	//	ff_q <= 24'dx en la rama we y 0 en idle — esa mezcla hacia inferir
+	//	una BSRAM SP con WRITE_MODE=2'b10, que el PnR 1.9.12 rechaza con
+	//	PA2122 (la direccion es UNICA: no hay SDP posible). Patron NO_CHANGE
+	//	(write y read mutuamente excluyentes sobre el puerto; ff_q RETIENE
+	//	durante we) => WRITE_MODE=2'b00. Comportamiento externo IDENTICO:
+	//	las X del original eran don't care y ff_re_d fuerza 0 a la salida
+	//	en we/idle igual que antes; tuberia de 2 ciclos intacta.
 	always @( posedge clk ) begin
 		if( we ) begin
 			ff_imem[ address ]	<= d;
-			ff_q				<= 24'dx;
-		end
-		else if( re ) begin
-			ff_q				<= ff_imem[ address ];
 		end
 		else begin
-			ff_q				<= 24'd0;
+			ff_q				<= ff_imem[ address ];
 		end
 	end
 
 	always @( posedge clk ) begin
-		ff_q_out <= ff_q;
+		ff_re_d <= re && !we;
+	end
+
+	always @( posedge clk ) begin
+		ff_q_out <= ff_re_d ? ff_q : 24'd0;
 	end
 
 	assign q = ff_q_out;

@@ -227,10 +227,12 @@ module vdp_cpu_interface (
 	reg					ff_interrupt_line_nonR23_mode;
 	reg					ff_sprite_mode3;
 	reg					ff_ext_palette_mode;
+	reg					ff_ext_command_mode;
+	reg					ff_vram256k_mode;
 	reg					ff_sprite16_mode;
 	reg					ff_flat_interlace_mode;
 	reg					ff_force_highspeed;
-	reg					ff_v9958_mode;
+	reg					ff_fakeID;
 
 	reg					ff_2nd_access;
 	reg		[7:0]		ff_1st_byte;
@@ -246,6 +248,16 @@ module vdp_cpu_interface (
 	reg					ff_vram_address_inc;		//	アドレスインクリメント要求
 	reg					ff_vram_valid;
 	reg					ff_busy;
+
+	//	MSXimus _149: BUFFER DE PRE-LECTURA DE VRAM (comportamiento del V9938 real)
+	reg					ff_pf_req;					//	hay que lanzar una pre-lectura
+	reg					ff_pf_inflight;				//	la lectura en vuelo es una PRE-lectura
+	reg					ff_pf_valid;				//	el buffer tiene un byte listo
+	reg		[7:0]		ff_pf_data;
+	wire				w_set_vram_address;
+	wire				w_set_read_address;
+	wire				w_pf_invalidate;
+	wire				w_pf_hit;
 
 	reg					ff_line_interrupt = 1'b0;
 	reg					ff_frame_interrupt = 1'b0;
@@ -312,10 +324,27 @@ module vdp_cpu_interface (
 		end
 	end
 
-	assign bus_ready	= ff_bus_ready & ~ff_busy;
+	//	MSXimus _149: mientras una PRE-lectura esta EN VUELO el puerto de VRAM
+	//	esta ocupado — se retiene al maestro igual que con ff_busy (el maestro
+	//	reintenta solo: ff_bus_ready vuelve a 1 con bus_ioreq). Sin esto, un
+	//	acceso al puerto 0 durante la pre-lectura lanzaria un SEGUNDO
+	//	ff_vram_valid y las dos respuestas se confundirian.
+	assign bus_ready	= ff_bus_ready & ~ff_busy & ~ff_pf_inflight;
 
-	assign w_write		= ff_bus_valid &  ff_bus_write & ~ff_busy;
-	assign w_read		= ff_bus_valid & ~ff_bus_write & ~ff_busy;
+	assign w_write		= ff_bus_valid &  ff_bus_write & ~ff_busy & ~ff_pf_inflight;
+	assign w_read		= ff_bus_valid & ~ff_bus_write & ~ff_busy & ~ff_pf_inflight;
+
+	//	MSXimus _149: pulsos de 1 ciclo del ajuste de direccion de VRAM
+	//	(2o acceso al puerto 1 con bit7=0; bit6 = 0 lectura / 1 escritura)
+	assign w_set_vram_address	= w_write & ff_port1 & ff_2nd_access & ~ff_bus_wdata[7];
+	assign w_set_read_address	= w_set_vram_address & ~ff_bus_wdata[6];
+	//	el buffer deja de ser valido si se re-apunta la direccion para ESCRIBIR,
+	//	si se cambia el banco (R#14) o si la CPU ESCRIBE en VRAM (el contador
+	//	avanza y el byte guardado ya no corresponde a la direccion actual)
+	assign w_pf_invalidate		= w_set_vram_address |
+								  (ff_register_write & (ff_register_num == 6'd14)) |
+								  (w_write & ff_port0);
+	assign w_pf_hit				= w_read & ff_port0 & ff_pf_valid;
 
 	// --------------------------------------------------------------------
 	//	VRAM Read/Write access
@@ -396,44 +425,83 @@ module vdp_cpu_interface (
 			ff_vram_wdata		<= 8'd0;
 			ff_vram_address_inc	<= 1'b0;
 			ff_busy				<= 1'b0;
+			ff_pf_req			<= 1'b0;
+			ff_pf_inflight		<= 1'b0;
 		end
-		else if( vram_rdata_en ) begin
-			ff_vram_address_inc	<= 1'b1;
-		end
-		else if( ff_vram_valid ) begin
-			if( vram_ready ) begin
-				ff_vram_valid		<= 1'b0;
-				if( ff_vram_write ) begin
+		else begin
+			if( vram_rdata_en ) begin
+				ff_vram_address_inc	<= 1'b1;
+				ff_pf_inflight		<= 1'b0;
+			end
+			else if( ff_vram_valid ) begin
+				if( vram_ready ) begin
+					ff_vram_valid		<= 1'b0;
+					if( ff_vram_write ) begin
+						ff_busy			<= 1'b0;
+					end
+				end
+			end
+			else if( ff_vram_address_inc ) begin
+				ff_vram_address_inc	<= 1'b0;
+				if( ff_vram_write && !vram_access_mask ) begin
+					//	Write Access
+					ff_vram_valid	<= 1'b1;
+				end
+				else begin
+					//	Read access or vram_access_mask
 					ff_busy			<= 1'b0;
 				end
 			end
-		end
-		else if( ff_vram_address_inc ) begin
-			ff_vram_address_inc	<= 1'b0;
-			if( ff_vram_write && !vram_access_mask ) begin
-				//	Write Access
-				ff_vram_valid	<= 1'b1;
+			else if( w_write && ff_port0 ) begin
+				//	VRAM write access
+				ff_vram_valid		<= 1'b0;
+				ff_vram_write		<= 1'b1;
+				ff_vram_wdata		<= ff_bus_wdata;
+				ff_vram_address_inc <= 1'b1;
+				ff_busy				<= 1'b1;
+				ff_pf_req			<= 1'b0;
 			end
-			else begin
-				//	Read access or vram_access_mask
-				ff_busy			<= 1'b0;
+			else if( w_read && ff_port0 ) begin
+				if( ff_pf_valid ) begin
+					//	MSXimus _149: ACIERTO del buffer de pre-lectura — se
+					//	responde en el MISMO ciclo (sin ff_busy, sin acceso a
+					//	VRAM) y se arma la pre-lectura del byte siguiente. La
+					//	direccion ya la adelanto la pre-lectura anterior.
+					ff_pf_req			<= 1'b1;
+				end
+				else begin
+					//	buffer vacio: lectura BLOQUEANTE como el upstream
+					ff_vram_valid		<= 1'b1;
+					ff_vram_write		<= 1'b0;
+					ff_vram_wdata		<= 8'd0;
+					ff_vram_address_inc <= 1'b0;
+					ff_busy				<= 1'b1;
+					ff_pf_req			<= 1'b1;	//	y encadena la siguiente
+				end
 			end
-		end
-		else if( w_write && ff_port0 ) begin
-			//	VRAM write access
-			ff_vram_valid		<= 1'b0;
-			ff_vram_write		<= 1'b1;
-			ff_vram_wdata		<= ff_bus_wdata;
-			ff_vram_address_inc <= 1'b1;
-			ff_busy				<= 1'b1;
-		end
-		else if( w_read && ff_port0 ) begin
-			//	VRAM read access
-			ff_vram_valid		<= 1'b1;
-			ff_vram_write		<= 1'b0;
-			ff_vram_wdata		<= 8'd0;
-			ff_vram_address_inc <= 1'b0;
-			ff_busy				<= 1'b1;
+			else if( ff_pf_req && !ff_busy && !ff_pf_valid && !w_set_vram_address ) begin
+				//	(!w_set_vram_address: si en ESTE ciclo se esta re-apuntando la
+				//	direccion, ff_vram_address todavia es la VIEJA — se espera un
+				//	ciclo para pre-leer la nueva)
+				//	MSXimus _149: lanzar la PRE-LECTURA. NO pone ff_busy: la CPU
+				//	no espera por ella; solo ff_pf_inflight retiene el puerto.
+				ff_vram_valid		<= 1'b1;
+				ff_vram_write		<= 1'b0;
+				ff_vram_wdata		<= 8'd0;
+				ff_vram_address_inc <= 1'b0;
+				ff_pf_inflight		<= 1'b1;
+				ff_pf_req			<= 1'b0;
+			end
+
+			//	el ajuste de direccion de LECTURA arma la pre-lectura, y el de
+			//	ESCRITURA / R#14 / una escritura en VRAM la cancela. Van al FINAL
+			//	para ganar a las ramas de arriba si coinciden en el mismo ciclo.
+			if( w_set_read_address ) begin
+				ff_pf_req			<= 1'b1;
+			end
+			else if( w_pf_invalidate ) begin
+				ff_pf_req			<= 1'b0;
+			end
 		end
 	end
 
@@ -448,16 +516,16 @@ module vdp_cpu_interface (
 			if( ff_vram_address_noinc ) begin
 				ff_vram_address_noinc	<= 1'b0;
 			end
-			//	_125 (MSXimus): VR=0 (R#8 bit3) NO bloquea el acarreo del
-			//	contador al banco — en silicio real y openMSX VR solo elige
-			//	el tipo de DRAM para el refresh. Con el gate, un stream de
-			//	escritura >16KB (soft_vdp_test2 de HRA escribe R#8=0x02)
-			//	envolvia en el banco 0: "media pantalla" en HW _124. El
-			//	wrap de 14 bits queda SOLO para los modos TMS9918.
+			//	MSXimus _125 (re-aplicado sobre th9958): VR=0 (R#8 bit3) NO
+			//	bloquea el acarreo del contador al banco — en silicio real y
+			//	openMSX VR solo elige el tipo de DRAM para el refresh. Con el
+			//	gate, un stream de escritura >16KB (soft_vdp_test2 escribe
+			//	R#8=0x02) envolvia en el banco 0: "media pantalla" en HW _124.
+			//	El wrap de 14 bits queda SOLO para los modos TMS9918.
 			else if( ff_screen_mode[4:3] == 2'b00 ) begin
 				ff_vram_address[13:0]	<= w_next_vram_address[13:0];
 			end
-			else if( !ff_v9958_mode ) begin
+			else if( ff_vram256k_mode ) begin
 				ff_vram_address			<= w_next_vram_address;
 			end
 			else begin
@@ -466,9 +534,9 @@ module vdp_cpu_interface (
 		end
 		else if( ff_register_write && ff_register_num == 6'd14 ) begin
 			//	R#14 = [N/A][N/A][N/A][N/A][A17][A16][A15][A14]
-			//	_125 (MSXimus): VR=0 tampoco fuerza aqui el banco a 0
+			//	MSXimus _125: VR=0 tampoco fuerza aqui el banco a 0
 			//	(misma justificacion que arriba).
-			if( !ff_v9958_mode ) begin
+			if( ff_vram256k_mode ) begin
 				ff_vram_address[17:14]	<= ff_1st_byte[3:0];
 			end
 			else begin
@@ -543,10 +611,12 @@ module vdp_cpu_interface (
 			ff_interrupt_line_nonR23_mode <= 1'b0;
 			ff_sprite_mode3 <= 1'b0;
 			ff_ext_palette_mode <= 1'b0;
+			ff_ext_command_mode <= 1'b0;
+			ff_vram256k_mode <= 1'b0;
 			ff_sprite16_mode <= 1'b0;
 			ff_command_end_interrupt_enable <= 1'b0;
 			ff_flat_interlace_mode <= 1'b0;
-			ff_v9958_mode <= 1'b1;
+			ff_fakeID <= 1'b1;
 		end
 		else if( ff_register_write ) begin
 			case( ff_register_num )
@@ -596,11 +666,11 @@ module vdp_cpu_interface (
 				end
 			6'd9:	//	R#9 = [LN][N/A][N/A][N/A][IL][EO][NT][N/A]
 				begin
-					//	_125 (MSXimus v1): NTSC-only — el puente HDMI es
-					//	60Hz/525 fijo; con NT=1 el core cambiaba a 625
-					//	lineas y la imagen quedaba negra/descompuesta
-					//	(PAL TEST de HRA, HW _124). El bit se IGNORA:
-					//	software PAL se ve a 60Hz. PAL real = pendiente.
+					//	MSXimus _125 (v1): NTSC-only — el puente HDMI es
+					//	60Hz/525 fijo; con NT=1 el core cambiaba a 625 lineas
+					//	y la imagen quedaba negra/descompuesta (PAL TEST de
+					//	HRA, HW _124). El bit se IGNORA: software PAL se ve a
+					//	60Hz. PAL real = pendiente.
 					ff_50hz_mode <= 1'b0;
 					ff_interleaving_mode <= ff_1st_byte[2];
 					ff_interlace_mode <= ff_1st_byte[3];
@@ -649,13 +719,15 @@ module vdp_cpu_interface (
 					ff_interrupt_line_nonR23_mode <= ff_1st_byte[2];
 					ff_sprite_mode3 <= ff_1st_byte[3];
 					ff_ext_palette_mode <= ff_1st_byte[4];
-					ff_flat_interlace_mode <= ff_1st_byte[5];
-					ff_command_end_interrupt_enable <= ff_1st_byte[6];
+					ff_ext_command_mode <= ff_1st_byte[5];
+					ff_vram256k_mode <= ff_1st_byte[6];
 					ff_sprite16_mode <= ff_1st_byte[7];
 				end
 			8'd21:	//	R#21 = [CEIE][N/A][N/A][N/A][N/A][N/A][N/A][N/A]
 				begin
-					ff_v9958_mode <= ff_1st_byte[0];
+					ff_fakeID <= ff_1st_byte[0];
+					ff_flat_interlace_mode <= ff_1st_byte[6];
+					ff_command_end_interrupt_enable <= ff_1st_byte[7];
 				end
 			8'd23:	//	R#23 = [DO7][DO6][DO5][DO4][DO3][DO2][DO1][DO0]
 				begin
@@ -763,7 +835,7 @@ module vdp_cpu_interface (
 	always @( posedge clk ) begin
 		case( ff_status_register_pointer )
 		4'd0:		ff_status_register <= { ff_frame_interrupt, sprite_overmap, sprite_collision, sprite_overmap_id };
-		4'd1:		ff_status_register <= { 2'd0, ff_v9958_mode ? c_v9958id: c_v9968id, ff_line_interrupt };
+		4'd1:		ff_status_register <= { 2'd0, ff_fakeID ? c_v9958id: c_v9968id, ff_line_interrupt };
 		4'd2:		ff_status_register <= { status_transfer_ready, status_vsync, status_hsync, status_border_detect, 2'b11, status_field, status_command_execute };
 		4'd3:		ff_status_register <= sprite_collision_x[7:0];
 		4'd4:		ff_status_register <= { 7'b1111111, sprite_collision_x[8] };
@@ -776,11 +848,30 @@ module vdp_cpu_interface (
 		endcase
 	end
 
+	// --------------------------------------------------------------------
+	//	MSXimus _149: buffer de PRE-LECTURA de VRAM
+	// --------------------------------------------------------------------
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_pf_valid	<= 1'b0;
+			ff_pf_data	<= 8'd0;
+		end
+		else if( vram_rdata_en && ff_pf_inflight ) begin
+			ff_pf_data	<= vram_rdata;
+			ff_pf_valid	<= 1'b1;
+		end
+		else if( w_pf_hit || w_pf_invalidate ) begin
+			ff_pf_valid	<= 1'b0;
+		end
+	end
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_bus_rdata_en		<= 1'b0;
 		end
-		else if( vram_rdata_en ) begin
+		//	MSXimus _149: si la lectura completada era una PRE-lectura, su dato NO
+		//	va al bus (va al buffer, mas abajo) — el bus lo recoge en el IN.
+		else if( vram_rdata_en && !ff_pf_inflight ) begin
 			if( vram_access_mask ) begin
 				ff_bus_rdata		<= 8'b11111111;
 			end
@@ -791,8 +882,15 @@ module vdp_cpu_interface (
 		end
 		else if( w_read ) begin
 			if( ff_port0 ) begin
-				ff_bus_rdata	<= 8'b11111111;
-				ff_bus_rdata_en	<= 1'b0;
+				if( ff_pf_valid ) begin
+					//	MSXimus _149: ACIERTO — el byte ya estaba pre-leido
+					ff_bus_rdata	<= vram_access_mask ? 8'b11111111 : ff_pf_data;
+					ff_bus_rdata_en	<= 1'b1;
+				end
+				else begin
+					ff_bus_rdata	<= 8'b11111111;
+					ff_bus_rdata_en	<= 1'b0;
+				end
 			end
 			else if( ff_port1 ) begin
 				ff_bus_rdata	<= ff_status_register;
@@ -836,6 +934,9 @@ module vdp_cpu_interface (
 				//	Clear line interrupt flag
 				ff_line_interrupt <= 1'b0;
 			end
+			//	upstream 7298638: quedaba una rama legada que borraba el
+			//	interrupt de FIN DE COMANDO al leer S#10. El unico clear
+			//	legitimo es la escritura en el puerto 4 con bit2=1.
 		end
 		else if( w_write && ff_port4 ) begin
 			if( ff_bus_wdata[0] == 1'b1 ) begin
@@ -939,8 +1040,8 @@ module vdp_cpu_interface (
 	assign reg_interrupt_line_nonR23_mode			= ff_interrupt_line_nonR23_mode;
 	assign reg_sprite_mode3							= ff_sprite_mode3;
 	assign reg_ext_palette_mode						= ff_ext_palette_mode;
-	assign reg_ext_command_mode						= ~ff_v9958_mode;
-	assign reg_vram256k_mode						= ~ff_v9958_mode;
+	assign reg_ext_command_mode						= ff_ext_command_mode;
+	assign reg_vram256k_mode						= ff_vram256k_mode;
 	assign reg_sprite16_mode						= ff_sprite16_mode;
 	assign reg_flat_interlace_mode					= ff_flat_interlace_mode;
 endmodule

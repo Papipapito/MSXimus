@@ -15,6 +15,7 @@
 // v9958_top.v (ficheros de compilacion distintos) — mantener SINCRONIZADOS.
 `define VIDEO720
 `define ENABLE_WIFI       // F1 (_73): WiFi UNAPI por el BL616 ONBOARD (UART en V14/U15, ver uwifi)
+`define ENABLE_WIFI_ESP32 // _153: la UART del WiFi va al ESP32-C6 externo por el conector J10 (2x20 libre, fila PAR: 12=GND, 14=TX(W21), 16=RX(N17)) en vez del BL616 (sin antena/fw). Mismo wifi_lite, mismo baud 27M/31: el fw ducasp/ESP32-UNAPI a 859372 ya esta validado con este prescaler en el MSXnano.
 //`define WIFI_PMOD_TEST  // (_77diag) UART del WiFi al PMOD1 — apagado
 //`define WIFI_TAP_BL616TX  // _78diag (APAGADO en _111c: llevaba desde la _78 robandole E22 a todo; la telemetria _111 nunca salio por su culpa)
 `define ENABLE_OPLL         // F3 (_38): OPLL de vuelta — 1a pieza re-añadida sobre la base validada
@@ -29,6 +30,8 @@
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
 //`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
+//`define ENABLE_VRAM_DDR3   // _128X EXPERIMENTO: la VRAM del V9968 en la DDR3 del SOM (v9968_ddr3_backend; requiere ENABLE_V9968_VDP y USE_VRAM_DDR3=1 en build.tcl). ADVERTENCIA: DDR3 analogicamente marginal en esta placa (saga _94-_103)
+//`define DISABLE_BOOT_MENU  // _127D: arranque MSX DIRECTO (enmascara la firma AB del menu; tambien salta el init FM de esa pagina). Solo builds de prueba.
 
 module top
 #(
@@ -50,6 +53,22 @@ module top
     output wire spi_dir,
     input  wire spi_dat,
     output wire spi_irqn,
+    // _153: WiFi por ESP32-C6 externo (Waveshare C6-LCD-1.3, fw ESP32-UNAPI-
+    // Firmware rama msxnano, 859372 bps) en el CONECTOR J10 (el 2x20 libre,
+    // "SDRAM1 CONN." del esquematico oficial 32001C; el modulo SDRAM del core
+    // va en el otro). Peticion de Albert (v2, foto de la placa): los pines en
+    // FILA UNICA para cable plano de una hilera -> COLUMNA PAR, pines 12-14-16
+    // consecutivos: GND(12) TX(14=W21) RX(16=N17). El +5V (pin 11) queda en la
+    // columna impar, asi que el C6 se alimenta por su USB-C.
+    // esp_rx_i PULL_UP = idle UART correcto sin modulo pinchado.
+    // ⚠ Si algun dia se pincha un 2o modulo SDRAM en J10, esto se muda.
+    input  wire esp_rx_i,    // N17 = J10 pin 16 (SDRAM1_D10) <- IO16 (TX) del C6
+    output wire esp_tx_o,    // W21 = J10 pin 14 (SDRAM1_D12) -> IO17 (RX) del C6
+    // _156: indicador de TURBO en la pantalla del C6 (mismo esquema que el
+    // nano: turbo_status pin 29 -> GPIO3, Display.ino TURBO_PIN con pulldown).
+    // J10 pin 18 = el siguiente par del bloque => cable plano de 4 seguidos:
+    // 12=GND 14=TX 16=RX 18=TURBO. Cablear al GPIO3 del C6. Peticion de Albert.
+    output wire esp_turbo_o, // N13 = J10 pin 18 (SDRAM1_D8) -> GPIO3 del C6
     // Console 60K, mecánica JTAG→SPI (estilo C64Nano): jtagseln (NET_LOC
     // V_JTAGSELN) entrega los pines JTAG al fabric cuando vale 1; el BL616
     // reclama JTAG subiendo bl616_jtagsel (PULL_UP: sin firmware companion la
@@ -296,7 +315,19 @@ end
     //  _123: la frecuencia depende del placement). Modo RELATIVO con la K
     //  real medida (K_ON=2/1024 = -0.195%, el punto de Albert era -0.26%)
     //  + garantia por tiempo: fan FIJO a los 6 min si no ha disparado.
-    fan_ctrl #(.WIN_CYC(32'd262144), .K_ON(10'd2), .K_OFF(10'd1),
+    // _152: ventilador ~5 grados MAS TARDE + EL DOBLE DE HISTERESIS.
+    // Albert reporto DOS cosas: que arranca pronto y que "se enciende y apaga
+    // bastante" (ciclado audible, visible en el COM11: la columna fan alterna
+    // ON/of cada pocos segundos). Lo segundo es histeresis corta, no umbral.
+    // Un paso de K vale 1/1024 = 0.0977% de la cuenta del anillo; con la
+    // pendiente REAL medida en placa (~0.0167%/grado, ver cabecera de
+    // fan_ctrl.v: 6x menor que la teorica de 0.1%/grado) eso son ~5.9 grados.
+    // Subiendo SOLO K_ON se arreglan las dos a la vez: el arranque sube ~5.9
+    // grados y la banda pasa de 1 a 2 unidades (~5.9 -> ~11.7 grados), asi que
+    // una vez encendido sopla el doble antes de parar y cicla la mitad.
+    //   K_ON  2->3 : arranca a ~17.5 grados sobre el frio (antes ~11.7)
+    //   K_OFF 1    : para    a  ~5.9 grados sobre el frio (SIN CAMBIO)
+    fan_ctrl #(.WIN_CYC(32'd262144), .K_ON(10'd3), .K_OFF(10'd1),
                .FORCE_ON_SEC(32'd360)) u_fanctrl (
         .clk        (clk_27m),
         .reset_n    (clock_locked),
@@ -764,8 +795,17 @@ assign keyboard_addr = ppi_port_c[3:0];
                 `ifdef ENABLE_BIOS
                      ( exp_slot0_req_r == 1) ? ~exp_slot0  :
                      ( exp_slotx_req_r == 1) ? ~exp_slotx  :
-                     ( bios_req == 1) ? ram_dout : 
+                     ( bios_req == 1) ? ram_dout :
+`ifdef DISABLE_BOOT_MENU
+                     // _127D: SIN MENU — se enmascara la firma "AB" del menu
+                     // (slot expandido, bytes 0x4000/0x4001): el slot-scan de
+                     // la BIOS no ve cartucho y el MSX arranca DIRECTO.
+                     // OJO: tambien salta el init encadenado de esa pagina
+                     // (FM-BIOS del pack) — build de prueba, no de uso diario.
+                     ( subrom_logo_req == 1 ) ? ((bus_addr[14:1] == 14'h2000) ? 8'h00 : ram_dout) :
+`else
                      ( subrom_logo_req == 1 ) ? ram_dout :
+`endif
                 `endif
                 `ifdef ENABLE_SDCARD
                      ( sd_busreq_w == 1) ? sd_cd_w :
@@ -1515,6 +1555,8 @@ assign keyboard_addr = ppi_port_c[3:0];
         .rd_i       (w27_rd_n),
 `ifdef WIFI_PMOD_TEST
         .rx_i       (uart_pmod_rx),          // TEST: RX por PMOD1 D22 (CH340 TX / PC-de-ESP)
+`elsif ENABLE_WIFI_ESP32
+        .rx_i       (esp_rx_i),              // _153c: J10 pin 16 (N17) <- ESP32-C6 IO16
 `else
         .rx_i       (bl616_jtagsel),         // onboard: V14 <- BL616 IO28 TX
 `endif
@@ -1558,7 +1600,20 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire VideoDLClk;
     //decode del VDP: 98-9Bh
     wire vdp_io_hit;
+`ifdef ENABLE_V9968_VDP
+    // _140 ESPEJO 88-8Bh: la demo ru66-v9968-demo y el software de cartucho
+    // V9968 EXTERNO hablan SOLO por 88-8Bh (nunca 98-9B). En HW real son dos
+    // chips (V9968 externo en 88-8B + VDP interno en 98-9B, "switch to the
+    // V9968 display"); en el MSXimus el V9968 YA ES el VDP interno, asi que
+    // aliasamos AMBOS rangos al mismo chip. Se ignora bus_addr[4]: 98-9B
+    // (bit4=1) y 88-8B (bit4=0) son las UNICAS combinaciones con [7:5]=100 y
+    // [3:2]=10 (0x88-8B libre en el MSXimus; vecinos PSG A0-A2/PPI A8-AA/
+    // Y8950 C0-C1). mode = bus_addr[1:0] es identico en ambos rangos, asi
+    // que el glue recibe el mismo puerto; BIOS/DOS siguen en 98-9B intactos.
+    assign vdp_io_hit = ( bus_addr[7:5] == 3'b100 && bus_addr[3:2] == 2'b10 );
+`else
     assign vdp_io_hit = ( bus_addr[7:2] == 6'b100110 );
+`endif
     assign vdp_csw_n = (vdp_io_hit == 1 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 0:1; // VDP write
     assign vdp_csr_n = (vdp_io_hit == 1 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0)? 0:1; // VDP read
 
@@ -1697,9 +1752,13 @@ assign keyboard_addr = ppi_port_c[3:0];
     // consumen 1 palabra/730ns y un canal solo daba ~800ns.
     wire [31:0] v68dbg_miss, v68dbg_bka, v68dbg_bkb;   // _121diag → COM11
     wire [31:0] v68dbg_park;                           // _124: park del shim
+    wire [31:0] v68dbg_drops;                          // _154: {s1_pfq, wq_full} — drops reales
     wire        v68bk_req, v68bk_we, v68bk_done_t;
     wire [21:0] v68bk_addr;
-    wire [7:0]  v68bk_wdata;
+    // _148 FIX B: el shim escribe PALABRAS de 32b con mascara de bytes (1 op de
+    // backend por palabra en vez de hasta 4). Ver v9968_vram_shim.v.
+    wire [31:0] v68bk_wdata;
+    wire [3:0]  v68bk_wmask;
     wire [15:0] v68bk_rword;
     wire        v68bk2_req, v68bk2_done_t;
     wire [21:0] v68bk2_addr;
@@ -1712,37 +1771,135 @@ assign keyboard_addr = ppi_port_c[3:0];
         .vram_rdata(v68_vram_rdata), .vram_rdata_en(v68_vram_rdata_en),
         .vram_rtag(v68_vram_rtag),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
-        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .bk_wdata(v68bk_wdata), .bk_wmask(v68bk_wmask),
+        .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
         .bk2_req(v68bk2_req), .bk2_addr(v68bk2_addr),
         .bk2_rword(v68bk2_rword), .bk2_done_t(v68bk2_done_t),
         .vram_stall(v68_vram_stall),
         .diag(),
         .dbg_miss(v68dbg_miss), .dbg_bka(v68dbg_bka), .dbg_bkb(v68dbg_bkb),
-        .dbg_park(v68dbg_park)
+        .dbg_park(v68dbg_park),
+        .dbg_drops(v68dbg_drops)
     );
+`ifdef ENABLE_VRAM_DDR3
+    // ==== EXPERIMENTO _128X: la VRAM del V9968 vive en la DDR3 del SOM ====
+    // Los MISMOS bridges CDC, con el lado far a clk_x1 (74.25, lo genera la
+    // IP DDR3) y hablando con v9968_ddr3_backend en vez de memory.v. Los
+    // puertos wv2/wv3 de memory.v quedan inertes (reqs a 0, abajo). El shim
+    // NO se toca. ADVERTENCIA saga _94-_103: la DDR3 de esta placa es
+    // analogicamente marginal (loteria de calibracion) — telemetria
+    // vddr_diag en cnt_c[23:16] del COM11.
+    wire        vddr_clk_x1;
+    wire        vddr_a_req, vddr_a_we, vddr_b_req;
+    wire [21:0] vddr_a_addr, vddr_b_addr;
+    wire [31:0] vddr_a_wdata;      // _148 FIX B: palabra de 32b + mascara
+    wire [3:0]  vddr_a_wmask;
+    wire [15:0] vddr_a_dout, vddr_b_dout;
+    wire        vddr_a_done, vddr_b_done;
+    wire        vddr_ready;
+    wire [7:0]  vddr_diag;
+    wire [31:0] vddr_ops;      // _129b: {lecturas[31:16], escrituras[15:0]}
+
     v9968_sdram_bridge u_v68bridge (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
-        .bk_wdata(v68bk_wdata), .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
-        .clk_108m(clk_108m),
-        .wv2_req(wv2_req), .wv2_we(wv2_we), .wv2_addr(wv2_addr),
-        .wv2_wdata(wv2_wdata), .wv2_dout(wv2_dout), .wv2_done(wv2_done)
+        .bk_wdata(v68bk_wdata), .bk_wmask(v68bk_wmask),
+        .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .clk_108m(vddr_clk_x1),
+        .wv2_req(vddr_a_req), .wv2_we(vddr_a_we), .wv2_addr(vddr_a_addr),
+        .wv2_wdata(vddr_a_wdata), .wv2_wmask(vddr_a_wmask),
+        .wv2_dout(vddr_a_dout), .wv2_done(vddr_a_done)
     );
     v9968_sdram_bridge u_v68bridge2 (
         .clk_vdp(clk_86), .rst_n(rst86_n),
         .bk_req(v68bk2_req), .bk_we(1'b0), .bk_addr(v68bk2_addr),
-        .bk_wdata(8'd0), .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
-        .clk_108m(clk_108m),
-        .wv2_req(wv3_req), .wv2_we(wv3_we), .wv2_addr(wv3_addr),
-        .wv2_wdata(wv3_wdata), .wv2_dout(wv3_dout), .wv2_done(wv3_done)
+        .bk_wdata(32'd0), .bk_wmask(4'd0),
+        .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
+        .clk_108m(vddr_clk_x1),
+        .wv2_req(vddr_b_req), .wv2_we(), .wv2_addr(vddr_b_addr),
+        .wv2_wdata(), .wv2_wmask(), .wv2_dout(vddr_b_dout), .wv2_done(vddr_b_done)
     );
 
+    v9968_ddr3_backend u_vddr3 (
+        .a_req(vddr_a_req), .a_we(vddr_a_we), .a_addr(vddr_a_addr),
+        .a_wdata(vddr_a_wdata), .a_wmask(vddr_a_wmask),
+        .a_dout(vddr_a_dout), .a_done(vddr_a_done),
+        .b_req(vddr_b_req), .b_addr(vddr_b_addr),
+        .b_dout(vddr_b_dout), .b_done(vddr_b_done),
+        .clk_x1_out(vddr_clk_x1), .ready(vddr_ready), .diag(vddr_diag),
+        .dbg_ops(vddr_ops),        // _129b: {lecturas, escrituras} servidas
+        .recal_req(1'b0),
+        .clk_27(clk27_video),      // misma topologia que wave_ddr3/_86
+        // _130 FIDELIDAD nand2mario: clk/mdclk del controlador desde el PAD
+        // de 50MHz, EXACTAMENTE como su ddr3_framebuffer (probado con imagen
+        // en esta placa). (La _128Z probo clk_54m del PLL — tambien calibro;
+        // la teoria pad-vs-PLL de alanswx no era LA variable: lo decisivo
+        // era darle TIEMPO a la calibracion. Fidelidad total = pad.)
+        .clk_g50(ex_clk_27m),
+        .pll27_lock(pll27_lock),
+        .ddr_addr(ddr_addr), .ddr_bank(ddr_bank), .ddr_cs(ddr_cs),
+        .ddr_ras(ddr_ras), .ddr_cas(ddr_cas), .ddr_we(ddr_we),
+        .ddr_ck(ddr_ck), .ddr_ck_n(ddr_ck_n), .ddr_cke(ddr_cke),
+        .ddr_odt(ddr_odt), .ddr_reset_n(ddr_reset_n), .ddr_dm(ddr_dm),
+        .ddr_dq(ddr_dq), .ddr_dqs(ddr_dqs), .ddr_dqs_n(ddr_dqs_n)
+    );
+`else
+    // _148 FIX B — CAMINO LEGACY (VRAM en la SDRAM compartida, respaldo _137).
+    // memory.v solo sabe escribir 1 BYTE por operacion en wv2/wv3 (SdrDat =
+    // {wdata,wdata} con la DQM sacada de addr[0]) y NO se toca. El bridge se
+    // instancia con NARROW_BYTE=1: acepta la palabra de 32b del shim y la
+    // SERIALIZA en hasta 4 round-trips hacia memory.v, devolviendo bk_done_t
+    // solo al terminar la palabra entera. Coste identico al esquema byte-a-byte
+    // que este camino ya tenia; el shim ve una escritura atomica.
+    // FAR_DW=8 mantiene el bus de datos far del ancho de memory.v (sin
+    // conexiones de anchura desigual, que Gowin resuelve mal).
+    v9968_sdram_bridge #(.NARROW_BYTE(1), .FAR_DW(8)) u_v68bridge (
+        .clk_vdp(clk_86), .rst_n(rst86_n),
+        .bk_req(v68bk_req), .bk_we(v68bk_we), .bk_addr(v68bk_addr),
+        .bk_wdata(v68bk_wdata), .bk_wmask(v68bk_wmask),
+        .bk_rword(v68bk_rword), .bk_done_t(v68bk_done_t),
+        .clk_108m(clk_108m),
+        .wv2_req(wv2_req), .wv2_we(wv2_we), .wv2_addr(wv2_addr),
+        .wv2_wdata(wv2_wdata), .wv2_wmask(),
+        .wv2_dout(wv2_dout), .wv2_done(wv2_done)
+    );
+    v9968_sdram_bridge #(.NARROW_BYTE(1), .FAR_DW(8)) u_v68bridge2 (
+        .clk_vdp(clk_86), .rst_n(rst86_n),
+        .bk_req(v68bk2_req), .bk_we(1'b0), .bk_addr(v68bk2_addr),
+        .bk_wdata(32'd0), .bk_wmask(4'd0),
+        .bk_rword(v68bk2_rword), .bk_done_t(v68bk2_done_t),
+        .clk_108m(clk_108m),
+        .wv2_req(wv3_req), .wv2_we(wv3_we), .wv2_addr(wv3_addr),
+        .wv2_wdata(wv3_wdata), .wv2_wmask(),
+        .wv2_dout(wv3_dout), .wv2_done(wv3_done)
+    );
+`endif
+
     // ---- puente de video 800px -> HDMI 720p (back-end TMDS intacto) ----
+    // _127H: telemetria del audio — eventos de reset del HDMI y toggles del
+    // lock del puente (pulsos estirados ~30ms; 2FF + flanco a clk_54m). El
+    // lock togglea a ~30Hz en regimen: su TASA en el lector delata perdidas.
+    // Si los cortes de ~3s del audio coinciden con saltos de rst_cnt, el
+    // culpable es el re-arranque del stream HDMI (el receptor silencia).
+    wire v68_dbg_lock, v68_dbg_rst;
+    wire [31:0] v68_dbg_apkt;        // _127I: contadores del packet_picker
+    wire [5:0]  v68_dbg_defer;       // _134: yanks del reset diferidos
+    wire [4:0]  v68_dbg_tear;        // _134: assert en silicio (esperado 0)
+    reg [2:0]  aud_rst_sy = 3'd0, aud_lock_sy = 3'd0;
+    reg [15:0] aud_rst_cnt = 16'd0, aud_lock_cnt = 16'd0;
+    always @(posedge clk_54m) begin
+        aud_rst_sy  <= {aud_rst_sy[1:0],  v68_dbg_rst};
+        aud_lock_sy <= {aud_lock_sy[1:0], v68_dbg_lock};
+        if (aud_rst_sy[1]  & ~aud_rst_sy[2])  aud_rst_cnt  <= aud_rst_cnt  + 16'd1;
+        if (aud_lock_sy[1] & ~aud_lock_sy[2]) aud_lock_cnt <= aud_lock_cnt + 16'd1;
+    end
     // ce de pixel: el V9968 emite 1 pixel cada 2 ciclos de 85.9; un toggle
     // libre muestrea cada pixel exactamente una vez (la fase da igual: el
     // dato es estable 2 ciclos y la captura se auto-alinea con HS).
     reg ce86 = 1'b0;
     always @(posedge clk_86) ce86 <= ~ce86;
+
+    wire [15:0] amp_hdmi;   // _133: vumetro del lado HDMI (ver dbg_uart)
 
     msx2hdmi_v9968 u_msx2hdmi68 (
         .clk          (clk_86),
@@ -1764,6 +1921,7 @@ assign keyboard_addr = ppi_port_c[3:0];
 `endif
         .audio_l      (audio_sample),
         .audio_r      (audio_sample_r),
+        .dbg_amp      (amp_hdmi),
         .clk_pixel    (clk_hdmi),
         .clk_5x_pixel (clk_hdmi5),
         .tmds_clk_n   (clk_n),
@@ -1773,9 +1931,12 @@ assign keyboard_addr = ppi_port_c[3:0];
         .dbg_vs_tick  (),
         .dbg_wr_act   (),
         .dbg_nonblack (),
-        .dbg_lock_tgl (),
-        .dbg_hdmi_rst (),
-        .dbg_rd_act   ()
+        .dbg_lock_tgl (v68_dbg_lock),    // _127H: telemetria audio
+        .dbg_hdmi_rst (v68_dbg_rst),
+        .dbg_rd_act   (),
+        .dbg_apkt     (v68_dbg_apkt),    // _127I: {ovr, 0, paquetes_audio}
+        .dbg_defer    (v68_dbg_defer),   // _134: yanks diferidos (~60/s sano)
+        .dbg_tear     (v68_dbg_tear)     // _134: resets en zona de peligro (0 sano)
     );
 
     // ---- dh/dl: divisor LIBRE clk_108m ÷8/÷16 — el patron EXACTO con el
@@ -1993,6 +2154,18 @@ assign wv3_req   = 1'b0;
 assign wv3_we    = 1'b0;
 assign wv3_addr  = 22'd0;
 assign wv3_wdata = 8'd0;
+`else
+`ifdef ENABLE_VRAM_DDR3
+// _128X: la VRAM vive en la DDR3 — los puertos wv2/wv3 de memory.v inertes
+assign wv2_req   = 1'b0;
+assign wv2_we    = 1'b0;
+assign wv2_addr  = 22'd0;
+assign wv2_wdata = 8'd0;
+assign wv3_req   = 1'b0;
+assign wv3_we    = 1'b0;
+assign wv3_addr  = 22'd0;
+assign wv3_wdata = 8'd0;
+`endif
 `endif
 
 memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
@@ -2894,7 +3067,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .wv_done    (wv_done)
     );
 
-    // pines DDR3 del SOM en reposo seguro (la IP y su PLL fuera del build)
+`ifndef ENABLE_VRAM_DDR3
+    // pines DDR3 del SOM en reposo seguro (la IP y su PLL fuera del build;
+    // con _128X los conduce u_vddr3 — la VRAM del V9968 vive alli)
     assign ddr_addr = 15'd0;  assign ddr_bank = 3'd0;
     assign ddr_cs = 1'b1;     assign ddr_ras = 1'b1;
     assign ddr_cas = 1'b1;    assign ddr_we = 1'b1;
@@ -2902,6 +3077,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign ddr_cke = 1'b0;    assign ddr_odt = 1'b0;
     assign ddr_reset_n = 1'b0; assign ddr_dm = 2'b11;
     assign ddr_dq = 16'hzzzz; assign ddr_dqs = 2'bzz; assign ddr_dqs_n = 2'bzz;
+`endif
 `else
     assign wdbg_rd34_w = 1'b0;
     assign wdbg_rd35_w = 1'b0;
@@ -2910,7 +3086,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign wdbg_status = 8'hFF;
     assign wdbg_rdata  = 8'hFF;
     assign wdbg_diag_ddr3 = 8'hFF;
-    // DDR3 en reposo seguro
+`ifndef ENABLE_VRAM_DDR3
+    // DDR3 en reposo seguro (con _128X los pines los conduce u_vddr3)
     assign ddr_addr = 15'd0;  assign ddr_bank = 3'd0;
     assign ddr_cs = 1'b1;     assign ddr_ras = 1'b1;
     assign ddr_cas = 1'b1;    assign ddr_we = 1'b1;
@@ -2918,6 +3095,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign ddr_cke = 1'b0;    assign ddr_odt = 1'b0;
     assign ddr_reset_n = 1'b0; assign ddr_dm = 2'b11;
     assign ddr_dq = 16'hzzzz; assign ddr_dqs = 2'bzz; assign ddr_dqs_n = 2'bzz;
+`endif
 `endif
 
     // ===== MoonSound FM (_82): OPL3 en C4-C7 + stub wave 7E/7F =====
@@ -3310,9 +3488,29 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         + {{3{jt2413_wav[15]}}, jt2413_wav} + {{3{y8950_wav[15]}}, y8950_wav}
         + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
         + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term[15]}}, opl4pcm_term};
+    // _127H: TONO DE TEST — activado por el toggle "Sprite Limit" del menu
+    // (config2[3], LIBRE con el V9968: el SPMAXSPR murio). 440Hz cuadrada a
+    // -12dB directa al puente, PUENTEANDO el mezclador entero. Discriminador
+    // del bug #14: si el TONO tambien se corta -> HDMI/receptor; si el tono
+    // aguanta limpio mientras la musica se corta -> mezclador/fuentes.
+    reg [14:0] tone_cnt = 15'd0;
+    reg        tone_sq  = 1'b0;
+    always @ (posedge clk_27m) begin
+        if (tone_cnt == 15'd30681) begin      // 27e6/(2*440) - 1
+            tone_cnt <= 15'd0;
+            tone_sq  <= ~tone_sq;
+        end else
+            tone_cnt <= tone_cnt + 15'd1;
+    end
+    wire [15:0] tone_smp = tone_sq ? 16'd4096 : 16'hF000;   // +-4096 (-12dB)
+
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
-            if (config_enable_stereo == 1) begin
+            if (config_enable_8sprites == 1) begin
+                audio_sample   <= tone_smp;
+                audio_sample_r <= tone_smp;
+            end
+            else if (config_enable_stereo == 1) begin
                 audio_sample   <= sat16(mixL_st);
                 audio_sample_r <= sat16(mixR_st);
             end
@@ -4194,12 +4392,52 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // _121diag: telemetria del shim V9968 (ASCII 115200): "D <miss>
     // <complA> <complB>" cada 200ms. Sale por E22 (dbg_pmod1[4], donde
     // vive el CH340 de COM11) — ver el mux junto a los assigns de PMOD.
+    // _133 VUMETRO (bug #14): pico de |audio_sample| EN LA FUENTE (el
+    // registro del mezclador, dominio clk_27m) por ventana de ~0.31s
+    // (2^23 ciclos) con retencion. Junto con amp_hdmi (pico de lo que
+    // consume el HDMI, desde msx2hdmi_v9968) discrimina durante un corte
+    // audible: ambos picos altos = receptor; fuente alta y hdmi bajo =
+    // CDC congelado; ambos bajos = el mezclador se calla de verdad.
+    reg  [15:0] amp_src_acc = 16'd0, amp_src = 16'd0;
+    reg  [22:0] amp_src_win = 23'd0;
+    wire [15:0] asrc_abs = audio_sample[15] ? (~audio_sample + 16'd1)
+                                            : audio_sample;
+    always @(posedge clk_27m) begin
+        amp_src_win <= amp_src_win + 23'd1;
+        if (amp_src_win == 23'd0) begin
+            amp_src     <= amp_src_acc;
+            amp_src_acc <= 16'd0;
+        end
+        else if (asrc_abs > amp_src_acc) amp_src_acc <= asrc_abs;
+    end
+
     wire usb_uart_tx_int;
     dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
         .clk(clk_54m), .rst_n(bus_reset_n),
-        .cnt_a(v68dbg_miss), .cnt_b(v68dbg_bka), .cnt_c(v68dbg_bkb),
-        .cnt_d({fan_en_o, 11'd0, fan_dbg_cnt}),   // _123: termometro RO + estado fan
-        .cnt_e(v68dbg_park),                      // _124: {pisadas, drenajes} del park
+        // _148 FIX C: {miss de SPRITE[15:0], miss de FONDO[15:0]} — antes la
+        // palabra entera era el miss de fondo. Los sprites tenian CERO
+        // visibilidad en placa (el thrash del DEVCON paso desapercibido).
+        // Lectura en dbg_audio_reader.py: spmiss = w0 >> 16, bgmiss = w0 & 0xFFFF.
+        .cnt_a(v68dbg_miss),
+        .cnt_b({aud_rst_cnt, aud_lock_cnt}),      // _127H: {resets HDMI, toggles lock}
+`ifdef ENABLE_VRAM_DDR3
+        // _128X: los 8 bits libres [23:16] llevan el diag de la DDR3
+        // ({calib_drop, wd_fires[2:0], wd_ops[3:0]}); sano = 00
+        .cnt_c({v68_dbg_apkt[31:24], vddr_diag, v68_dbg_apkt[15:0]}),
+`else
+        .cnt_c(v68_dbg_apkt),                     // _127I: {ovr, 0, paquetes_audio}
+`endif
+        // _134: los 11 bits libres llevan {tear[4:0], defer[5:0]} del yank
+        .cnt_d({fan_en_o, v68_dbg_tear, v68_dbg_defer, fan_dbg_cnt}),
+`ifdef ENABLE_VRAM_DDR3
+        .cnt_e(vddr_ops),                         // _129b: ops DDR3 servidas
+`else
+        .cnt_e({amp_src, amp_hdmi}),              // _133: vumetro {fuente, hdmi}
+`endif
+        // _154: 6a palabra = drops del shim ({s1_pfq[15:0], wq_full[15:0]}).
+        // SANO = 00000000. Cualquier valor distinto en placa = escrituras o
+        // prefetches PERDIDOS de verdad — el sismografo del frente Aleste.
+        .cnt_f(v68dbg_drops),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
@@ -4351,7 +4589,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire joy_on   = (|joystick0[5:0]) | (|joystick1[5:0]);
     wire kbd_raw  = |keyboard;                            // any key held
 `ifdef ENABLE_WIFI
+`ifdef ENABLE_WIFI_ESP32
+    wire wifi_raw = ~bl616_uart_tx_w | ~esp_rx_i;         // WiFi UART active (idle = high; _153: enlace ESP32-C6)
+`else
     wire wifi_raw = ~bl616_uart_tx_w | ~bl616_jtagsel;    // WiFi UART active (idle = high; F1: enlace BL616)
+`endif
 `else
     wire wifi_raw = 1'b0;                                 // BASE MINIMA: WiFi fuera
 `endif
@@ -4455,6 +4697,20 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign spi_irqn = bl616_uart_tx_w;
 `else
     assign spi_irqn = companion_irqn_w;
+`endif
+    // _153: el TX del wifi_lite tambien sale por el PMOD0 hacia el ESP32-C6.
+    // Se emite SIEMPRE (broadcast inofensivo); sin ENABLE_WIFI queda en idle.
+`ifdef ENABLE_WIFI
+    assign esp_tx_o = bl616_uart_tx_w;
+`else
+    assign esp_tx_o = 1'b1;               // idle UART
+`endif
+    // _156: estado de turbo hacia el C6 (turbo_eff = el que consume el FSM de
+    // waits; cuasi-estatico, sin CDC que valga la pena)
+`ifdef ENABLE_TURBO
+    assign esp_turbo_o = turbo_eff;
+`else
+    assign esp_turbo_o = 1'b0;
 `endif
     fpga_companion fpga_companion_inst
     (

@@ -9,7 +9,12 @@ module audio_clock_regeneration_packet
 )
 (
     input logic clk_pixel,
-    input logic clk_audio,
+    // _127I (bug #14): clk_audio ERA un reloj de fabric (registro-divisor) —
+    // Gowin lo rutaba por recursos genericos (PR1014, "excessive delay or
+    // skew") y el skew intra-dominio podia corromper el contador => CTS
+    // basura => el receptor re-engancha su PLL de audio a trompicones.
+    // Ahora es un clock-enable de 1 ciclo @fs, sincrono a clk_pixel.
+    input logic audio_ce,
     output logic clk_audio_counter_wrap = 0,
     output logic [23:0] header,
     output logic [55:0] sub [3:0]
@@ -23,23 +28,30 @@ localparam int CLK_AUDIO_COUNTER_WIDTH = $clog2(N / 128);
 localparam bit [CLK_AUDIO_COUNTER_WIDTH-1:0] CLK_AUDIO_COUNTER_END = CLK_AUDIO_COUNTER_WIDTH'(N / 128 - 1);
 logic [CLK_AUDIO_COUNTER_WIDTH-1:0] clk_audio_counter = CLK_AUDIO_COUNTER_WIDTH'(0);
 logic internal_clk_audio_counter_wrap = 1'd0;
-always_ff @(posedge clk_audio)
+always_ff @(posedge clk_pixel)
 begin
-    if (clk_audio_counter == CLK_AUDIO_COUNTER_END)
+    if (audio_ce)
     begin
-        clk_audio_counter <= CLK_AUDIO_COUNTER_WIDTH'(0);
-        internal_clk_audio_counter_wrap <= !internal_clk_audio_counter_wrap;
+        if (clk_audio_counter == CLK_AUDIO_COUNTER_END)
+        begin
+            clk_audio_counter <= CLK_AUDIO_COUNTER_WIDTH'(0);
+            internal_clk_audio_counter_wrap <= !internal_clk_audio_counter_wrap;
+        end
+        else
+            clk_audio_counter <= clk_audio_counter + 1'd1;
     end
-    else
-        clk_audio_counter <= clk_audio_counter + 1'd1;
 end
 
 logic [1:0] clk_audio_counter_wrap_synchronizer_chain = 2'd0;
 always_ff @(posedge clk_pixel)
     clk_audio_counter_wrap_synchronizer_chain <= {internal_clk_audio_counter_wrap, clk_audio_counter_wrap_synchronizer_chain[1]};
 
-localparam bit [19:0] CYCLE_TIME_STAMP_COUNTER_IDEAL = 20'(int'(VIDEO_RATE * int'(N) / 128 / AUDIO_RATE));
-localparam int CYCLE_TIME_STAMP_COUNTER_WIDTH = $clog2(20'(int'(real'(CYCLE_TIME_STAMP_COUNTER_IDEAL) * 1.1))); // Account for 10% deviation in audio clock
+// _127I: declaraciones como int con paso intermedio entero (mismo valor,
+// 82500 para 44.1k/74.25M); el original bit[19:0] + int'(N) + real'()
+// rompia el constant-folding de Verilator 5.020.
+localparam int SAMPLES_PER_WRAP = N / 128;
+localparam int CYCLE_TIME_STAMP_COUNTER_IDEAL = int'(VIDEO_RATE * SAMPLES_PER_WRAP / AUDIO_RATE);
+localparam int CYCLE_TIME_STAMP_COUNTER_WIDTH = $clog2(int'(VIDEO_RATE * SAMPLES_PER_WRAP / AUDIO_RATE * 1.1)); // Account for 10% deviation in audio clock
 
 logic [19:0] cycle_time_stamp = 20'd0;
 logic [CYCLE_TIME_STAMP_COUNTER_WIDTH-1:0] cycle_time_stamp_counter = CYCLE_TIME_STAMP_COUNTER_WIDTH'(0);

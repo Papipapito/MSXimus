@@ -65,7 +65,7 @@
 //   * write-side en clk_86 (85.909 MHz) con `ce` (2 ciclos/pixel del V9968);
 //   * ring de 32 lineas x 800 px (el V9968 saca 800 activos: 256x3=768 de
 //     contenido + bordes — el ring de 720 croparia 48 px de contenido);
-//   * lectura: H 800->960 (acumulador +800/umbral 960) 4:3, 800->1280 16:9;
+//   * lectura: H 800->1200 (x1,5 EXACTO, _127C) 4:3, 800->1280 16:9;
 //     V FIJO 240->720 x3 en AMBOS modos (el V9968 normaliza NTSC y PAL a
 //     480 lineas dobladas = 240 nativas);
 //   * scanlines: patron x3 (1 de cada 3) tambien en PAL;
@@ -93,6 +93,7 @@ module msx2hdmi_v9968 (
                                      // Cuasi-estático desde la config del menú.
     input  wire [15:0] audio_l,      // muestras del core (cruce 2FF)
     input  wire [15:0] audio_r,
+    output wire [15:0] dbg_amp,      // _133: pico |muestra| que consume el HDMI
     input  wire        clk_pixel,    // 74.25 MHz
     input  wire        clk_5x_pixel, // 371.25 MHz
     output wire        tmds_clk_n,
@@ -105,20 +106,43 @@ module msx2hdmi_v9968 (
     output wire        dbg_nonblack, // clk: stretch de mem_we con dato != 0
     output wire        dbg_lock_tgl, // clk: frame_tgl tal cual (~30 Hz NTSC)
     output wire        dbg_hdmi_rst, // clk_pixel: stretch del pulso hdmi_rst
-    output wire        dbg_rd_act    // clk_pixel: nivel ventana activa lectura
+    output wire        dbg_rd_act,   // clk_pixel: nivel ventana activa lectura
+    output wire [31:0] dbg_apkt,     // _127I: {ovr[7:0], 8'h00, paquetes_audio[15:0]}
+    output wire [5:0]  dbg_defer,    // _134: yanks diferidos (esperado ~60/s)
+    output wire [4:0]  dbg_tear      // _134: resets en zona de peligro (esperado 0)
 );
 
     localparam HS_ACTIVE_LOW   = 0;  // V9968: display_hs/vs activos ALTOS
     localparam VS_ACTIVE_LOW   = 0;
-    localparam RING_W          = 800; // px por linea del ring (V9968)
+    localparam RING_W          = 768; // px por linea del ring (V9968)
     localparam NATIVE_LINES    = 240; // lineas nativas (480 dobladas / 2)
     localparam LOCK_LINES      = 6;  // líneas de salida DESDE y0 (ver cabecera)
     localparam CLKFRQ          = 74250;   // kHz de clk_pixel
     localparam AUDIO_RATE      = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
     localparam NUM_CHANNELS    = 3;
-    localparam XSTART          = (1280-960)/2;  // 160   (4:3)
-    localparam XSTOP           = (1280+960)/2;  // 1120  (4:3)
+    // _127C (BUILD DE PRUEBA): el 4:3 clasico queda INTACTO (960, ventana
+    // 4:3 exacta = proporcionado; el x1,2 fraccional es el precio: cada
+    // pixel MSX — 3 columnas nativas del core, que ya escala 256->768 —
+    // sale a 3 o 4 columnas alternas = palos desiguales en las fuentes).
+    // La POSICION 16:9 del menu pasa a ser el modo PIXEL-PERFECTO para
+    // comparar en caliente: 800->1066 (x4/3, acumulador +600 umbral 800,
+    // patron 2,1,1 por nativa -> CUALQUIER triplete suma 4): pixel MSX =
+    // 4 columnas EXACTAS, inmune a la fase de los bordes. Ventana 1066
+    // centrada (~11% mas ancha que el 4:3 puro). En la _128 se decide:
+    // tercera opcion de menu o sustitucion.
+    // _141 4:3 PIXEL-PERFECT x3: ventana 800 (no 960) -> el nativo del V9968
+    // (800 = 256*3 contenido + borde) se pasa 1:1 => cada pixel MSX = 3
+    // columnas EXACTAS (uniforme, la "H" con los dos palos iguales) y el
+    // contenido 768x576 = 4:3 REAL. Antes 960 daba x1.2 (columnas 4,4,4,3
+    // por celda = caracteres descuadrados). El 16:9 sigue siendo pixel-perfect
+    // x4 (1066). OJO: los modos de TEXTO de 40/80 col (240/480px de contenido)
+    // los escala el propio V9968 a 768 con factor no-entero -> ahi la
+    // uniformidad la limita el core, no este escalador (SCREEN1 256px = limpio).
+    localparam XSTART          = (1280-800)/2;   // 240   (4:3 pixel-perfect x3)
+    localparam XSTOP           = (1280+800)/2;   // 1040  (4:3 pixel-perfect x3)
+    localparam XSTART_P        = (1280-1066)/2;  // 107   (pixel-perfecto)
+    localparam XSTOP_P         = (1280+1066)/2;  // 1173  (pixel-perfecto)
     // _56 (16:9 estirado): ventana a pantalla completa, 720→1280
     localparam XSTART_W        = 0;
     localparam XSTOP_W         = 1280;
@@ -215,7 +239,7 @@ module msx2hdmi_v9968 (
             // reg->mult->reg, patron _56b del read-side): a 85.9 el x800
             // dentro del mux por-pixel era -2.4ns. rel es estable toda la
             // linea y x_cnt==0 llega >=1 ce tras hs_lead: rel800 ya vale.
-            rel800 <= rel[5:1] * 15'd800;
+            rel800 <= rel[5:1] * 15'd768;
             if (cap_ok) begin
                 wr_en   <= 1'b1;
                 wr_data <= {r_q, g_q, b_q};
@@ -246,7 +270,68 @@ module msx2hdmi_v9968 (
     reg [2:0] tgl_x = 3'b000;
     always @(posedge clk_pixel)
         tgl_x <= {tgl_x[1:0], frame_tgl};
-    wire hdmi_rst = tgl_x[2] ^ tgl_x[1];        // pulso de 1 ciclo por frame
+    wire hdmi_rst_raw = tgl_x[2] ^ tgl_x[1];    // pulso de 1 ciclo por frame
+
+    // _134 (bug #14, CAUSA RAIZ PROPUESTA): con los relojes reales
+    // (clk_86 = 27*35/11, clk_pixel = 27*55/20, ratio exacto 121/140) el
+    // yank por-frame aterrizaba SIEMPRE en cx~1595 = DENTRO de la ventana
+    // de data islands del frame VIC4 (cx en [1290,1610), todas las lineas)
+    // => truncaba un paquete HDMI (audio/ACR/NULL) en el cable CADA frame,
+    // sin ECC ni guard de cierre. El video lo tolera; el audio del receptor
+    // no: deficit de muestras + CTS basura ocasional = "30-40s bien y luego
+    // va y viene" (el colchon del sink se drena y resbala). La v9958
+    // aterriza en zona inocua — por eso la _116 suena perfecta con el MISMO
+    // transmisor. Fix: DIFERIR el reset hasta que cx salga de la zona de
+    // peligro (preambulo + guard + islands + guard de cierre, ensanchada
+    // +-2 por el registro del pulso). Retardo maximo ~340 px = 4.6 us,
+    // CONSTANTE (el aterrizaje es deterministico) e invisible para el
+    // realineado del conversor. defer_cnt/tear_cnt = assert en silicio:
+    // esperado defer ~60/s (el yank SI caia en la ventana) y tear = 0.
+    // _136 (leccion HW _134/_135: TRES dados en pantalla negra): diferir el
+    // reset SIN compensar movia el anclaje cx/cy ~27 px y el lado de
+    // lectura del conversor (ventanas por valor de cx/cy calibradas con la
+    // fase del reset) dejaba de casar con el lado de escritura => negro.
+    // Ahora el reset diferido re-ancla cx a reset_cx = 1 + ciclos
+    // diferidos: la trayectoria cx/cy queda IDENTICA ciclo a ciclo a la
+    // del diseno viejo — el conversor NO puede notar la diferencia — y el
+    // data island en vuelo se salva igual (el reset ya no cae dentro).
+    reg  rst_pend  = 1'b0;
+    reg  hdmi_rst  = 1'b0;
+    reg  [11:0] rst_dly = 12'd0;     // ciclos desde el yank crudo
+    reg  [11:0] rst_cx  = 12'd0;     // re-anclaje compensado para hdmi.sv
+    // ventana de DECISION (peligro real ensanchada +-2 por el registro del
+    // pulso) y zona de PELIGRO real (para el assert tear)
+    wire in_defer_win = pal_x ? (cx >= 12'd1278 && cx < 12'd1870)
+                              : (cx >= 12'd1278 && cx < 12'd1620);
+    wire in_danger    = pal_x ? (cx >= 12'd1280 && cx < 12'd1868)
+                              : (cx >= 12'd1280 && cx < 12'd1618);
+    reg [5:0] defer_cnt = 6'd0;
+    reg [4:0] tear_cnt  = 5'd0;
+    always @(posedge clk_pixel) begin
+        hdmi_rst <= 1'b0;
+        if (hdmi_rst_raw) begin
+            rst_dly <= 12'd1;
+            if (in_defer_win) begin
+                rst_pend  <= 1'b1;
+                defer_cnt <= defer_cnt + 6'd1;
+            end
+            else begin
+                hdmi_rst <= 1'b1;
+                rst_cx   <= 12'd1;   // 1 ciclo de registro (vs wire viejo)
+            end
+        end
+        else if (rst_pend) begin
+            rst_dly <= rst_dly + 12'd1;
+            if (!in_defer_win) begin
+                rst_pend <= 1'b0;
+                hdmi_rst <= 1'b1;
+                rst_cx   <= rst_dly + 12'd1;
+            end
+        end
+        if (hdmi_rst && in_danger) tear_cnt <= tear_cnt + 5'd1;
+    end
+    assign dbg_defer = defer_cnt;
+    assign dbg_tear  = tear_cnt;
 
     reg [1:0] pal_sync = 2'b00;
     always @(posedge clk_pixel)
@@ -300,17 +385,23 @@ module msx2hdmi_v9968 (
     reg [10:0] ycnt = 11'd0;
     reg [9:0]  cy_r = 10'd0;
 
-    // _56: geometría del escalador horizontal muxeada por aspecto
+    // _143 PANTALLA COMPLETA SIEMPRE (como el MSXnano): el escalador llena el
+    // 1280 entero -> 256px MSX * 5 = 1280 EXACTO => pixeles UNIFORMES y SIN
+    // marco. Se retiran el 4:3 pixel-perfect (_141, imagen pequena con marco
+    // que molestaba a Albert) y el 1066 pixel-perfect (_127C): Albert quiere
+    // UN modo full-screen como el MSXnano (que no tiene 4:3). wide_x deja de
+    // afectar a la geometria (misma ventana full-screen con wrap que el
+    // MSXnano, ajustado al nativo de 800 del V9968: xcnt+=800, umbral 1280).
     wire [11:0] wlast    = pal_x ? 12'd1979 : 12'd1649;             // W-1
-    wire        xacc_en  = wide_x ? ((cx >= wlast - 12'd1) || (cx < XSTOP_W-3))
-                                  : ((cx >= XSTART-2) && (cx < XSTOP-3));
-    wire [10:0] xthresh  = wide_x ? 11'd1280 : 11'd960;
-    wire        xrst_now = wide_x ? (cx == wlast - 12'd2) : (cx == 12'd0);
+    wire        xacc_en  = (cx >= wlast - 12'd1) || (cx < XSTOP_W - 12'd3);
+    wire [10:0] xthresh  = 11'd1280;                     // ventana = 1280 (full)
+    wire [10:0] xinc     = 11'd768;                       // nativo del V9968 = 800
+    wire        xrst_now = (cx == wlast - 12'd2);
 
     always @(posedge clk_pixel) begin : scaler
         reg [10:0] xcnt_next;
         reg [10:0] ycnt_next;
-        xcnt_next = xcnt + 11'd800;              // V9968: 800->960 / 800->1280
+        xcnt_next = xcnt + xinc;                 // V9968 _127C: 800->1066 / 800->1280
         ycnt_next = ycnt + 11'd240;              // V9968: x3 FIJO ambos modos
 
         // Horizontal: acumula en la ventana adelantada 2 ciclos del modo
@@ -377,8 +468,8 @@ module msx2hdmi_v9968 (
     reg        tgt_is0_r   = 1'b0;    // ...y la línea destino es la 0 del frame
 
     always @(posedge clk_pixel) begin
-        yy720_r     <= yy[4:0]     * 15'd800;
-        yy720_inc_r <= yy_inc[4:0] * 15'd800;
+        yy720_r     <= yy[4:0]     * 15'd768;
+        yy720_inc_r <= yy_inc[4:0] * 15'd768;
         // flags para el ciclo SIGUIENTE: cx+1 ∈ {W-2,W-1,0,1} ⟺ cx ∈ {W-3,W-2,W-1,0}
         use_tgt_r   <= (cx >= wlast - 12'd2) || (cx == 12'd0);
         tgt_is0_r   <= ((cx >= wlast - 12'd2) && (cy == 10'd749)) ||
@@ -386,19 +477,19 @@ module msx2hdmi_v9968 (
     end
 
     // Lectura del ring: base registrada + xx; dato registrado + registro rgb.
-    wire [14:0] rd_base = (wide_x && use_tgt_r) ? (tgt_is0_r ? 15'd0 : yy720_inc_r)
-                                                : yy720_r;
+    // _143: full-screen SIEMPRE -> el wrap de fin de linea (use_tgt_r) aplica
+    // en ambos aspectos (ya no gateado por wide_x).
+    wire [14:0] rd_base = use_tgt_r ? (tgt_is0_r ? 15'd0 : yy720_inc_r)
+                                    : yy720_r;
     wire [14:0] rd_addr = rd_base + {5'd0, xx};
     reg  [17:0] rd_data = 18'd0;
     reg  [23:0] rgb     = 24'd0;
 
-    // "El PRÓXIMO ciclo está dentro de la ventana activa" del modo:
-    //  4:3:  cx+1 ∈ [160,1120) en línea activa.
-    //  16:9: cx+1 ∈ [0,1280) — en cx==W-1 el próximo píxel es el x=0 de la
-    //        LÍNEA SIGUIENTE (activa si cy<719, o cy==749 → línea 0).
-    wire win_next = wide_x ? ( ((cx < XSTOP_W-1) && (cy < 10'd720)) ||
-                               ((cx == wlast) && ((cy < 10'd719) || (cy == 10'd749))) )
-                           : ((cx >= XSTART-1) && (cx < XSTOP-1) && (cy < 10'd720));
+    // _143: ventana activa = PANTALLA COMPLETA (como el MSXnano): cx+1 ∈
+    // [0,1280); en cx==wlast el proximo pixel es el x=0 de la linea siguiente
+    // (activa si cy<719, o cy==749 -> linea 0). wide_x ya no afecta.
+    wire win_next = ((cx < XSTOP_W - 12'd1) && (cy < 10'd720)) ||
+                    ((cx == wlast) && ((cy < 10'd719) || (cy == 10'd749)));
 
     always @(posedge clk_pixel) begin
         rd_data <= mem[rd_addr];
@@ -450,16 +541,39 @@ module msx2hdmi_v9968 (
     // Audio: divisor a 44100 Hz desde clk_pixel + cruce 2FF (como sms2hdmi)
     // ========================================================================
 
-    localparam AUDIO_CLK_DELAY = CLKFRQ * 1000 / AUDIO_RATE / 2;
-    logic [$clog2(AUDIO_CLK_DELAY)-1:0] audio_divider = '0;
-    logic clk_audio = 1'b0;
+    // _127G (bug #14, bajones de volumen): el divisor ENTERO truncaba
+    // 74.25M/44100/2 = 841.83 -> 841 y el sample rate real era 44144.5 Hz
+    // frente a los 44100 que anuncia el ACR (N=6272/CTS=82500): +0.1% de
+    // deriva continua. El buffer del receptor la aguanta ~30-40 s y luego
+    // corrige a trompicones cada ~3 s — EXACTAMENTE lo observado en HW
+    // (OPL4 wave bien 30-40 s y luego cortes ritmicos; FM/SCC "mal desde
+    // el principio" porque su musica arranca con la deriva ya saturada).
+    // Fix: acumulador FRACCIONAL — 88200 toggles/s exactos de media
+    // (2 por muestra) => 44100.000 Hz. Jitter de +-1 ciclo de pixel:
+    // irrelevante (el dato cruza por audio_sample_word y el modulo hdmi
+    // empaqueta por muestra).
+    // _127I (bug #14, LA CAUSA): clk_audio era un REGISTRO usado como reloj —
+    // Gowin lo rutaba por fabric generico (PR1014 en el log del PnR:
+    // "excessive delay or skew") y el skew intra-dominio en el contador del
+    // ACR corrompia el CTS => el monitor re-engancha su PLL de audio a
+    // trompicones (cortes ~3s tras 30-40s). Con el diseno v9958 (holgado)
+    // el skew no mordia; con el V9968 (congestionado) si. FIX: se ELIMINA el
+    // reloj de fabric — clock-enable de 1 ciclo a 44100.000 Hz exactos de
+    // media (acumulador fraccional 44100/74250000), todo sincrono a
+    // clk_pixel. De regalo el CTS medido queda exacto y el SDC ya no
+    // necesita el create_clock clock_audio68 (retirado de msx_v9968.sdc).
+    reg  [26:0] audio_acc = 27'd0;
+    reg         audio_ce  = 1'b0;
 
-    always_ff @(posedge clk_pixel) begin
-        if (audio_divider != AUDIO_CLK_DELAY - 1)
-            audio_divider <= audio_divider + 1'b1;
-        else begin
-            clk_audio     <= ~clk_audio;
-            audio_divider <= '0;
+    always_ff @(posedge clk_pixel) begin : audio_div_frac
+        reg [27:0] acc_n;
+        acc_n = {1'b0, audio_acc} + 28'd44100;
+        if (acc_n >= 28'd74250000) begin
+            audio_acc <= acc_n[26:0] - 27'd74250000;
+            audio_ce  <= 1'b1;
+        end else begin
+            audio_acc <= acc_n[26:0];
+            audio_ce  <= 1'b0;
         end
     end
 
@@ -483,6 +597,27 @@ module msx2hdmi_v9968 (
         if (aud_c1[0] == aud_c2[0]) audio_sample_word[0] <= aud_c2[0];
         if (aud_c1[1] == aud_c2[1]) audio_sample_word[1] <= aud_c2[1];
     end
+
+    // _133 VUMETRO (bug #14): pico de |audio_sample_word[0]| por ventana de
+    // ~0.23s (2^24 ciclos de pixel) con registro de retencion — el COM11 lo
+    // muestrea cuasi-estatico. Si durante un corte audible este pico se
+    // DESPLOMA, las muestras que consume el HDMI van ya muertas (reo aguas
+    // arriba); si sigue alto, el reo es el empaquetado o el receptor.
+    reg [15:0] amp_acc = 16'd0;
+    reg [23:0] amp_win = 24'd0;
+    reg [15:0] dbg_amp_r = 16'd0;
+    wire [15:0] asw_abs = audio_sample_word[0][15]
+                        ? (~audio_sample_word[0] + 16'd1)
+                        : audio_sample_word[0];
+    always @(posedge clk_pixel) begin
+        amp_win <= amp_win + 24'd1;
+        if (amp_win == 24'd0) begin
+            dbg_amp_r <= amp_acc;
+            amp_acc   <= 16'd0;
+        end
+        else if (asw_abs > amp_acc) amp_acc <= asw_abs;
+    end
+    assign dbg_amp = dbg_amp_r;
 
     // ========================================================================
     // Diagnóstico (stretchers retriggerables; activo = 1)
@@ -525,6 +660,7 @@ module msx2hdmi_v9968 (
     // ========================================================================
 
     logic [9:0] tmds_ntsc [NUM_CHANNELS-1:0];
+    wire apkt_pulse_ntsc, aovr_pulse_ntsc;      // _127I telemetria bug #14
     hdmi #( .VIDEO_ID_CODE(4),                  // 720p60, frame 1650×750
             .DVI_OUTPUT(0),
             .VIDEO_REFRESH_RATE(60.0),
@@ -540,15 +676,31 @@ module msx2hdmi_v9968 (
             )
     hdmi_ntsc ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
-          .clk_audio(clk_audio),
+          .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
+          .reset_cx( rst_cx[10:0] ),   // _136: anclaje compensado
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_ntsc),
           .cy(cy_ntsc),
-          .tmds_internal(tmds_ntsc)
+          .tmds_internal(tmds_ntsc),
+          .audio_pkt_pulse(apkt_pulse_ntsc),
+          .audio_ovr_pulse(aovr_pulse_ntsc)
         );
+
+    // _127I telemetria bug #14: contadores de paquetes de audio despachados
+    // y de overruns del doble buffer del packet_picker (instancia NTSC — la
+    // salida real; el nucleo es NTSC-only). Esperado: 11025.0 paquetes/s
+    // CLAVADOS y ovr=0. Si la tasa baja o hay ovr durante un corte audible,
+    // el lado transmisor es culpable; si sigue perfecta -> receptor/cable.
+    reg [15:0] apkt_cnt = 16'd0;
+    reg [7:0]  aovr_cnt = 8'd0;
+    always @(posedge clk_pixel) begin
+        if (apkt_pulse_ntsc) apkt_cnt <= apkt_cnt + 1'b1;
+        if (aovr_pulse_ntsc) aovr_cnt <= aovr_cnt + 1'b1;
+    end
+    assign dbg_apkt = {aovr_cnt, 8'h00, apkt_cnt};
 
     logic [9:0] tmds_pal [NUM_CHANNELS-1:0];
     hdmi #( .VIDEO_ID_CODE(19),                 // 720p50, frame 1980×750
@@ -566,9 +718,10 @@ module msx2hdmi_v9968 (
             )
     hdmi_pal ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
-          .clk_audio(clk_audio),
+          .audio_ce(audio_ce),
           .rgb(rgb_out),       // _58: con dim de scanlines aplicado
           .reset( hdmi_rst ),
+          .reset_cx( rst_cx[11:0] ),   // _136: anclaje compensado
           .audio_sample_word(audio_sample_word),
           .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
           .cx(cx_pal),

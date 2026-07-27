@@ -399,8 +399,7 @@ module vdp (
 		.reg_sprite_mode3							( reg_sprite_mode3							),
 		.reg_sprite16_mode							( reg_sprite16_mode							),
 		.reg_flat_interlace_mode					( reg_flat_interlace_mode					),
-		.reg_sprite_priority_shuffle				( reg_sprite_priority_shuffle				),
-		.reg_ext_palette_mode						( reg_ext_palette_mode						)
+		.reg_sprite_priority_shuffle				( reg_sprite_priority_shuffle				)
 	);
 
 	// --------------------------------------------------------------------
@@ -555,8 +554,8 @@ module vdp (
 		.display_b									( display_b									),
 		.reg_interlace_mode							( reg_interlace_mode						),
 		.reg_flat_interlace_mode					( reg_flat_interlace_mode					),
-		.reg_denominator							( 8'd200									),
-		.reg_normalize								( 8'd41										),
+		.reg_denominator							( 8'd192									),
+		.reg_normalize								( 8'd43										),
 		.reg_50hz_mode								( reg_50hz_mode								)
 	);
 endmodule
