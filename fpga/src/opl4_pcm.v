@@ -829,11 +829,11 @@ always @(posedge clk_eng or negedge erst_n) begin
             fr[10] <= c_miss[15:8]; fr[11] <= c_miss[7:0];
             fr[12] <= c_pf[15:8];   fr[13] <= c_pf[7:0];
             fr[14] <= {lvl_min_w, rf_lvl};
-            // _114diag: nibble alto = estado de VIDEO (2FF), bajo = alive del
-            // motor. Yo (COM11) veo: alive avanza=motor vivo; vid[2:0]=frame_cnt
-            // avanza entre tramas => el pipeline de video GENERA FRAMES;
-            // vid[3]=pll27_lock. (Restaurar a {ifw_hits,alive} tras diagnostico.)
-            fr[15] <= {vid_s1, alive};     // el sum va aparte como byte 16
+            // niquelado B: RESTAURADO a {ifw_hits, alive} — lo que documenta
+            // la spec de la trama (:758) y espera tools/dbg_reader.py. El
+            // diagnostico _114diag ({vid_s1, alive}) dejaba invisibles los
+            // hits del watchdog, el centinela de la salud del motor.
+            fr[15] <= {ifw_hits, alive};   // el sum va aparte como byte 16
             seq <= seq + 8'd1;
             fr_i <= 5'd0; bit_i <= 0; baud <= 0; sum <= 8'd0;
         end

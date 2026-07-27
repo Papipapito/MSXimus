@@ -124,13 +124,11 @@ module vdp_vram_interface (
 	wire		[17:0]	w_screen_mode_vram_address;
 	wire		[17:0]	w_command_vram_address;
 	reg			[17:0]	ff_vram_address;
-	reg			[1:0]	ff_vram_byte_sel;
 	reg					ff_vram_valid;
 	reg					ff_vram_write;
 	reg			[31:0]	ff_vram_wdata;
 	reg			[3:0]	ff_vram_wdata_mask;
 	reg			[2:0]	ff_vram_rdata_sel;
-	reg			[2:0]	ff_vram_rdata_sel_d1;
 	wire		[7:0]	w_rdata8;
 	reg			[31:0]	ff_screen_mode_vram_rdata;
 	reg			[31:0]	ff_sprite_vram_rdata;
@@ -295,17 +293,6 @@ module vdp_vram_interface (
 
 	//	MSXimus: byte_sel del ECO de la respuesta (no del snapshot de fase fija)
 	assign w_rdata8 = func_rdata_sel( vram_rtag[1:0], vram_rdata );
-
-	always @( posedge clk ) begin
-		if( !reset_n ) begin
-			ff_vram_rdata_sel_d1	<= 2'd0;
-			ff_vram_byte_sel		<= 2'd0;
-		end
-		else if( h_count == c_timming_a || h_count == c_timming_b ) begin
-			ff_vram_rdata_sel_d1	<= ff_vram_rdata_sel;
-			ff_vram_byte_sel		<= ff_vram_address[1:0];
-		end
-	end
 
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
