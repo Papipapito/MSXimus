@@ -133,6 +133,34 @@ IO_LOC  "esp_tx_o" W21; IO_PORT "esp_tx_o" IO_TYPE=LVCMOS33 DRIVE=8;        // J
 // _156: indicador de turbo (esquema del nano: drive suave; el C6 lo lee en
 // GPIO3 con pulldown => sin cable = "Normal", sin destellos en frio)
 IO_LOC  "esp_turbo_o" N13; IO_PORT "esp_turbo_o" IO_TYPE=LVCMOS33 DRIVE=4;   // J10 p18 (SDRAM1_D8) -> GPIO3 del C6
+// ============================================================================
+// PINOUT COMPLETO DEL J10 — extraido del ESQUEMATICO OFICIAL (27/07)
+// docs/hw/Tang_Mega_60K_Console_32001C_Schematics.pdf, hoja del conector +
+// hoja de ballout. Los tres pines EN USO validan la extraccion: SDRAM1_D12=W21,
+// D10=N17, D8=N13 casan exactamente con lo medido/usado arriba.
+//
+//   pin | net          | bola FPGA (banco)      || pin | net          | bola
+//   ----+--------------+------------------------++-----+--------------+------
+//    11 | +5V          | -                      ||  12 | GND          | -
+//    13 | SDRAM1_D13   |                        ||  14 | SDRAM1_D12   | W21 (B7)  [TX  -> C6]
+//    15 | SDRAM1_D11   |                        ||  16 | SDRAM1_D10   | N17 (B6)  [RX  <- C6]
+//    17 | SDRAM1_D9    |                        ||  18 | SDRAM1_D8    | N13 (B6)  [TURBO -> C6]
+//    19 | SDRAM1_A12   | V20 (B8, GCLKC_8)      ||  20 | SDRAM1_CLK   | U20 (B8, GCLKT_8)  <- LIBRE
+//    21 | SDRAM1_A9    | Y22 (B8)               ||  22 | SDRAM1_A11   | Y21 (B8)           <- LIBRE
+//    23 | SDRAM1_A7    | AB22 (B8)              ||  24 | SDRAM1_A8    |
+//    25 | SDRAM1_A5    |                        ||  26 | SDRAM1_A6    | AA20 (B7)
+//    27 | SDRAM1_/WE   |                        ||  28 | SDRAM1_A4    |
+//    29 | SDRAM1_EXIO0 |                        ||  30 | SDRAM1_EXIO1 |
+//   (1-10 = SDRAM1_D0..D7,D15,D14; el resto de la tabla en el esquematico)
+//
+// SIGUIENTES DOS PINES LIBRES de la columna par, para ampliar el cable plano a
+// 6 hilos (12/14/16/18/20/22) — reservados para la CINTA TSX del C6:
+//   J10 p20 = U20  (banco 8; es GCLKT_8, entrada de reloj global: IDEAL como
+//                   entrada de datos rapida desde el C6)
+//   J10 p22 = Y21  (banco 8, IOB99A)
+// ⚠ Siguen siendo pines del slot SDRAM1: si algun dia se pincha un 2o modulo
+//   de SDRAM ahi, todo esto se muda.
+// ============================================================================
 
 // ---- Memoria del CORE: SDR SDRAM (módulo Tang SDRAM, W9825G6KH, 16b/32MB) ----
 //  Decisión (docs/MEMORY_OPTIONS.md): el core va en SDR SDRAM, reusando memory.v
