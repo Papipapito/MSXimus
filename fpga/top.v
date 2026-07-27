@@ -167,6 +167,43 @@ module top
 
 );
 
+// ============================================================================
+// GUARDAS de la matriz ENABLE_* (niquelado B, bug #22 del informe): las
+// combinaciones rotas COMPILABAN con nets implicitas de 1 bit sin driver
+// (el patron que ya mordio en la _40). Ahora fallan en sintesis instanciando
+// un modulo inexistente cuyo NOMBRE es el mensaje de error. Coste cero en
+// builds sanos.
+`ifdef ENABLE_OPL4_WAVE
+ `ifndef ENABLE_WAVE_DDR3
+    ERROR_ENABLE_OPL4_WAVE_requiere_ENABLE_WAVE_DDR3 u_guarda_def1();
+ `endif
+ `ifndef ENABLE_WAVE_LOADER
+    ERROR_ENABLE_OPL4_WAVE_requiere_ENABLE_WAVE_LOADER u_guarda_def2();
+ `endif
+ `ifndef ENABLE_OPL4FM
+    ERROR_ENABLE_OPL4_WAVE_requiere_ENABLE_OPL4FM u_guarda_def3();
+ `endif
+`endif
+`ifdef ENABLE_WAVE_LOADER
+ `ifndef ENABLE_WAVE_DDR3
+    ERROR_ENABLE_WAVE_LOADER_requiere_ENABLE_WAVE_DDR3 u_guarda_def4();
+ `endif
+`endif
+`ifdef ENABLE_VRAM_DDR3
+ `ifndef ENABLE_V9968_VDP
+    ERROR_ENABLE_VRAM_DDR3_requiere_ENABLE_V9968_VDP u_guarda_def5();
+ `endif
+`endif
+// Stubs para builds SIN estos subsistemas (nets que el resto del top consume
+// incondicionalmente — sin ellos, net implicita sin driver):
+`ifndef ENABLE_CONFIG
+    wire config_reset_req = 1'b0;   // warm-reset: sin bloque config no hay peticion
+    wire pana41_wr        = 1'b0;   // turbo Panasonic: sin config no hay decode
+`endif
+`ifndef ENABLE_SDCARD
+    wire sd_busy_w = 1'b0;
+`endif
+
 initial begin
 
 end
@@ -2244,7 +2281,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign psgBdir = ( bus_addr[7:3]== 5'b10100 && iorq_wr_n == 0 && bus_addr[1]== 0 ) ?  1 : 0; // I/O:A0-A2h / PSG(AY-3-8910) bdir = 1 when writing to &HA0-&Ha1
     assign psgBc1 = ( bus_addr[7:3]== 5'b10100 && ((iorq_rd_n==0 && bus_addr[1]== 1) || (bus_addr[1]==0 && iorq_wr_n==0 && bus_addr[0]==0))) ? 1 : 0; // I/O:A0-A2h / PSG(AY-3-8910) bc1 = 1 when writing A0 or reading A2
     assign psgPA =8'h00;
-    reg psgPB = 8'hff;
+    // niquelado B: aqui habia un `reg psgPB = 8'hff;` DUPLICANDO el wire [7:0]
+    // psgPB de arriba (identificador doble, ancho 1 vs 8 — mina de sintesis).
+    // El wire con el loopback O_IOB->I_IOB es la conexion correcta del puerto B.
 
     // v2.4: el PSG vive ENTERO en 54M (su bus BDIR/BC1/I_DA es del dominio 54M;
     // clockearlo a 27M con la fase arbitraria del CLKDIV lo dejaba MUDO). La
@@ -3539,6 +3578,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [15:0] audio_sample_r;
     wire megaram_wrt;
     wire y8950_int_n = 1'b1;   // _81: sin sonido no hay Y8950
+    wire opl4_int_n  = 1'b1;   // niquelado B (bug #21): sin sonido no hay OPL4 —
+                               // faltaba y quedaba una net implicita SIN DRIVER
+                               // colgada del INT_n del Z80 (leccion EX3638)
     assign opl4pcm_wait_n = 1'b1;  // _89: sin sonido no hay motor PCM
 
 `endif

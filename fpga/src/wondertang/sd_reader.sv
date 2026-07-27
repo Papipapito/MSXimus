@@ -411,7 +411,7 @@ always @ (posedge clk or negedge rstn)
                         ridx   <= 0;
 
                     end else begin
-                        if(ridx > 1000000)      // according to SD datasheet, 1ms is enough to wait for DAT result, here, we set timeout to 1000000 clock cycles = 80ms (when SDCLK=12.5MHz)
+                        if(ridx > 1000000)      // SD datasheet: 1ms basta para el DAT. Timeout = 1e6 ciclos del reloj de ESTE dominio (~80ms A 12.5MHz; escala con la frecuencia real del build — comentario corregido en niquelado B)
                             sddat_stat <= RTIMEOUT;
                         ridx   <= ridx + 1;
                     end
