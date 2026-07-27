@@ -1,168 +1,176 @@
 <p align="center"><img src="docs/logo/msximus.svg" alt="MSXimus" width="480"/></p>
 
 <h1 align="center">MSXimus</h1>
-<p align="center"><b>Un MSX2+ completo, en una Tang Console 60K — ahora con el VDP V9968</b></p>
+<p align="center"><b>A complete MSX2+ on a Tang Console 60K — now with the V9968 VDP</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v2.0-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.0-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
-  <img alt="licencia" src="https://img.shields.io/badge/licencia-GPLv3-orange">
+  <img alt="license" src="https://img.shields.io/badge/license-GPLv3-orange">
 </p>
 
-<p align="center"><img src="docs/img/v9968_devcon.jpg" alt="La demo DEVCON del V9968 corriendo en el MSXimus" width="820"/></p>
-<p align="center"><i>La demo oficial del V9968 de HRA!, corriendo en el MSXimus.</i></p>
+<p align="center">🇪🇸 <a href="README.es.md">Versión en castellano</a></p>
+
+<p align="center"><img src="docs/img/v9968_devcon.jpg" alt="The V9968 DEVCON demo running on the MSXimus" width="820"/></p>
+<p align="center"><i>HRA!'s official V9968 demo, running on the MSXimus.</i></p>
 
 ---
 
-**MSXimus** es el hermano mayor del [**MSXnano**](https://github.com/Papipapito/MSXnano): el mismo linaje de core MSX2+ (goauld → MSXnano), portado y ampliado sobre la **Tang Console 60K**. *Nano* era el pequeño; *Maximus* es el grande.
+**MSXimus** is the big brother of the [**MSXnano**](https://github.com/Papipapito/MSXnano): the same MSX2+ core lineage (goauld → MSXnano), ported to and expanded on the **Tang Console 60K**. *Nano* was the small one; *Maximus* is the big one.
 
-No necesita un MSX. Es un MSX.
+It doesn't need an MSX. It **is** an MSX.
 
-## Lo nuevo de la v2.0: el V9968
+## What's inside
 
-Hasta la v1.1 el MSXimus llevaba un **V9958**, el VDP del MSX2+. La v2.0 incorpora el **[V9968](https://github.com/hra1129/V9968_Cartridge) de Takayuki Hara (HRA!)**, un VDP imaginario que extiende el V9958 con lo que Yamaha nunca llegó a sacar:
+**Video** · Full-screen 720p HDMI output · **V9968** or V9958 · **configurable aspect ratio** (4:3 / widescreen) and scanlines, right from the menu
 
-- **Sprites multicolor**: 15 colores más transparencia **por sprite**, definidos píxel a píxel
-- **16 sprites por línea** en vez de 8 — se acabó el parpadeo
-- **Sprites escalables**, con magnificación libre, rotación y espejado
-- **Paleta extendida**: 256 colores en 16 juegos de 16
-- **256 KB de VRAM**, comandos extendidos (rotación LRMM, LFMM, LFMC) y modo de comandos rápido
+**Audio** · PSG · dual SCC with stereo · OPLL (MSX-Music) · **MSX-Audio Y8950** with FM and ADPCM-B · full **MoonSound / OPL4**: FM (OPL3) plus 24-voice wavetable
 
-<p align="center"><img src="docs/img/v9968_sprites.jpg" alt="Sprites multicolor del V9968" width="760"/></p>
-<p align="center"><i>Sprites de 15 colores definidos píxel a píxel: imposible en un MSX2+ real.</i></p>
+**Storage** · Nextor over microSD · megaram with Konami4, Konami-SCC, ASCII8 and ASCII16 mappers
 
-La VRAM del V9968 vive en la **DDR3** de la placa, lo que deja la SDRAM entera para la RAM del MSX y para lo que venga después.
+**Input** · USB keyboard straight into the board (no hub needed), with physical F1–F10 · USB gamepads mapped to MSX joysticks
 
-Y sigue siendo un MSX2+ normal: el software de siempre funciona igual.
+**WiFi** · UNAPI through an external **ESP32-C6**, with an **optional display** for extra information
 
-## Hardware necesario
+**Extras** · 5.37 MHz Panasonic-style turbo · custom boot menu with file browser · boot logo · temperature-driven fan control · serial-port telemetry for diagnostics
 
-| | Qué | Notas |
+## Required hardware
+
+| | What | Notes |
 |---|---|---|
-| **Obligatorio** | [Sipeed **Tang Console 60K**](https://wiki.sipeed.com/hardware/en/tang/tang-console/mega-console.html) | SOM Tang Mega 60K (Gowin GW5AT-60), HDMI, 2× USB-A, microSD, DDR3 |
-| **Obligatorio** | Módulo de **SDRAM** de la Console | Es la RAM del MSX; sin él el core no arranca |
-| Opcional | **Disipador** sobre el SOM | Recomendado: el core va bastante cargado |
-| Opcional | **Ventilador** de 5 V | Conector **JST SH de 1,0 mm, 2 pines**. Se gobierna solo por temperatura |
-| Opcional | Teclado y gamepad **USB** | Directos a los USB-A de la placa, sin hub |
-| Opcional | **ESP32-C6** (Waveshare C6-LCD-1.3) | Para el **WiFi**. 3 cables al conector libre de 40 pines; ver abajo |
+| **Required** | [Sipeed **Tang Console 60K**](https://wiki.sipeed.com/hardware/en/tang/tang-console/mega-console.html) | Tang Mega 60K SOM (Gowin GW5AT-60), HDMI, 2× USB-A, microSD, DDR3 |
+| **Required** | The Console's **SDRAM** module | It is the MSX's RAM; the core won't boot without it |
+| Optional | **20×20 mm heatsink** on the SOM | Recommended: the core keeps the chip busy. [Like these](https://s.click.aliexpress.com/e/_c4WMlpD9) |
+| Optional | **20×20 mm 5 V fan** | **1.25 mm JST connector, 2-pin** — [like this one](https://s.click.aliexpress.com/e/_c328rXwB). Fully temperature-controlled by the core |
+| Optional | **USB** keyboard and gamepad | Straight into the board's USB-A ports, no hub |
+| Optional | **ESP32-C6** (Waveshare C6-LCD-1.3) | For **WiFi**, with an optional info display |
 
-El ventilador no hace falta para funcionar. Si lo pones, el core lo controla solo: mide la temperatura del chip con un termómetro interno y solo sopla cuando toca.
+The fan is not needed for operation. If you fit one, the core drives it by itself: it measures the die temperature with an internal thermometer and only spins it when needed.
 
-## Instalación
+## Installation
 
-Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
+Everything goes into the board's **SPI flash**, at three different addresses:
 
-| # | Fichero | Dirección | ¿Obligatorio? |
+| # | File | Address | Required? |
 |---|---|---|---|
-| 1 | `msximus_60k_*.fs` | **`0x000000`** | Sí — es el core |
-| 2 | Pack de BIOS (`goauld_rom_int_*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
-| 3 | `yrw801.rom` | **`0x500000`** | No — solo para MoonSound/OPL4 |
+| 1 | `msximus_60k_*.fs` | **`0x000000`** | Yes — this is the core |
+| 2 | BIOS pack (`goauld_rom_int_*.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
+| 3 | `yrw801.rom` | **`0x500000`** | No — only for MoonSound/OPL4 |
 
-### Cómo grabarlo
+### How to flash
 
-1. Conecta la placa por el **USB-C** y abre el **Gowin Programmer** (va bien el de la versión 1.9.12).
-2. Deja que detecte el dispositivo: debe salir el **GW5AT-60**.
-3. Para **cada** uno de los tres ficheros, configura una operación de escritura en la **flash SPI externa** (las opciones que empiezan por *exFlash*, no las de SRAM), pon el fichero en *Programming File* y **la dirección de la tabla en el campo de dirección de inicio**.
-4. Graba primero el `.fs` y luego los otros dos. El orden entre ellos da igual, pero **las direcciones no**: si el pack no cae exactamente en `0x400000`, el core arranca y se queda en negro.
-5. **Apaga y enciende la placa.** Un reset **no** basta: la DDR3 necesita recalibrar desde frío y con un reset caliente puede quedarse colgada.
+1. Connect the board over **USB-C** and open the **Gowin Programmer** (the 1.9.12 one works fine).
+2. Let it detect the device: it should report a **GW5AT-60**.
+3. For **each** of the three files, configure a write operation to the **external SPI flash** (the options starting with *exFlash*, not the SRAM ones), select the file as *Programming File*, and put **the address from the table into the start-address field**.
+4. Flash the `.fs` first, then the other two. Their order doesn't matter — **the addresses do**: if the pack doesn't land exactly at `0x400000`, the core boots to a black screen.
+5. **Power-cycle the board.** A reset is **not** enough: the DDR3 needs a cold recalibration and may hang after a warm reset.
 
-> Si al arrancar ves la pantalla azul y nada más, casi siempre es (a) el pack en la dirección equivocada, o (b) que no has hecho el ciclo de apagado.
+> If you power up and only get a blue screen, it's almost always (a) the pack at the wrong address, or (b) a missing power-cycle.
 
-### Sobre el pack de BIOS
+### About the BIOS pack
 
-La release **solo trae el bitstream**. El pack contiene las BIOS del MSX, que son propiedad de sus dueños y no se pueden redistribuir aquí — igual que `yrw801.rom`, que es la wavetable de Yamaha del OPL4. Tienes que aportarlos tú, de un MSX que poseas o de donde tengas licencia para hacerlo.
+The release **ships the bitstream only**. The pack contains MSX BIOS ROMs, which belong to their owners and cannot be redistributed here — same for `yrw801.rom`, Yamaha's OPL4 wavetable. You must supply them yourself, from an MSX you own or wherever you're licensed to.
 
-Para montar el pack está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con tus propias ROMs, Nextor incluido.
+To build the pack there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from your own ROMs, Nextor included.
 
-Sin OPL4 el core funciona igual; simplemente no tendrás MoonSound.
+Without the OPL4 ROM the core works just the same; you simply won't have MoonSound.
 
-Después, mete una microSD con tus ROMs y discos y listo — el menú de arranque sale solo.
+After that, insert a microSD with your ROMs and disk images and you're done — the boot menu comes up on its own.
 
-## Qué lleva dentro
+## Status and known limitations
 
-**Vídeo** · Salida HDMI 720p a pantalla completa · V9968 o V9958 · scanlines y relación de aspecto configurables desde el menú
+This version has been validated on hardware with HRA!'s V9968 test suite, the DEVCON demo, Metal Gear 2, Aleste 2 and the usual MSX2+ software. It's not perfect, and I'd rather be upfront about it:
 
-**Audio** · PSG · doble SCC con estéreo · OPLL (MSX-Music) · **MSX-Audio Y8950** con FM y ADPCM-B · **MoonSound / OPL4** completo, FM (OPL3) y wavetable de 24 voces
+- **The MSX2+ boot logo** (the one shown when entering BASIC) glitches for half a second, probably tied to the interlacing of its animation. It's diagnosed; the known fix hurts the chip's routing and is parked — it's purely cosmetic.
+- **A few stray lines remain** in the most demanding V9968 demo scenes — on the order of 4–10 cache misses per frame. Games are unaffected.
+- **Two-page scroll in SCREEN 7 and 8**, and backwards scroll, are not fully polished yet.
+- The core tracks the V9968 as it was in **January 2026**. HRA! has kept working since; later fixes are being ported one by one — details in [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
-**Almacenamiento** · Nextor sobre microSD · megaram con Konami4, Konami-SCC, ASCII8 y ASCII16
-
-**Entrada** · Teclado USB directo sin hub, con F1–F10 físicas · gamepads USB mapeados a joystick MSX
-
-**WiFi** · UNAPI por **ESP32-C6** externo: menú de configuración (tecla `W`), descarga directa desde internet, telnet, FTP… El módulo (Waveshare ESP32-C6-LCD-1.3, con pantallita de estado) se conecta con **3 cables** al conector libre de 40 pines — GND y dos hilos de UART en pines consecutivos — y se alimenta por su USB-C. Firmware: [ESP32-UNAPI-Firmware](https://github.com/ducasp/ESP8266-UNAPI-Firmware) (port ESP32, rama `msxnano`), protocolo UNAPI de ducasp a 859372 bps. El detalle de pines está en `fpga/constraints/msx_console60k.cst`.
-
-**Extras** · Turbo Panasonic 5,37 MHz · menú de arranque propio con explorador de ficheros · logo de arranque · control de ventilador por temperatura · telemetría por puerto serie para diagnóstico
-
-## Estado y limitaciones conocidas
-
-Esta versión se ha validado en hardware con la batería de tests del V9968 de HRA!, la demo DEVCON, Metal Gear 2, Aleste 2 y el software MSX2+ habitual. No es perfecta, y prefiero contarlo:
-
-- **El logo de arranque del MSX2+** (el que sale al entrar en BASIC) muestra glitches durante medio segundo, probablemente ligados al entrelazado de su animación. Está diagnosticado; el arreglo conocido penaliza el rutado del chip y está aparcado — es puramente cosmético.
-- **Quedan líneas sueltas** en las escenas más exigentes de las demos del V9968 — del orden de 4 a 10 fallos de caché por frame. No afecta a los juegos.
-- El **scroll de dos páginas en SCREEN 7 y 8**, y el scroll hacia atrás, todavía no están finos.
-- El core está alineado con el V9968 tal como estaba en **enero de 2026**. HRA! ha seguido trabajando desde entonces y los arreglos posteriores se van portando uno a uno; el detalle está en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
-
-## Estructura del repositorio
+## Repository layout
 
 ```
-docs/            Planes, auditorías, logo, capturas
+docs/            Plans, audits, logo, screenshots
 fpga/            top.v, build.tcl
-  v9968/         El VDP V9968 (+ ORIGEN.txt: procedencia y parches locales)
-  video720/      Puente HDMI y escalador
-  src/           RTL propio (shim de VRAM, backend DDR3, audio, USB…)
-  constraints/   Pinout y constraints de la Console 60K
-tools/           Testbenches y utilidades de validación
+  v9968/         The V9968 VDP (+ ORIGEN.txt: provenance and local patches)
+  video720/      HDMI bridge and scaler
+  src/           Own RTL (VRAM shim, DDR3 backend, audio, USB…)
+  constraints/   Console 60K pinout and constraints
+tools/           Testbenches and validation utilities
 ```
 
-## Licencia
+## Versions
 
-**GPLv3**, por derivación de [`Papipapito/MSXnano`](https://github.com/Papipapito/MSXnano). Ver [LICENSE](LICENSE) y [UPSTREAM.md](UPSTREAM.md) para la atribución completa y la IP de terceros.
+### v2.0 — the news: the V9968
 
-El **V9968** es de Takayuki Hara y viene con su licencia propia, tipo BSD pero **no comercial**: se puede redistribuir conservando los avisos y publicar gratis, **pero no vender**. Esa condición se hereda, así que **este proyecto no se vende**.
+Up to v1.1 the MSXimus carried a **V9958**, the MSX2+ VDP. v2.0 brings in **Takayuki Hara's (HRA!) [V9968](https://github.com/hra1129/V9968_Cartridge)**, an imaginary VDP that extends the V9958 with everything Yamaha never got to ship:
 
-El logo del MSXimus es del proyecto.
+- **Multicolor sprites**: 15 colors plus transparency **per sprite**, defined pixel by pixel
+- **16 sprites per line** instead of 8 — flicker is over
+- **Scalable sprites**, with free magnification, rotation and mirroring
+- **Extended palette**: 256 colors in 16 sets of 16
+- **256 KB of VRAM**, extended commands (LRMM rotation, LFMM, LFMC) and a fast command mode
+
+<p align="center"><img src="docs/img/v9968_sprites.jpg" alt="V9968 multicolor sprites" width="760"/></p>
+<p align="center"><i>15-color sprites defined pixel by pixel: impossible on a real MSX2+.</i></p>
+
+The V9968's VRAM lives in the board's **DDR3**, leaving the whole SDRAM to the MSX's RAM and to whatever comes next. v2.0 also debuts the **ESP32-C6 WiFi**, fixes a serious DDR3 refresh bug inherited from the community reference configuration, and ports the first upstream V9968 fixes.
+
+And it's still a regular MSX2+: your usual software runs just the same.
+
+### v1.1 — stable V9958
+
+The first public MSXimus release: the classic MSX2+ with V9958, the full audio stack (PSG, SCC, OPLL, Y8950, OPL4) and the boot menu, on build `_116`.
+
+## License
+
+**GPLv3**, derived from [`Papipapito/MSXnano`](https://github.com/Papipapito/MSXnano). See [LICENSE](LICENSE) and [UPSTREAM.md](UPSTREAM.md) for full attribution and third-party IP.
+
+The **V9968** belongs to Takayuki Hara and comes under his own BSD-like but **non-commercial** license: it may be redistributed with its notices intact and published for free, **but not sold**. That condition is inherited, so **this project is not for sale**.
+
+The MSXimus logo belongs to the project.
 
 ---
 
-# Gracias
+# Thanks
 
-Esto no lo he hecho yo solo, ni de lejos. Todo lo que hay aquí se apoya en el trabajo de gente que publicó lo suyo para que otros pudiéramos seguir.
+I didn't build this alone — not even close. Everything here stands on the work of people who published theirs so others could keep going.
 
-### El core y su linaje
+### The core and its lineage
 
-- **[jabadiagm](https://github.com/jabadiagm)** — MSXgoauldSD, el Goa'uld, origen de todo este linaje (goauld → MSXnano → MSXimus), y MSX_LCD_tn20k.
-- **Linaje OCM-PLD / ESE Artists' Factory** — Kunihiko Ohnaka, KdL y todos los que han mantenido vivo el MSX2+ en FPGA durante dos décadas. De ahí viene el VDP V9958.
+- **[jabadiagm](https://github.com/jabadiagm)** — MSXgoauldSD, the Goa'uld, origin of this whole lineage (goauld → MSXnano → MSXimus), and MSX_LCD_tn20k.
+- **OCM-PLD / ESE Artists' Factory lineage** — Kunihiko Ohnaka, KdL and everyone who has kept the FPGA MSX2+ alive for two decades. The V9958 VDP comes from there.
 
-### El V9968
+### The V9968
 
-- **[Takayuki Hara — HRA!](https://github.com/hra1129)** — autor del **V9968**, el VDP que hace especial a esta versión, y de la demo DEVCON y de toda la batería de tests con la que se ha validado. Gracias por publicarlo y por documentarlo tan bien.
-- **[Albert Herranz — herraa1](https://github.com/herraa1)** — port de la demo a MSXgl (`ru66-v9968-demo`), el cartucho V9968 y el material de referencia que ha permitido depurar el core.
+- **[Takayuki Hara — HRA!](https://github.com/hra1129)** — author of the **V9968**, the VDP that makes this version special, of the DEVCON demo and of the whole test suite it was validated against. Thank you for publishing and documenting it so well.
+- **[Albert Herranz — herraa1](https://github.com/herraa1)** — the MSXgl demo port (`ru66-v9968-demo`), the V9968 cartridge and the reference material that made debugging the core possible.
 
 ### Audio
 
-- **[Jose Tejada — jotego](https://github.com/jotego)** — jt2413 (OPLL), jtopl2 (FM del Y8950) y jt10_adpcmb. GPLv3.
-- **[Greg Taylor — gtaylormb](https://github.com/gtaylormb)** — opl3_fpga (LGPLv3), que incluye `afifo.v` de **Dan Gisselquist (ZipCPU)**.
-- **Jokin Miragaia (antxiko)** — mangOPL4, los arreglos para Gowin y las lecciones de integración.
-- **srg320** — YMF278B.sv, el motor PCM del OPL4, cedido con permiso expreso.
-- **Equipo MAME** — R. Belmont, Olivier Galibert y hap (ymf278b.cpp), y **Aaron Giles** (ymfm).
-- **Tatsuyuki Satoh** — el algoritmo ADPCM-B de referencia.
+- **[Jose Tejada — jotego](https://github.com/jotego)** — jt2413 (OPLL), jtopl2 (Y8950 FM) and jt10_adpcmb. GPLv3.
+- **[Greg Taylor — gtaylormb](https://github.com/gtaylormb)** — opl3_fpga (LGPLv3), which includes `afifo.v` by **Dan Gisselquist (ZipCPU)**.
+- **Jokin Miragaia (antxiko)** — mangOPL4, the Gowin fixes and the integration lessons.
+- **srg320** — YMF278B.sv, the OPL4's PCM engine, contributed with express permission.
+- **MAME team** — R. Belmont, Olivier Galibert and hap (ymf278b.cpp), and **Aaron Giles** (ymfm).
+- **Tatsuyuki Satoh** — the reference ADPCM-B algorithm.
 
-### La placa y la cadena de vídeo
+### The board and the video chain
 
-- **[nand2mario](https://github.com/nand2mario)** — `ddr3_framebuffer_gowin` (la receta de la IP DDR3 que hace posible meter ahí la VRAM), `usb_hid_host`, la plantilla de vídeo 720p y, en general, por abrir camino en el ecosistema Tang.
-- **hdl-util (Sameer Puri)** — el empaquetador HDMI (MIT).
-- **[ducasp](https://github.com/ducasp)** — firmware y protocolo UNAPI del ESP.
+- **[nand2mario](https://github.com/nand2mario)** — `ddr3_framebuffer_gowin` (the DDR3 IP recipe that makes VRAM-in-DDR3 possible), `usb_hid_host`, the 720p video template and, in general, for clearing the path in the Tang ecosystem.
+- **hdl-util (Sameer Puri)** — the HDMI packer (MIT).
+- **[ducasp](https://github.com/ducasp)** — the ESP UNAPI firmware and protocol.
 
-### Validación y herramientas
+### Validation and tools
 
-- **Equipo de [openMSX](https://openmsx.org)** — la referencia contra la que se comprueba si algo está bien o mal.
-- **Laurens Holst (grauw)** — VGMPlay MSX y la MSX Assembly Page.
+- **The [openMSX](https://openmsx.org) team** — the reference against which right and wrong get decided.
+- **Laurens Holst (grauw)** — VGMPlay MSX and the MSX Assembly Page.
 - **aoineko (Guillaume Blanchard)** — MSXgl.
-- **[Sipeed](https://sipeed.com)** y **Gowin** — la placa y el toolchain.
-- **Yamaha** — por los chips originales (V9958, YM2149, YM2413, Y8950, YMF262, YMF278B) que esto emula con cariño.
+- **[Sipeed](https://sipeed.com)** and **Gowin** — the board and the toolchain.
+- **Yamaha** — for the original chips (V9958, YM2149, YM2413, Y8950, YMF262, YMF278B) that this project emulates with love.
 
-### Y
+### And
 
-- **Claude (Anthropic)** — **coautora del código**: RTL nuevo, el shim de VRAM sobre DDR3, las integraciones de audio, la suite de validación, y una cantidad indecente de horas de depuración a base de simulación, telemetría y equivocarse mucho antes de acertar.
+- **Claude (Anthropic)** — **code co-author**: new RTL, the VRAM-over-DDR3 shim, the audio integrations, the validation suite, and an indecent number of debugging hours built on simulation, telemetry, and being wrong many times before being right.
 
 ---
 
-<p align="center"><i>Para la comunidad MSX. Que dure otros cuarenta años.</i></p>
+<p align="center"><i>For the MSX community. May it last another forty years.</i></p>
