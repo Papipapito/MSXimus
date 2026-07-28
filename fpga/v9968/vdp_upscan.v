@@ -77,7 +77,17 @@ module vdp_upscan (
 	output		[7:0]	upscan_g,
 	output		[7:0]	upscan_b
 );
-	localparam			c_left_pos		= 11'd32;		//	画面上の水平位置。小さくすると左へ、大きくすると右に寄る。
+	//	MSXimus _158 BORDES: 32 -> 94.  El line buffer solo captura las
+	//	muestras cuyo w_write_pos cae en [0,1023]; con 32 la ventana escrita
+	//	empezaba en la muestra 0 = punto MSX -15 (medido: 620 escrituras,
+	//	contenido en [30,541]) y NO habia sitio para 32 puntos de borde por
+	//	la izquierda.  Con 94 se escribe la LINEA MSX ENTERA (684 muestras,
+	//	indices [14,683] al adjust neutro) y el contenido pasa a [92,603]:
+	//	quedan 92 muestras utiles a la izquierda y 80 a la derecha, de sobra
+	//	para los 64+64 que pide la ventana de 640.  El V9968 pinta BACKDROP
+	//	en toda la linea fuera del area activa (no hay negro de blanking en
+	//	el camino de color), asi que esas muestras son borde de verdad.
+	localparam			c_left_pos		= 11'd94;		//	画面上の水平位置。小さくすると左へ、大きくすると右に寄る。
 	wire		[10:0]	w_write_pos;
 	wire		[9:0]	w_read_pos;
 	wire		[9:0]	w_even_address;

@@ -75,7 +75,11 @@ module vdp_video_out #(
 	// muestras (~7 px MSX) al borde IZQUIERDO y se comia el DERECHO. Con 30,
 	// TEXT1 queda centrado exacto (16 muestras de borde por lado). SET ADJUST
 	// (+-8) sigue montado encima sin cambios.
-	parameter [9:0]	c_read_start = 10'd30,
+	// [v2.0.2 BORDES] 30 -> 28: con c_left_pos = 94 (vdp_upscan.v) el
+	// contenido arranca en la muestra 92; leer desde 28 deja 64 muestras
+	// (= 32 puntos MSX) de borde a la IZQUIERDA y, como la ventana ahora
+	// mide 640 muestras, otras 64 a la DERECHA (28+639 = 667 = 92+511+64).
+	parameter [9:0]	c_read_start = 10'd28,
 	// MSXimus _143 PRIME: adelanta el arranque de la ventana ACTIVA (arranque
 	// del puntero de lectura + reset del Bresenham) respecto a h_en_start (748)
 	// para CEBAR la tuberia del magnificador (lat ~8 columnas) antes de que se
@@ -143,10 +147,14 @@ module vdp_video_out #(
 	localparam		c_v_count_max_60	= 10'd523;
 	localparam		c_v_count_max_50	= 10'd625;
 	localparam		active_area_start	= c_active_start;
-	localparam		active_area_end		= 12'd747 + 12'd1536;	//	fijo (2283)
+	// [v2.0.2 BORDES] ventana ACTIVA de 1280 clk = 640 columnas nativas
+	// (antes 1536 clk = 768). Con el magnificador a 1 muestra/columna eso
+	// son 640 muestras = 256 px de contenido + 32 puntos de borde por lado.
+	localparam		c_h_active			= 12'd1280;
+	localparam		active_area_end		= 12'd747 + c_h_active;	//	2027 (antes 2283)
 	localparam		clocks_per_line		= 12'd2736;
 	localparam		h_en_start			= 12'd748;
-	localparam		h_en_end			= h_en_start + 12'd1536;
+	localparam		h_en_end			= h_en_start + c_h_active;	//	2028 (antes 2284)
 	localparam		hs_start			= clocks_per_line - 1;
 	localparam		hs_end				= 12'd567;
 	localparam		v_en_start			= 10'd14;
@@ -155,7 +163,17 @@ module vdp_video_out #(
 	localparam		vs_end_60hz			= c_v_count_max_60 - 10'd6;
 	localparam		vs_start_50hz		= c_v_count_max_50 - 10'd13;
 	localparam		vs_end_50hz			= c_v_count_max_50 - 10'd6;
-	localparam		c_numerator			= 512 / 4;
+	// [v2.0.2 BORDES] 128 -> 192 == reg_denominator: el magnificador pasa a
+	// 1 muestra por columna (relacion 1:1, sin hold). Consecuencias:
+	//   * ff_numerator queda clavado en 0 => ff_coeff = 0 => tap1 puro
+	//     (nearest-neighbor trivial; los multiplicadores del bilineal se
+	//     podan en sintesis).
+	//   * un px MSX de 2 muestras = 2 columnas = 4 px de pantalla EXACTOS y
+	//     un px de 1 muestra (TEXT2/SCREEN6/7) = 1 columna = 2 px EXACTOS,
+	//     en LAS DOS fases de ce86 => desaparece la loteria que motivo el
+	//     fix _147 (c_active_start 731->729 deja de ser critico).
+	// OJO: debe seguir siendo igual a reg_denominator (vdp.v pasa 8'd192).
+	localparam		c_numerator			= 192;
 
 	wire			w_enable;
 	wire	[9:0]	w_x_position_w;

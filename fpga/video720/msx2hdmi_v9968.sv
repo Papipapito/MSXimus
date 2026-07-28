@@ -114,7 +114,10 @@ module msx2hdmi_v9968 (
 
     localparam HS_ACTIVE_LOW   = 0;  // V9968: display_hs/vs activos ALTOS
     localparam VS_ACTIVE_LOW   = 0;
-    localparam RING_W          = 768; // px por linea del ring (V9968)
+    // [v2.0.2 BORDES] 768 -> 640 columnas nativas: el V9968 saca ahora 640
+    // columnas (256 px de contenido x2 + 32 puntos de borde por lado x2) y
+    // 640 -> 1280 es un x2 EXACTO. Ahorra 4 BSRAM (24 -> 20 bloques).
+    localparam RING_W          = 640; // px por linea del ring (V9968)
     localparam NATIVE_LINES    = 240; // lineas nativas (480 dobladas / 2)
     localparam LOCK_LINES      = 6;  // líneas de salida DESDE y0 (ver cabecera)
     localparam CLKFRQ          = 74250;   // kHz de clk_pixel
@@ -239,7 +242,7 @@ module msx2hdmi_v9968 (
             // reg->mult->reg, patron _56b del read-side): a 85.9 el x800
             // dentro del mux por-pixel era -2.4ns. rel es estable toda la
             // linea y x_cnt==0 llega >=1 ce tras hs_lead: rel800 ya vale.
-            rel800 <= rel[5:1] * 15'd768;
+            rel800 <= rel[5:1] * 15'd640;
             if (cap_ok) begin
                 wr_en   <= 1'b1;
                 wr_data <= {r_q, g_q, b_q};
@@ -395,7 +398,8 @@ module msx2hdmi_v9968 (
     wire [11:0] wlast    = pal_x ? 12'd1979 : 12'd1649;             // W-1
     wire        xacc_en  = (cx >= wlast - 12'd1) || (cx < XSTOP_W - 12'd3);
     wire [10:0] xthresh  = 11'd1280;                     // ventana = 1280 (full)
-    wire [10:0] xinc     = 11'd768;                       // nativo del V9968 = 800
+    wire [10:0] xinc     = 11'd640;                      // nativo del V9968 = 640
+                                                         // => xx = cx>>1 (x2 exacto)
     wire        xrst_now = (cx == wlast - 12'd2);
 
     always @(posedge clk_pixel) begin : scaler
@@ -468,8 +472,8 @@ module msx2hdmi_v9968 (
     reg        tgt_is0_r   = 1'b0;    // ...y la línea destino es la 0 del frame
 
     always @(posedge clk_pixel) begin
-        yy720_r     <= yy[4:0]     * 15'd768;
-        yy720_inc_r <= yy_inc[4:0] * 15'd768;
+        yy720_r     <= yy[4:0]     * 15'd640;
+        yy720_inc_r <= yy_inc[4:0] * 15'd640;
         // flags para el ciclo SIGUIENTE: cx+1 ∈ {W-2,W-1,0,1} ⟺ cx ∈ {W-3,W-2,W-1,0}
         use_tgt_r   <= (cx >= wlast - 12'd2) || (cx == 12'd0);
         tgt_is0_r   <= ((cx >= wlast - 12'd2) && (cy == 10'd749)) ||
