@@ -395,6 +395,62 @@ module vdp_video_out #(
 			// solo pixel sin mezcla => bordes nitidos. Original preservado
 			// en el comentario para revertir facil.
 			//	ff_coeff <= w_normalized_numerator[14:7];					//	0 ... 63 (bilineal HRA)
+			//
+			// MSXimus [BUG #19 del INFORME_NIQUELADO 2026-07-26] — VERIFICADO
+			// INERTE DESDE LA v2.0.2. NO LO "ARREGLES" A CIEGAS.
+			// El informe tiene razon en la ARITMETICA: este snap a 8'd63 NO
+			// selecciona "un solo pixel", porque el datapath del bilineal pesa
+			// coeff/256 (vdp_video_out_bilinear.v: ff_mul <= w_mul[17:7] y luego
+			// ff_out <= w_add[8:1]), o sea 63/256 = 24,6% de mezcla; el snap "de
+			// verdad" seria 8'd255 (99,6%, error <= 1 LSB). PERO desde el cambio
+			// de bordes (commit 6d15c0b) esta linea NO HACE NADA, y ponerle
+			// 8'd255 TAMPOCO haria nada:
+			//   c_numerator == reg_denominator == 192 (magnificador 1:1) y
+			//   c_start_numerator = 0  =>  w_sub_numerator = ff_numerator + 192
+			//   - 192 = ff_numerator, con acarreo SIEMPRE 0 (w_hold = 0, no hay
+			//   columnas repetidas)  =>  ff_numerator es un PUNTO FIJO, y se
+			//   carga con 0 en el reset y en CADA linea (active_area_start)
+			//   =>  w_normalized_numerator = 0  =>  ff_coeff == 0 SIEMPRE, con
+			//   snap o sin el: el bilineal degenera en tap1 puro (pass-through).
+			// MEDIDO, no razonado: banco tb_coeff19.sv (entregado con el informe
+			// del bug #19, fuera del arbol), vdp_upscan + vdp_video_out REALES,
+			// 4 familias de modo (256px / TEXT1 / TEXT2 / 512px) x 8 combos de
+			// interlace/flat_interlace/50Hz/scanline x 80 lineas x las dos
+			// paridades de h_count (las dos fases del ring ce86), con contenido
+			// de frontera BINARIA 0x00/0xFF:
+			//   ff_numerator {0:103840}, ff_coeff {0:103840} — UN SOLO valor —,
+			//   ff_coeff2 (el que entra de verdad al bilineal) != 0 en CERO
+			//   ciclos, y 102400 muestras de salida bilineal 100% binarias,
+			//   0 mezcladas. En la pila COMPLETA (tb_textgeom del repo, vdp.v +
+			//   shim) la imagen sale con DOS colores exactos — borde 000000ff /
+			//   contenido 00ffffff — en los tres modos y en las dos fases del
+			//   ring: SCREEN1 241 runs {2:239}, TEXT1 229 runs {2:227}, TEXT2
+			//   469 runs {1:467} columnas nativas por pixel MSX. Ni un pixel
+			//   intermedio en ninguno.
+			// Control positivo del MISMO banco (para que no sea uno de esos
+			// bancos verdes que no ejercitan nada): con c_start_numerator = 128
+			// este mismo RTL da ff_coeff {63:103840} y 40960..81920 muestras
+			// MEZCLADAS (la frontera 0x00/0xFF sale 63 = el 24,6% que denuncia
+			// el informe) => el banco SI ve la mezcla cuando la hay.
+			// EL BUG REVIVE si alguien: (a) vuelve a un magnificador fraccionario
+			// (c_numerator != reg_denominator, p.ej. el 128 de antes de la
+			// v2.0.2), (b) pone c_start_numerator >= 128 (con 0 y 64 el snap
+			// sigue dando 0), o (c) cambia el 8'd192 que vdp.v cablea en
+			// reg_denominator. SOLO ENTONCES tiene sentido tocar el 8'd63, y el
+			// valor correcto entonces es 8'd255.
+			// DATO EXTRA, y por que el arreglo tampoco habria hecho falta ANTES:
+			// el mismo banco con el RTL de 6d15c0b^ (c_numerator = 128, cuando el
+			// snap SI se ejecutaba) da coeff 63 en 41280 ciclos... y en NINGUNO
+			// de ellos tap0 != tap1 (contador n_c2mix = 0 en las 4 familias de
+			// modo) => mezcla real CERO. El motivo: con el snap, el 63 cae
+			// siempre en la columna de HOLD del Bresenham, que es justo la que
+			// repite muestra (tap0 == tap1). El control de al lado — el mismo
+			// RTL con el coeficiente bilineal ORIGINAL de HRA — si pilla taps
+			// distintos (36160/37440 ciclos en TEXT2 y SCREEN6/7) y ensucia
+			// 36000..37280 muestras (ejemplo 234 sobre frontera 0xFF/0x00). O
+			// sea: el _142 hacia lo que prometia y el artefacto que el informe
+			// deducia ("1 de cada 3 fronteras con columna fantasma al 25%") no
+			// llego a existir nunca. Se deja la linea TAL CUAL a proposito.
 			ff_coeff	<= (w_normalized_numerator[14:7] >= 8'd32) ? 8'd63 : 8'd0;
 		end
 	end

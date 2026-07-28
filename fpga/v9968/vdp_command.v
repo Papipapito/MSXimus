@@ -819,7 +819,9 @@ module vdp_command (
 				reg_ny[10]	<= 1'b0;
 			end
 		end
-		else if( w_cache_flush_end ) begin
+		//	FIX ABORTO 2b (MSXimus): misma guarda que en ff_command_execute --
+		//	el flush_end del comando ABORTADO no es el fin del comando NUEVO.
+		else if( w_cache_flush_end && (ff_state == c_state_finish) ) begin
 			reg_ny <= ff_ny;
 		end
 	end
@@ -1112,7 +1114,18 @@ module vdp_command (
 		else if( ff_start ) begin
 			ff_command_execute <= 1'b1;
 		end
-		else if( w_cache_flush_end ) begin
+		//	FIX ABORTO 2b (MSXimus): w_cache_flush_end SOLO es "fin de comando"
+		//	si el motor lo esta esperando en c_state_finish. Un start (R#46) a
+		//	mitad del flush del comando ANTERIOR salta ya a la orden nueva, pero
+		//	el flush viejo sigue su curso y su flush_end llegaba igual: apagaba
+		//	el CE RECIEN encendido, y con el se congelan los contadores del
+		//	comando nuevo (todos se retienen con !ff_command_execute) -> el
+		//	comando pintaba UN pixel y se quedaba clavado hasta el siguiente
+		//	R#46. Con la guarda, el pulso rancio se ignora.
+		//	Banco: tools/v9968_sim/tb_cmdghost.sv (el rectangulo fantasma).
+		//	NO cambia el flujo normal: el motor SIEMPRE espera ese flush_end
+		//	parado en c_state_finish (ver la rama de ese estado mas abajo).
+		else if( w_cache_flush_end && (ff_state == c_state_finish) ) begin
 			ff_command_execute <= 1'b0;
 		end
 	end
@@ -1121,7 +1134,9 @@ module vdp_command (
 		if( !reset_n ) begin
 			ff_border_detect <= 1'b0;
 		end
-		else if( w_cache_flush_end ) begin
+		//	FIX ABORTO 2b (MSXimus): misma guarda que en ff_command_execute --
+		//	el flush_end del comando ABORTADO no es el fin del comando NUEVO.
+		else if( w_cache_flush_end && (ff_state == c_state_finish) ) begin
 			ff_border_detect <= ff_border_detect | ff_border_detect_request;
 		end
 		else if( clear_border_detect ) begin

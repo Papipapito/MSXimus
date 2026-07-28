@@ -307,3 +307,68 @@ Se anota aqui solo para que quien busque el historial de sprites mode3 en el
 sitio equivocado lo encuentre. Delta vs upstream HRA en fpga/v9968/*: NINGUNO
 nuevo. Banco de pruebas del caso real: tools/v9968_sim/tb_sprite3.sv -DRU66
 (+ sprite3_ru66_setup.svh y ru66_preload.svh, layout sacado de devcon.c).
+
+============================================================================
+[_162 2026-07-28] vdp_cpu_interface.v: HANDSHAKE DEL BUS — el latch aceptaba
+transacciones que el maestro NO veia aceptadas, y las ejecutaba DOS VECES.
+(Bug #1, severidad ALTA, del files/20260726/INFORME_NIQUELADO.md.)
+
+CAUSA: el latch del bus (always "Latch") aceptaba con `bus_valid &&
+ff_bus_ready` — ff_bus_ready CRUDO — mientras el maestro real
+(fpga/src/v9968_cpu_glue.v) solo da la transferencia por hecha cuando ve el
+bus_ready GATEADO `ff_bus_ready & ~ff_busy & ~ff_pf_inflight`. Los dos lados
+del handshake NO estaban de acuerdo sobre QUE ciclo era la transferencia:
+  - dentro de una ventana busy / pre-lectura el latch acepta (ff_bus_ready<=0)
+    y al ciclo siguiente ff_bus_ready vuelve a 1 (rama else: <= bus_ioreq),
+    asi que RE-ACEPTA la misma transaccion cada dos ciclos;
+  - cuando la ventana cae, w_read/w_write disparan (1a ejecucion) y el maestro
+    -que nunca vio ready- sigue con bus_valid alto: el latch la acepta otra vez
+    y la transaccion se ejecuta UNA SEGUNDA VEZ.
+Efectos: un IN del puerto 0 consume DOS bytes y adelanta el contador de
+direccion (candidato al residuo del "salto +-1 del puerto CPU"); un OUT al
+puerto 0 escribe DOS celdas; un OUT al puerto 1 toggla ff_2nd_access DOS veces
+y desincroniza el par de bytes -> a partir de ahi TODAS las escrituras de
+registro caen en el sitio equivocado hasta que un OUT impar re-alinee.
+PEOR CASO MEDIDO: si la ejecucion vuelve a levantar ff_busy (escritura) y la
+paridad de la ventana deja ff_bus_ready a 1 en su ultimo ciclo, el ciclo
+aceptar->ejecutar->busy->aceptar NO TERMINA: bus atascado y VRAM machacada
+byte a byte (con la latencia constante del banco es perpetuo; con la latencia
+variable de la DDR3 degenera en rafagas de N escrituras espurias).
+
+FIX (3 lineas): `wire w_bus_accept = bus_valid & bus_ready;` y el latch acepta
+con w_bus_accept. Es LA condicion del handshake, la misma que ve el maestro.
+Coste: 2 entradas mas en el enable del latch (ff_busy / ff_pf_inflight ya
+estaban en el cono de bus_ready). NO se toca la logica de VRAM ni la
+pre-lectura _149.
+
+BANCO NUEVO: tools/v9968_sim/tb_cpuif_dbl.sv + run_cpuif_dbl.sh
+(vdp_cpu_interface + v9968_cpu_glue REALES + VRAM de latencia programable).
+Modos: 0 lecturas encadenadas, 1 SETRD+IN, 2 escrituras encadenadas, 3
+escrituras con maestro ideal (aisla del bug #26 del glue), 4 barrido de fase
+IN->OUT de registro. La cuenta clave es n_exec - n_glue (ejecuciones de mas);
+si ninguna peticion cae en la ventana el banco lo dice y el caso NO vale.
+
+VERIFICACION (Icarus, antes -> despues, Z80 5,37 MHz salvo el modo 4):
+  MODE=3 LAT=120/200/280 : BUS ATASCADO (livelock)     -> 44/44 ejecuciones,
+                           0 de mas, 0 fallos, 0 flancos perdidos en el glue
+  MODE=2 LAT=200         : +11 ejecuciones, 6 celdas de VRAM corruptas +
+                           1 celda escrita FUERA del bloque -> 0 y 0
+  MODE=1 LAT=200         : +3 ejecuciones, 16 lecturas malas -> 0 y 0
+  MODE=4 LAT=140/180     : +1 ejecucion y 46 de 48 fases con R#7 PEGADO en el
+                           valor viejo (par de bytes desincronizado) -> 0 y 0
+  tb_t2cpuread (regresion _149, pila completa vdp+shim, TEXT2 dibujando):
+                           3,58 y 5,37 MHz -> 0,0% de bytes rancios y latencia
+                           CONSTANTE de 3 ciclos, IDENTICO a la referencia
+                           _149; 622 transferencias = 622 ejecuciones.
+  Con latencias bajas (<=120 ciclos) NINGUNA peticion cae en la ventana y el
+  antes/despues es bit-identico: el fix solo actua en el caso patologico.
+
+RESIDUO CONOCIDO (NO tocado, NO demostrado): si una pre-lectura se lanza en el
+MISMO ciclo en que el maestro da por aceptada una transaccion, ff_pf_inflight
+sube antes de que w_read/w_write disparen y esa transaccion se pierde
+(n_exec < n_glue). El barrido de fase del MODE=4 (48 fases x LAT 60..180) NO
+lo reproduce ni antes ni despues del fix. Si algun dia aparece, la cura es
+ceder el ciclo: `... && !w_bus_accept` en la rama que lanza la pre-lectura.
+Lo que SI se ve en el banco a latencias >2 us es el bug #26 del informe (el
+glue descarta flancos de csw_n/csr_n sin cola ni /WAIT): ese contador va
+aparte en el banco para no atribuirselo a este fix.

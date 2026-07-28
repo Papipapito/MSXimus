@@ -146,6 +146,7 @@ module vdp_timing_control_ssg (
 	reg					ff_hsync;
 	reg					ff_vsync;
 	reg					ff_clear_line_interrupt;
+	wire		[2:0]	w_horizontal_offset_l_next;		//	MSXimus _162: proximo valor del latch de R#27[2:0]
 
 	assign w_half_line_shift	= ff_field & (reg_interlace_mode | reg_flat_interlace_mode);
 
@@ -165,6 +166,24 @@ module vdp_timing_control_ssg (
 
 	assign horizontal_offset_l	= ff_horizontal_offset_l;
 	assign horizontal_offset_h	= ff_horizontal_offset_h;
+
+	//	MSXimus _162 (CORRECCION del _120): funcion de proximo estado del latch
+	//	de arriba, replicada TERMINO A TERMINO (misma condicion de captura, misma
+	//	rama de reset). Es lo que hay que restarle a la coordenada de sprites en
+	//	el _120: como esa resta esta ANTES de un registro, el valor correcto no es
+	//	el R#27 VIVO (reg_horizontal_offset_l) sino el que ff_horizontal_offset_l
+	//	tendra EN EL MISMO FLANCO en el que se registra la resta. PORQUE: R#27 se
+	//	latchea una sola vez por PAR de lineas (ff_v_count[0] && w_h_count_end);
+	//	usando el valor vivo, un split de R#27 por interrupcion de linea llegaba
+	//	a los SPRITES hasta ~2 lineas antes que al FONDO (desalineacion de 1..7 px
+	//	y posible desencuadre de la coleccion de sprites de una linea).
+	//	_162 (forma exacta que el verificador probo en verde, 0 desajustes):
+	//	con `reset_n &&` el mux devuelve el valor VIEJO del latch mientras el
+	//	reset esta aserto (1 ciclo de divergencia frente al upstream); con la
+	//	rama explicita a 0 la equivalencia es bit-exacta TAMBIEN en el reset,
+	//	que es justo lo que este parche viene a poder afirmar sin mentir.
+	assign w_horizontal_offset_l_next	= ( !reset_n ) ? 3'd0 :
+	                                      ( ff_v_count[0] && w_h_count_end ) ? reg_horizontal_offset_l: ff_horizontal_offset_l;
 
 	// --------------------------------------------------------------------
 	//	Horizontal Counter
@@ -424,12 +443,16 @@ module vdp_timing_control_ssg (
 		ff_screen_pos_x			<= w_screen_pos_x;
 		ff_screen_pos_x_clone	<= w_screen_pos_x;
 		//	MSXimus _120 (timing): la resta del scroll para los SPRITES se
-		//	hace AQUI, al otro lado del registro — bit-exacta ciclo a ciclo
-		//	con la combinacional que vivia en vdp_timing_control_sprite
-		//	(usar reg_horizontal_offset_l = el valor que ff_horizontal_
-		//	offset_l tendra el proximo flanco, tambien en el cambio de R#27).
-		//	Era el peor camino de TODA la matriz de rutados con CLS al 84%.
-		ff_screen_pos_x_sprite	<= { w_screen_pos_x[13:4] - { 7'd0, reg_horizontal_offset_l }, w_screen_pos_x[3:0] };
+		//	hace AQUI, al otro lado del registro. Era el peor camino de TODA
+		//	la matriz de rutados con CLS al 84% (registro -> resta 10b ->
+		//	decode de fases del selector de planos, hasta -1,9 ns).
+		//	_162: se resta w_horizontal_offset_l_next (el proximo valor del
+		//	LATCH), NO reg_horizontal_offset_l (el R#27 vivo, que era el error
+		//	del _120). Asi ff_screen_pos_x_sprite(t+1) vale exactamente
+		//	ff_screen_pos_x(t+1) - ff_horizontal_offset_l(t+1) = la expresion
+		//	combinacional original de vdp_timing_control_sprite.v: BIT-EXACTO
+		//	ciclo a ciclo, tambien durante un split de R#27.
+		ff_screen_pos_x_sprite	<= { w_screen_pos_x[13:4] - { 7'd0, w_horizontal_offset_l_next }, w_screen_pos_x[3:0] };
 		ff_screen_pos_y			<= w_screen_pos_y;
 		ff_pixel_pos_x	<= w_pixel_pos_x[8:0];
 		ff_pixel_pos_y	<= w_pixel_pos_y;

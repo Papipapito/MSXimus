@@ -258,6 +258,9 @@ module vdp_cpu_interface (
 	wire				w_set_read_address;
 	wire				w_pf_invalidate;
 	wire				w_pf_hit;
+	//	MSXimus _162: handshake del bus — LA transferencia (la ve el maestro Y la
+	//	latchea este modulo en el MISMO ciclo). Ver el comentario del latch.
+	wire				w_bus_accept;
 
 	reg					ff_line_interrupt = 1'b0;
 	reg					ff_frame_interrupt = 1'b0;
@@ -306,7 +309,18 @@ module vdp_cpu_interface (
 			ff_bus_valid	<= 1'b0;
 			ff_bus_ready	<= 1'b1;
 		end
-		else if( bus_valid && ff_bus_ready ) begin
+		//	MSXimus _162 (bug #1 del INFORME_NIQUELADO 26/07): el latch aceptaba
+		//	con ff_bus_ready CRUDO, pero el maestro (fpga/src/v9968_cpu_glue.v)
+		//	espera el bus_ready GATEADO de abajo. PORQUE del fallo: una
+		//	transaccion que llegue DENTRO de una ventana busy / pre-lectura se
+		//	latcheaba sin que el maestro viera la transferencia; el glue mantiene
+		//	bus_valid, ff_bus_ready vuelve a 1 al ciclo siguiente y la MISMA
+		//	transaccion se latchea OTRA VEZ => se ejecuta DOS VECES (dos avances
+		//	del contador de direccion en un IN del puerto 0 — el "salto +1" —,
+		//	dos toggles de ff_2nd_access en un OUT al puerto 1, doble escritura
+		//	en VRAM...). Se acepta EXACTAMENTE en el ciclo en que el maestro da
+		//	la transferencia por hecha: misma condicion que bus_ready.
+		else if( w_bus_accept ) begin
 			ff_bus_ioreq	<= bus_ioreq;
 			ff_bus_write	<= bus_write;
 			ff_bus_wdata	<= bus_wdata;
@@ -330,6 +344,9 @@ module vdp_cpu_interface (
 	//	acceso al puerto 0 durante la pre-lectura lanzaria un SEGUNDO
 	//	ff_vram_valid y las dos respuestas se confundirian.
 	assign bus_ready	= ff_bus_ready & ~ff_busy & ~ff_pf_inflight;
+	//	MSXimus _162: la MISMA condicion, mas bus_valid — es el unico ciclo en el
+	//	que la transferencia existe para los dos lados del handshake.
+	assign w_bus_accept	= bus_valid & bus_ready;
 
 	assign w_write		= ff_bus_valid &  ff_bus_write & ~ff_busy & ~ff_pf_inflight;
 	assign w_read		= ff_bus_valid & ~ff_bus_write & ~ff_busy & ~ff_pf_inflight;
@@ -479,7 +496,11 @@ module vdp_cpu_interface (
 					ff_pf_req			<= 1'b1;	//	y encadena la siguiente
 				end
 			end
-			else if( ff_pf_req && !ff_busy && !ff_pf_valid && !w_set_vram_address ) begin
+			//	MSXimus _162 (correccion del verificador): sin `!w_bus_accept` este
+			//	parche cambiaba 115 dobles ejecuciones por 101 PERDIDAS silenciosas
+			//	(mismo sintoma: par de bytes desincronizado). Medido a LAT=200 (la
+			//	de placa ~190): con la linea, 230/230 aciertos, 0 perdidas, 0 dobles.
+			else if( ff_pf_req && !ff_busy && !ff_pf_valid && !w_set_vram_address && !w_bus_accept ) begin
 				//	(!w_set_vram_address: si en ESTE ciclo se esta re-apuntando la
 				//	direccion, ff_vram_address todavia es la VIEJA — se espera un
 				//	ciclo para pre-leer la nueva)

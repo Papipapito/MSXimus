@@ -115,6 +115,13 @@ module vdp_command_cache (
 	reg				ff_busy;
 	reg				ff_after_read;
 	reg		[2:0]	ff_flush_state;
+	//	MSXimus (BUG#16): lecturas ACEPTADAS por el interface cuya respuesta
+	//	aun no ha llegado (ff_read_pending) y cuantas de ellas hay que TIRAR a
+	//	la basura por haberse abortado su comando (ff_read_discard).
+	reg		[1:0]	ff_read_pending;
+	reg		[1:0]	ff_read_discard;
+	wire			w_read_accept;
+	wire	[1:0]	w_read_pending_next;
 
 	assign w_cache0_hit		= ff_cache0_data_en && (ff_cache0_address == cache_vram_address[17:2]);
 	assign w_cache1_hit		= ff_cache1_data_en && (ff_cache1_address == cache_vram_address[17:2]);
@@ -171,6 +178,19 @@ module vdp_command_cache (
 			ff_update_target		<= 2'd0;
 			ff_prewrite_read		<= 1'b0;
 			ff_after_read			<= 1'b0;
+			//	FIX STROBE (bug #17): el strobe de respuesta pertenece al comando
+			//	que se ABORTA, asi que se descarta AQUI (vale para las dos ramas
+			//	de abajo). Sin esto, si el R#46 cae en el unico ciclo en que
+			//	ff_cache_vram_rdata_en esta alto y ademas hay flush sucio, las
+			//	ramas de mayor prioridad (ff_vram_valid / ff_flush_state) tapan a
+			//	la rama :313 durante TODO el flush y el strobe se queda alto. Al
+			//	acabar el flush, w_vram_ready sube en el mismo ciclo en que la
+			//	:313 por fin se ejecuta, y esa rama GANA a la aceptacion de la
+			//	peticion (:318): el motor ve ready=1, baja su valid dandola por
+			//	aceptada y se queda esperando para siempre un rdata_en que ya
+			//	nadie va a generar => comando colgado con CE=1 hasta el siguiente
+			//	R#46. Se restaura el invariante "rdata_en dura 1 ciclo".
+			ff_cache_vram_rdata_en	<= 1'b0;
 			if( w_dirty_any || ff_flush_state != 3'd0 ) begin
 				//	la ESCRITURA en vuelo se conserva; la lectura se cancela
 				ff_vram_valid		<= ff_vram_valid && ff_vram_write;
@@ -304,6 +324,27 @@ module vdp_command_cache (
 				//	書き出し終わり
 				ff_vram_write			<= 1'b0;
 				ff_flush_state			<= 3'd0;
+				//	FIX ABORTO 2: TODO cierre de flush libera ff_busy.
+				//	Un start (escritura de R#46, legal sin esperar a CE=0) que
+				//	caiga con un flush en marcha entra por la rama de arriba y
+				//	pone ff_busy=1. Si ese flush ya estaba DRENADO -- lo tipico
+				//	tras un comando de SOLO LECTURA (POINT/SRCH/LMCM), que no
+				//	ensucia la cache -- no queda ninguna aceptacion de VRAM que
+				//	lo vuelva a bajar (esa es la unica via, linea ~203) y
+				//	cache_vram_ready se queda a 0 PARA SIEMPRE: el comando nuevo
+				//	no se ejecuta jamas, CE cae igual y el software ve un
+				//	rectangulo fantasma hasta el siguiente R#46.
+				//	Este estado es el UNICO punto por el que pasan TODOS los
+				//	flushes (5->4->3->2->1->0), venga el flush del motor
+				//	(cache_flush_start) o de la rama de aborto: liberar aqui
+				//	cubre todas las entradas con una sola linea.
+				//	No adelanta nada ni cambia el timing de lo que hoy funciona:
+				//	w_vram_ready ya vale 0 mientras ff_flush_state != 0, y en los
+				//	flushes con escrituras ff_busy ya estaba a 0 al llegar aqui.
+				//	Sin guard `if( !ff_vram_valid )`: a este estado solo se llega
+				//	con ff_vram_valid == 0, porque la rama de la linea ~197 tiene
+				//	prioridad sobre toda la maquina de flush.
+				ff_busy					<= 1'b0;
 			end
 			default: begin
 				//	hold
@@ -688,8 +729,12 @@ module vdp_command_cache (
 				end
 			end
 		end
-		else if( command_vram_rdata_en ) begin
+		else if( command_vram_rdata_en && (ff_read_discard == 2'd0) ) begin
 			//	SDRAMから読んだデータを cache#n に書き込む
+			//	MSXimus (BUG#16): con ff_read_discard != 0 esta respuesta es de
+			//	una lectura de un comando ya ABORTADO — se deja caer entera (ni
+			//	toca la cache, ni avanza ff_update_target, ni emite rdata_en).
+			//	El descuento del contador vive en su propio always (abajo).
 			ff_busy						<= 1'b0;
 			case( ff_update_target )
 			2'd0:	begin
@@ -743,6 +788,63 @@ module vdp_command_cache (
 
 			ff_cache_vram_rdata_en		<= 1'b1;
 			ff_update_target			<= ff_update_target + 2'd1;
+		end
+	end
+
+	// --------------------------------------------------------------------
+	//	MSXimus (BUG#16): MATADOR DE RESPUESTAS HUERFANAS DE LECTURA
+	// --------------------------------------------------------------------
+	//	POR QUE: una lectura ya ACEPTADA por el interface (valid & ready en el
+	//	mismo ciclo) tiene su respuesta EN CAMINO y el shim la entrega 14-90+
+	//	ciclos despues. Si entre medias llega `start` (escritura de R#46, legal
+	//	sin esperar a CE=0), el comando se aborta y ff_update_target vuelve a
+	//	2'd0... pero la respuesta sigue viniendo: la rama command_vram_rdata_en
+	//	RESUCITA la entrada cache#0 — que a esas alturas ya es del comando
+	//	NUEVO — cambiandole la direccion por la de la lectura ABORTADA y
+	//	conservando su mascara sucia. Consecuencia medida en tb_cmdcache_abort:
+	//	el byte del comando nuevo acaba escrito en la direccion VIEJA (1 byte de
+	//	VRAM corrupto + el pixel bueno perdido) y ademas sale un
+	//	cache_vram_rdata_en espurio que pisa ff_read_pixel/ff_read_byte del
+	//	motor (vdp_command.v:1141).
+	//	COMO: se cuenta cuantas lecturas hay aceptadas-sin-responder; al abortar
+	//	se copia ese contador a ff_read_discard y la rama de respuesta se salta
+	//	exactamente esas primeras respuestas.
+	//	POR QUE UN always PROPIO: la aceptacion hay que verla EN EL CABLE. En el
+	//	ciclo del `start` la cadena de prioridad del always principal ni mira el
+	//	handshake, pero el interface SI acepta la peticion en ese mismo ciclo
+	//	(vdp_vram_interface.v:259) — es justo el caso limite que hay que armar. Y
+	//	al reves: una respuesta que llegue mientras manda una rama anterior
+	//	(flush, aceptacion de una peticion nueva...) el always principal la
+	//	ignora, y el contador tiene que descontarla igual para no quedarse
+	//	armado y comerse la respuesta BUENA del comando siguiente.
+	//	INVARIANTE (la misma de la que ya depende el motor, que se cuelga
+	//	esperando su rdata_en si falta): cada lectura aceptada recibe UNA
+	//	respuesta, por tarde que sea. Lecturas simultaneas en vuelo <= 2 (el
+	//	motor espera su dato antes de pedir otro; solo un aborto puede juntar la
+	//	del comando viejo con la del nuevo), asi que 2 bits sobran.
+	assign w_read_accept		= ff_vram_valid & ~ff_vram_write & command_vram_ready;
+	assign w_read_pending_next	= ff_read_pending
+								+ ( w_read_accept                                          ? 2'd1 : 2'd0 )
+								- ( ( command_vram_rdata_en && (ff_read_pending != 2'd0) ) ? 2'd1 : 2'd0 );
+
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_read_pending		<= 2'd0;
+			ff_read_discard		<= 2'd0;
+		end
+		else begin
+			ff_read_pending		<= w_read_pending_next;
+			if( start ) begin
+				//	toda lectura que siga en vuelo al acabar este ciclo es ya
+				//	huerfana (la aceptada EN el ciclo del start incluida); si
+				//	ademas llega una respuesta en este mismo ciclo, el propio
+				//	`start` gana la cadena de prioridad y la tira: por eso se
+				//	carga el contador YA descontado (w_read_pending_next).
+				ff_read_discard	<= w_read_pending_next;
+			end
+			else if( command_vram_rdata_en && (ff_read_discard != 2'd0) ) begin
+				ff_read_discard	<= ff_read_discard - 2'd1;
+			end
 		end
 	end
 
