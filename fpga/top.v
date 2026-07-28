@@ -4673,7 +4673,18 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         // _154: 6a palabra = drops del shim ({s1_pfq[15:0], wq_full[15:0]}).
         // SANO = 00000000. Cualquier valor distinto en placa = escrituras o
         // prefetches PERDIDOS de verdad — el sismografo del frente Aleste.
+        // _161c: los 8 bits ALTOS (hoy siempre 0, el shim solo usa 16+16 en la
+        // mitad baja... ojo: usa los 32) NO caben; el diagnostico del ADPCM va
+        // en cnt_g, palabra NUEVA (7a) — ver abajo.
         .cnt_f(v68dbg_drops),
+        // _161c CAZA DE LOS CRUJIDOS DE LA VOZ: salud del camino de samples
+        // del MSX-Audio, que desde la _160 vive en la SDRAM. Nibble alto =
+        // wq_lost (bytes de la subida PERDIDOS: el "imposible"), nibble bajo =
+        // wd_hits (disparos del watchdog del handshake = lectura que no llego
+        // a tiempo). SANO = 00. Si al cantar la voz esto sube, el crujido es
+        // del camino de memoria; si se queda en 00, el camino esta impoluto y
+        // el culpable es el remuestreador (alias 49,7k->44,1k).
+        .cnt_g({24'd0, adpcm_mem_diag}),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)

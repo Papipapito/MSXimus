@@ -25,6 +25,7 @@ module dbg_uart #(
     input  wire [31:0] cnt_d,           // _123: {fan_en, 11'b0, ro dbg_cnt}
     input  wire [31:0] cnt_e,           // _124: park {pisadas[15:0], drenajes[15:0]}
     input  wire [31:0] cnt_f,           // _154: drops del shim {s1_pfq[15:0], wq_full[15:0]} — sano = 0
+    input  wire [31:0] cnt_g,           // _161c: salud del ADPCM {24'd0, wq_lost[3:0], wd_hits[3:0]} — sano = 0
     output reg         tx
 );
 
@@ -32,35 +33,37 @@ module dbg_uart #(
     localparam integer TICKS = (CLK_HZ / 1000) * PERIOD_MS;
 
     // snapshot de los contadores (cuasi-estaticos)
-    reg [31:0] s_a, s_b, s_c, s_d, s_e, s_f;
+    reg [31:0] s_a, s_b, s_c, s_d, s_e, s_f, s_g;
 
     // mensaje: "D aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee\r\n" = 48 chars
     // _124d: el mensaje YA NO se materializa en un array (48x8 FF + un
     // decodificador one-shot de ~400 LUTs que se disparaba entero en un
     // ciclo): cada byte se computa AL VUELO desde los snapshots cuando le
     // toca transmitirse (byte_at, mux de ~4 niveles a 54MHz = gratis).
-    localparam MSG_LEN = 57;
+    localparam MSG_LEN = 66;   // _161c: 7 palabras (era 57 con 6)
 
     function [7:0] hexc(input [3:0] v);
         hexc = (v < 10) ? ("0" + {4'd0, v}) : ("a" + {4'd0, v} - 8'd10);
     endfunction
 
-    function [7:0] byte_at(input [5:0] idx);
+    function [7:0] byte_at(input [6:0] idx);   // _161c: 7 bits (66 > 63)
         reg [31:0] w;
         reg [2:0]  nib;
         begin
-            if (idx == 6'd0)  byte_at = "D";
-            else if (idx == 6'd1 || idx == 6'd10 || idx == 6'd19 ||
-                     idx == 6'd28 || idx == 6'd37 || idx == 6'd46) byte_at = " ";
-            else if (idx == 6'd55) byte_at = 8'h0D;
-            else if (idx == 6'd56) byte_at = 8'h0A;
+            if (idx == 7'd0)  byte_at = "D";
+            else if (idx == 7'd1  || idx == 7'd10 || idx == 7'd19 ||
+                     idx == 7'd28 || idx == 7'd37 || idx == 7'd46 ||
+                     idx == 7'd55) byte_at = " ";
+            else if (idx == 7'd64) byte_at = 8'h0D;
+            else if (idx == 7'd65) byte_at = 8'h0A;
             else begin
-                if      (idx <= 6'd9)  begin w = s_a; nib = idx - 6'd2;  end
-                else if (idx <= 6'd18) begin w = s_b; nib = idx - 6'd11; end
-                else if (idx <= 6'd27) begin w = s_c; nib = idx - 6'd20; end
-                else if (idx <= 6'd36) begin w = s_d; nib = idx - 6'd29; end
-                else if (idx <= 6'd45) begin w = s_e; nib = idx - 6'd38; end
-                else                   begin w = s_f; nib = idx - 6'd47; end
+                if      (idx <= 7'd9)  begin w = s_a; nib = idx - 7'd2;  end
+                else if (idx <= 7'd18) begin w = s_b; nib = idx - 7'd11; end
+                else if (idx <= 7'd27) begin w = s_c; nib = idx - 7'd20; end
+                else if (idx <= 7'd36) begin w = s_d; nib = idx - 7'd29; end
+                else if (idx <= 7'd45) begin w = s_e; nib = idx - 7'd38; end
+                else if (idx <= 7'd54) begin w = s_f; nib = idx - 7'd47; end
+                else                   begin w = s_g; nib = idx - 7'd56; end
                 // nibble MSB-first: char nib muestra w[28-4*nib +:4];
                 // (7-nib) = ~nib en 3 bits => desplazamiento {~nib, 2'b00}
                 byte_at = hexc(w[{~nib, 2'b00} +: 4]);
@@ -72,7 +75,7 @@ module dbg_uart #(
     reg [9:0]  baud_cnt;
     reg [3:0]  bit_idx;         // 0=start, 1-8=datos, 9=stop
     reg [7:0]  cur_byte;
-    reg [5:0]  msg_idx;         // _123: 39 chars ya no caben en 5 bits
+    reg [6:0]  msg_idx;         // _161c: 66 chars ya no caben en 6 bits
     reg        sending;
 
     always @(posedge clk) begin
@@ -80,7 +83,7 @@ module dbg_uart #(
             tx <= 1'b1;
             period_cnt <= 0; baud_cnt <= 0; bit_idx <= 0;
             msg_idx <= 0; sending <= 0; cur_byte <= 0;
-            s_a <= 0; s_b <= 0; s_c <= 0; s_d <= 0; s_e <= 0; s_f <= 0;
+            s_a <= 0; s_b <= 0; s_c <= 0; s_d <= 0; s_e <= 0; s_f <= 0; s_g <= 0;
         end
         else begin
             if (!sending) begin
@@ -89,6 +92,7 @@ module dbg_uart #(
                 if (period_cnt >= TICKS) begin
                     period_cnt <= 0;
                     s_a <= cnt_a; s_b <= cnt_b; s_c <= cnt_c; s_d <= cnt_d; s_e <= cnt_e; s_f <= cnt_f;
+                    s_g <= cnt_g;
                     msg_idx <= 0; bit_idx <= 0; baud_cnt <= 0;
                     sending <= 1;
                     cur_byte <= 8'h44;   // "D" (se recarga por byte_at igualmente)

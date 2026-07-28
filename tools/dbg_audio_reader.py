@@ -27,8 +27,12 @@ while True:
     if not ln.startswith("D "):
         continue
     try:
-        p = [int(x, 16) for x in ln.split()[1:7]]
-        miss, aud, apkt, fanw, park, drops = (p + [0] * 6)[:6]
+        p = [int(x, 16) for x in ln.split()[1:8]]
+        miss, aud, apkt, fanw, park, drops, adpcm = (p + [0] * 7)[:7]
+        # _161c: 7a palabra = salud del camino de samples del MSX-Audio
+        #   nibble alto = wq_lost (bytes de la subida perdidos)
+        #   nibble bajo = wd_hits (disparos del watchdog del handshake)
+        # SANO = 00. Si sube al cantar la voz -> el crujido es de memoria.
         # _154: 6a palabra (builds >= _154) = {s1_pfq[31:16], wq_full[15:0]} —
         # DROPS REALES del shim (escrituras/prefetch perdidos). Sano = 0.
         # Con builds antiguas (5 palabras) queda a 0 y no se muestra nada.
@@ -40,6 +44,8 @@ while True:
     # se veia). Si se leen juntos sale un numero gigante (spmiss*65536).
     bgmiss = miss & 0xFFFF
     spmiss = (miss >> 16) & 0xFFFF
+    ad_lost = (adpcm >> 4) & 0xF
+    ad_wd   = adpcm & 0xF
     wqdrop = drops & 0xFFFF
     s1drop = (drops >> 16) & 0xFFFF
     rst  = (aud >> 16) & 0xFFFF
@@ -120,11 +126,13 @@ while True:
         dfr = f"dfr/s={d_defer/dt:4.1f}" if dt > 0 else "dfr/s= ?"
         # _154/_155: aviso de drops SOLO si el contador no es cero (6a palabra)
         drops_txt = f"!DROPS wq={wqdrop} pfq={s1drop}  " if (wqdrop or s1drop) else ""
+        # el aviso del ADPCM solo aparece si algo va mal (sano = todo ceros)
+        adp_txt = f"!ADPCM lost={ad_lost} wd={ad_wd}  " if (ad_lost or ad_wd) else ""
         # _155b: termometro RO (palabra d bits [19:0]) — cuenta ALTA = die FRIO,
         # cuenta BAJA = die CALIENTE (~0.017%/grado). Se muestra en miles.
         ro_cnt = fanw & 0xFFFFF
         print(f"+{now - t0:6.1f}s {rst:4d} {'+' + str(d_rst) if d_rst else ' .'} "
               f"{lock_s:6.1f}  {pkt_s:8.1f}  {miss_s:7.0f} {spm_s:8.0f} {fan}  {dfr}  "
-              f"T={ro_cnt/1000:5.1f}k {drops_txt}{ops}  {ddtxt}{anom}")
+              f"T={ro_cnt/1000:5.1f}k {drops_txt}{adp_txt}{ops}  {ddtxt}{anom}")
     prev = (rst, lock, miss, pkt, ovr, park, fanw)
     prev_t = now
