@@ -3709,24 +3709,38 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [15:0] tone_smp = tone_sq ? 16'd4096 : 16'hF000;   // +-4096 (-12dB)
 `endif
 
+    // _161b SEGMENTACION (el gate de la _161 dio 30 violaciones de setup, todas
+    // en el camino uopl4fm/pcm_out -> audio_sample: el cono mezclador + ganancia
+    // + valor absoluto + rodilla + saturacion no cabia en un ciclo de clk_27m).
+    // Se parte en dos etapas, la variante que el propio INFORME_GANANCIA_AUDIO
+    // dejaba preparada: etapa 1 = seleccion + ganancia (registrada), etapa 2 =
+    // limitador. clk_enable_3m6_27 solo se activa 1 de cada ~7,5 ciclos de 27M,
+    // asi que la muestra sigue lista MUCHO antes del siguiente pulso: el retardo
+    // extra (37 ns) es inaudible y no cambia ni un bit del resultado.
+    reg signed [22:0] snd_g_l, snd_g_r;
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
 `ifdef DEBUG_TONE_440
             if (config_enable_8sprites == 1) begin
-                audio_sample   <= tone_smp;
-                audio_sample_r <= tone_smp;
+                snd_g_l <= {{7{tone_smp[15]}}, tone_smp};
+                snd_g_r <= {{7{tone_smp[15]}}, tone_smp};
             end
             else
 `endif
             if (config_enable_stereo == 1) begin
-                audio_sample   <= sat16k(gmul(mixL_st));
-                audio_sample_r <= sat16k(gmul(mixR_st));
+                snd_g_l <= gmul(mixL_st);
+                snd_g_r <= gmul(mixR_st);
             end
             else begin
-                audio_sample   <= sat16k(gmul(mix_mono));
-                audio_sample_r <= sat16k(gmul(mix_mono));
+                snd_g_l <= gmul(mix_mono);
+                snd_g_r <= gmul(mix_mono);
             end
         end
+    end
+
+    always @ (posedge clk_27m) begin
+        audio_sample   <= sat16k(snd_g_l);
+        audio_sample_r <= sat16k(snd_g_r);
     end
 
 `else
