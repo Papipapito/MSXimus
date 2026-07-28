@@ -90,6 +90,8 @@ add_file jt10/jt10_adpcmb.v
 add_file jt10/jt10_adpcmb_interpol.v
 add_file jt10/jt10_adpcm_div.v
 add_file src/y8950_adpcm.v
+# _159: RAM de muestras del ADPCM-B (256KB) en la SDRAM via puerto wv2
+add_file src/adpcm_sdram.v
 add_file src/flash_rw.v
 add_file src/megaram.v
 add_file src/scc_wave2_ghdl.v

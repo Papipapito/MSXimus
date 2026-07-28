@@ -33,6 +33,24 @@
 //`define ENABLE_VRAM_DDR3   // _128X EXPERIMENTO: la VRAM del V9968 en la DDR3 del SOM (v9968_ddr3_backend; requiere ENABLE_V9968_VDP y USE_VRAM_DDR3=1 en build.tcl). ADVERTENCIA: DDR3 analogicamente marginal en esta placa (saga _94-_103)
 //`define DISABLE_BOOT_MENU  // _127D: arranque MSX DIRECTO (enmascara la firma AB del menu; tambien salta el init FM de esa pagina). Solo builds de prueba.
 
+// _159: la RAM de muestras del ADPCM-B pasa de 32KB en BSRAM a los 256KB
+// COMPLETOS del Y8950 servidos desde la SDRAM (adpcm_sdram.v -> puerto wv2,
+// filas 5120+). Esto NO se decide a mano: se DERIVA, porque solo es legal
+// cuando wv2 esta libre. Lo esta con el V9968 apagado y con el V9968 + VRAM
+// en DDR3 (la linea principal _138); en la linea de respaldo _137 (VRAM del
+// V9968 en la SDRAM) lo conduce el bridge del V9968 y el ADPCM cae solo a
+// los 32KB de BSRAM de siempre (adpcm_sdram con FALLBACK_BSRAM=1). Derivarlo
+// hace IMPOSIBLE por construccion la combinacion con dos drivers de wv2.
+`ifdef ENABLE_Y8950_ADPCM
+ `ifndef ENABLE_V9968_VDP
+  `define ENABLE_ADPCM_SDRAM
+ `else
+  `ifdef ENABLE_VRAM_DDR3
+   `define ENABLE_ADPCM_SDRAM
+  `endif
+ `endif
+`endif
+
 module top
 #(
     parameter SD_SLOT = 3
@@ -2182,11 +2200,15 @@ wire        wv3_req, wv3_we, wv3_done;
 wire [21:0] wv3_addr;
 wire [7:0]  wv3_wdata;
 wire [15:0] wv3_dout;
+// _159: wv2 lo conduce el shim del ADPCM-B cuando ENABLE_ADPCM_SDRAM esta
+// derivado (ver la cabecera); los tie-offs de wv2 solo sobreviven si no.
 `ifndef ENABLE_V9968_VDP
+`ifndef ENABLE_ADPCM_SDRAM
 assign wv2_req   = 1'b0;
 assign wv2_we    = 1'b0;
 assign wv2_addr  = 22'd0;
 assign wv2_wdata = 8'd0;
+`endif
 assign wv3_req   = 1'b0;
 assign wv3_we    = 1'b0;
 assign wv3_addr  = 22'd0;
@@ -2194,10 +2216,12 @@ assign wv3_wdata = 8'd0;
 `else
 `ifdef ENABLE_VRAM_DDR3
 // _128X: la VRAM vive en la DDR3 — los puertos wv2/wv3 de memory.v inertes
+`ifndef ENABLE_ADPCM_SDRAM
 assign wv2_req   = 1'b0;
 assign wv2_we    = 1'b0;
 assign wv2_addr  = 22'd0;
 assign wv2_wdata = 8'd0;
+`endif
 assign wv3_req   = 1'b0;
 assign wv3_we    = 1'b0;
 assign wv3_addr  = 22'd0;
@@ -2553,6 +2577,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire signed [15:0] y8950_adpcm_wav;
     wire y8950_irq_w;
 
+    // _159: puerto de la RAM de muestras (256KB fuera del chip)
+    wire        adpcm_mem_req_t, adpcm_mem_we, adpcm_mem_done_t;
+    wire [17:0] adpcm_mem_addr;
+    wire [7:0]  adpcm_mem_wdata;
+    wire [15:0] adpcm_mem_rword;
+    wire [7:0]  adpcm_mem_diag;      // {wq_lost, wd_hits} — salud del camino
+
     y8950_adpcm uadpcm(
         .clk       (clk_54m),
         .cen3m6    (clk_enable_3m6_54),
@@ -2566,8 +2597,56 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .status    (y8950_status_c0),
         .data_dout (y8950_data_c1),
         .irq       (y8950_irq_w),        // flags visibles (ya enmascarados)
-        .pcm_out   (y8950_adpcm_wav)
+        .pcm_out   (y8950_adpcm_wav),
+        .mem_req_t (adpcm_mem_req_t),
+        .mem_we    (adpcm_mem_we),
+        .mem_addr  (adpcm_mem_addr),
+        .mem_wdata (adpcm_mem_wdata),
+        .mem_rword (adpcm_mem_rword),
+        .mem_done_t(adpcm_mem_done_t),
+        .mem_diag  (adpcm_mem_diag)
     );
+
+    // _159: las muestras viven en la SDRAM (puerto wv2, filas 5120+). Con el
+    // wv2 ocupado (linea de respaldo _137) el shim cae a los 32KB de BSRAM
+    // de siempre — misma interfaz, cero cambios en el modulo de arriba.
+`ifdef ENABLE_ADPCM_SDRAM
+    adpcm_sdram #(.FALLBACK_BSRAM(0)) uadpcmmem (
+        .clk_host   (clk_54m),
+        .rst_n      (bus_reset_n),
+        .req_toggle (adpcm_mem_req_t),
+        .we         (adpcm_mem_we),
+        .addr       (adpcm_mem_addr),
+        .wdata      (adpcm_mem_wdata),
+        .rword      (adpcm_mem_rword),
+        .done_toggle(adpcm_mem_done_t),
+        .clk_108m   (clk_108m),
+        .wv_req     (wv2_req),
+        .wv_we      (wv2_we),
+        .wv_addr    (wv2_addr),
+        .wv_wdata   (wv2_wdata),
+        .wv_dout    (wv2_dout),
+        .wv_done    (wv2_done)
+    );
+`else
+    adpcm_sdram #(.FALLBACK_BSRAM(1)) uadpcmmem (
+        .clk_host   (clk_54m),
+        .rst_n      (bus_reset_n),
+        .req_toggle (adpcm_mem_req_t),
+        .we         (adpcm_mem_we),
+        .addr       (adpcm_mem_addr),
+        .wdata      (adpcm_mem_wdata),
+        .rword      (adpcm_mem_rword),
+        .done_toggle(adpcm_mem_done_t),
+        .clk_108m   (clk_108m),
+        .wv_req     ( ),
+        .wv_we      ( ),
+        .wv_addr    ( ),
+        .wv_wdata   ( ),
+        .wv_dout    (16'd0),
+        .wv_done    (1'b0)
+    );
+`endif
     // C0 = status compuesto (timers+EOS+BUF_RDY+PCM_BSY); C1 = puerto de datos
     assign y8950_dout = bus_addr[0] ? y8950_data_c1 : y8950_status_c0;
     // _81: al /INT del Z80 como en el Music Module real (activo-bajo). La
@@ -3472,8 +3551,23 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 
 
     // ADPCM-B del Y8950 (_80) y MoonSound FM (_82): mono en ambos canales
-    // como el FM del Y8950; >>>1 de margen (el mixer suma sin saturacion)
-    wire [15:0] y8950_adpcm_term = {y8950_adpcm_wav[15], y8950_adpcm_wav[15:1]};
+    // como el FM del Y8950.
+    // _159b: BALANCE CANONICO. El ADPCM-B tiene que picar como UNA portadora
+    // FM del propio Y8950. Aritmetica cerrada, cadena por cadena:
+    //   MSXimus: decoder +-32767 -> volumen FF (pcm*255>>8) = +-32639
+    //            con >>>1 al mixer = +-16320, contra los +-4095 de una
+    //            portadora del jtopl_acc (INW=13)  =>  3,99x  =  +12,0 dB
+    //   openMSX: pd.out +-32767 -> out*volume>>12 = +-2040, contra el
+    //            dB2LinTab maximo de 2048 (getAmplificationFactorImpl=1/2048)
+    //            =>  1,00x
+    // El divisor canonico es >>>3: 32639/8 = 4080 frente a 4095 = 0,99x.
+    // Escrito como CONCATENACION con extension de signo EXPLICITA, no como
+    // >>>: la leccion _85/_115 (un literal unsigned envenena la signedness de
+    // la expresion y el >>> degenera en shift logico) ya costo una build.
+    // Si en placa suena demasiado apagado, el intermedio honesto es >>>2
+    // ({{2{...[15]}}, ...[15:2]}, -6 dB): quita el 75% del exceso y deja el
+    // ADPCM a 2x la portadora.
+    wire [15:0] y8950_adpcm_term = {{3{y8950_adpcm_wav[15]}}, y8950_adpcm_wav[15:3]};
     // _83: OPL3 ya sale a nivel nativo (como jt2413_wav) — sin >>1
     // _110: atenuacion del reg F8 (MixCalc del motor: >>> 2*codigo). Hasta
     // ahora F8 se ignoraba y el FM entraba siempre a 0dB aunque el software

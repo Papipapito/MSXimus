@@ -7,9 +7,14 @@
 // Auditado adversarialmente contra openMSX (2026-07-12): 29 hallazgos, los
 // 11 relevantes aplicados; ver comentarios [AUDIT] en el codigo.
 //
-// - RAM de samples: 32KB en BSRAM (config de serie del Philips NMS-1205),
-//   inicializada a FF como el HW real. Fuera de 32KB o con ROM-bank: lee 0 /
-//   ignora escritura (verificado en HW real segun openMSX).
+// - RAM de samples: _159 los 256KB COMPLETOS del Y8950 (unidad AMPLIADA),
+//   FUERA del chip: el array de 32KB en BSRAM se retira (libera 16 bloques)
+//   y las muestras viven en la SDRAM del dock a traves de adpcm_sdram.v
+//   (puerto wv2 de memory.v, filas 5120+). Motivo: 256KB en BSRAM son 128
+//   bloques y el GW5AT-60 tiene 118 EN TOTAL — no cabe ni con el chip vacio.
+//   Con ROM-bank se sigue leyendo 0 e ignorando la escritura (HW real).
+//   El camino de direcciones ya era de 256KB desde el _80 (ptr de 19 bits en
+//   nibbles, mascara 0x3FFFF): lo unico que topaba era el array.
 // - Registros: 07 control, 08 ROM/64K, 09/0A start, 0B/0C stop, 0F dato,
 //   10/11 delta-N, 12 volumen. Punteros en NIBBLES (start = regL<<3 |
 //   regH<<11, 19 bits); stop lleva SIEMPRE los bits [2:0] a 111 (|7, como el
@@ -31,6 +36,16 @@
 // para no leer ram_q rancio justo tras un START. El orden del always es
 // reproduccion-ANTES-de-escrituras: en colisiones gana la CPU (mismo orden
 // sync->write de openMSX). pcm_out registrado (cruce 54M->27M del mixer).
+//
+// _159 — POR QUE UNA CACHE DE PALABRA BASTA: el ADPCM-B consume un nibble
+// por 'adv', y adv ocurre con probabilidad delta_n/65536 sobre un tick de
+// 49.716 kHz. El PEOR CASO ABSOLUTO (delta_n=0xFFFF) son 24.858 B/s =
+// 12.429 lecturas de palabra/s = una cada 80 us; el puerto wave de memory.v
+// concede un turno cada ~148 ns => >270x de margen. Con una linea de palabra
+// + una plaza de prefetch el motor JAMAS espera en regimen. Y si aun asi el
+// dato no esta, el motor se GATEA (word_hit): se pierde un tick de 20 us en
+// vez de decodificar basura — el deltaT es un decoder con estado y meterle un
+// nibble inventado envenena toda la nota (la leccion del rail de la _158).
 // ============================================================================
 
 module y8950_adpcm(
@@ -51,7 +66,21 @@ module y8950_adpcm(
     output     [7:0]  status,     // byte de status compuesto (lectura C0)
     output reg [7:0]  data_dout,  // valor para lecturas de C1
     output            irq,        // IRQ compuesta (sin cablear en _80)
-    output signed [15:0] pcm_out
+    output signed [15:0] pcm_out,
+
+    // ---- _159: puerto de la RAM de muestras (256KB, via adpcm_sdram.v) ----
+    // Contrato TOGGLE, el mismo del lado HOST de wave_sdram.v: mem_req_t
+    // CAMBIA DE VALOR = nueva operacion, y el payload (we/addr/wdata) viaja
+    // con el y no se toca hasta ver mem_done_t. La respuesta es la PALABRA
+    // alineada que contiene el byte (memory.v ya devuelve 16 bits): es lo
+    // que alimenta la cache de aqui abajo.
+    output reg         mem_req_t,
+    output reg         mem_we,
+    output reg [17:0]  mem_addr,   // direccion de BYTE dentro de los 256KB
+    output reg [7:0]   mem_wdata,
+    input  wire [15:0] mem_rword,
+    input  wire        mem_done_t,
+    output wire [7:0]  mem_diag    // {wq_lost, wd_hits} — salud del camino
 );
 
 // ---------------------------------------------------------------------------
@@ -91,24 +120,182 @@ wire [7:0] mode = reg7 & 8'hE0;
 wire [18:0] wr_ptr = (read_delay != 2'd0) ? start_addr : ptr;
 
 // ---------------------------------------------------------------------------
-// direccionamiento de byte + RAM 32KB (BSRAM inferida: 1 escritura+1 lectura)
+// direccionamiento de byte — _159: SIN la guarda de 32KB. La unica guarda
+// que sobrevive es rom_bank (el HW real lee 0 e ignora escrituras con el
+// banco de ROM seleccionado; openMSX Y8950Adpcm::readMemory hace lo mismo).
+// La mascara is64k se queda TAL CUAL: es la del chip real (openMSX:
+// addrMask = 64K ? (1<<16)-1 : (1<<18)-1) y con 256KB reales es correcta.
 // ---------------------------------------------------------------------------
 wire [17:0] rd_byte_addr = ptr[18:1]    & (is64k ? 18'h0FFFF : 18'h3FFFF);
 wire [17:0] wr_byte_addr = wr_ptr[18:1] & (is64k ? 18'h0FFFF : 18'h3FFFF);
-wire        rd_oob       = (rd_byte_addr[17:15] != 3'b000) | rom_bank;
-wire        wr_oob       = (wr_byte_addr[17:15] != 3'b000) | rom_bank;
+wire        rd_oob       = rom_bank;
+wire        wr_oob       = rom_bank;
 
-// NOTA: el HW real arranca la sample RAM a FF (openMSX clearRam); la BSRAM
-// Gowin arranca a 0 (el init por bucle excede el limite EX3934 del sintesis).
-// Solo afecta a lecturas de zonas nunca escritas — indefinido para software.
-reg  [7:0] sram [0:32767];
-reg  [7:0] ram_q;
-always @(posedge clk) ram_q <= sram[rd_byte_addr[14:0]];   // lectura continua
-wire [7:0] mem_byte = rd_oob ? 8'h00 : ram_q;
+// NOTA _159: el HW real arranca la sample RAM a FF (openMSX clearRam). La
+// SDRAM arranca INDETERMINADA (antes la BSRAM Gowin arrancaba a 0). Solo
+// afecta a lecturas de zonas nunca escritas, que ya eran indefinidas para el
+// software; todo replayer sube sus muestras antes de disparar el key-on.
+
+// ---------------------------------------------------------------------------
+// _159 — CACHE DE PALABRA (2 entradas, reemplazo round-robin)
+//
+// El puntero de reproduccion avanza MONOTONO de nibble en nibble: dos
+// entradas (la palabra en curso + la que trae el prefetch) cubren el patron
+// entero sin fallar una sola vez en regimen. El reemplazo round-robin es
+// correcto justo POR esa monotonia: cuando el prefetch de T+1 aterriza en la
+// entrada libre, la siguiente victima es la de T, que ya esta consumida.
+//
+// El tag es la DIRECCION FISICA de palabra ya enmascarada, asi que la cache
+// es coherente por construccion frente a saltos (START/REPEAT), a is64k y a
+// rom_bank: si la direccion cambia, el tag no casa y se hace un miss. Lo
+// UNICO que hay que invalidar a mano son las escrituras de la CPU.
+// ---------------------------------------------------------------------------
+wire [16:0] rd_word   = rd_byte_addr[17:1];
+wire [16:0] wr_word   = wr_byte_addr[17:1];
+wire [16:0] word_mask = is64k ? 17'h07FFF : 17'h1FFFF;
+wire [16:0] pf_word   = (rd_word + 17'd1) & word_mask;
+
+reg  [15:0] cw0, cw1;
+reg  [16:0] ctag0, ctag1;
+reg         cv0, cv1;
+
+wire hit0     = cv0 && (ctag0 == rd_word);
+wire hit1     = cv1 && (ctag1 == rd_word);
+wire word_hit = hit0 | hit1;
+wire [15:0] hit_word = hit0 ? cw0 : cw1;
+wire [7:0]  mem_byte = rd_oob ? 8'h00
+                              : (rd_byte_addr[0] ? hit_word[15:8] : hit_word[7:0]);
+
+wire pf_present = (cv0 && (ctag0 == pf_word)) || (cv1 && (ctag1 == pf_word));
+
+// Modos que LEEN memoria: 0xA0 (reproduccion) y 0x20 (RAM->CPU por reg 0F).
+// En 0x60 (subida CPU->RAM) el puerto es todo para las escrituras: emitir
+// misses ahi seria trafico inutil que compite con la propia subida.
+wire cache_rd_mode = (mode == 8'hA0) || (mode == 8'h20);
+wire cache_active  = cache_rd_mode && !rom_bank;
 
 wire ram_we = wr_c1 && (reg_sel == 8'h0F) && (mode == 8'h60) &&
               (wr_ptr <= stop_addr) && !wr_oob;
-always @(posedge clk) if (ram_we) sram[wr_byte_addr[14:0]] <= din;
+
+// ---------------------------------------------------------------------------
+// _159 — FSM del puerto de memoria (UNA operacion en vuelo)
+// Prioridad: escritura de la CPU > miss de lectura > prefetch. La escritura
+// va primero porque es la unica con control de flujo visible (BUF_RDY) y la
+// unica que puede perder informacion; el prefetch es especulativo y puede
+// esperar todo lo que haga falta.
+// ---------------------------------------------------------------------------
+localparam OP_RD = 2'd0, OP_PF = 2'd1, OP_WR = 2'd2;
+
+reg        busy;                  // op en vuelo
+reg  [1:0] op_kind;
+reg [16:0] op_tag;                // tag destino del fill
+reg        fill_sel;              // round-robin de reemplazo
+reg        done_seen;             // eco del toggle mem_done_t
+
+// Cola de escritura de 4 plazas con FRENO ANTICIPADO a 2. La reserva de 2
+// plazas NO es paranoia: entre que el software lee BUF_RDY y llega su OUT
+// pasan ciclos, y en ese hueco puede haber colado otra escritura — sin
+// reserva, un byte se perderia EN SILENCIO (medido en el banco). Con el
+// freno a 2 y capacidad 4 caben las dos escrituras "en vuelo" del peor caso.
+// Ritmos: VGMPlay sube un byte cada ~30 us (OUT + poll), un bucle 'outi' a
+// pelo cada ~5 us, y el puerto sirve en ~1-2 us. wq_lost delata el imposible.
+reg [25:0] wq [0:3];              // {addr[17:0], data[7:0]}
+reg  [1:0] wq_wp, wq_rp;
+reg  [2:0] wq_cnt;
+wire       wq_full  = (wq_cnt >= 3'd2);   // lo que ve BUF_RDY (freno)
+wire       wq_ovf   = (wq_cnt == 3'd4);   // desbordamiento real
+wire       wq_empty = (wq_cnt == 3'd0);
+wire       wq_push  = ram_we && !wq_ovf;
+wire       wq_pop   = !busy && !wq_empty;
+reg  [3:0] wq_lost;               // bytes perdidos (deberia quedarse en 0)
+
+// _95 (leccion del OPL4): watchdog del handshake. Si un toggle se pierde,
+// busy quedaria clavado y el ADPCM mudo PARA SIEMPRE. A ~150 us (2^13 ciclos
+// de 54 MHz) se libera a la fuerza; wd_hits lo delata por telemetria.
+reg [12:0] wd;
+reg  [3:0] wd_hits;
+assign mem_diag = {wq_lost, wd_hits};
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        mem_req_t <= 1'b0; mem_we <= 1'b0; mem_addr <= 18'd0; mem_wdata <= 8'd0;
+        busy <= 1'b0; op_kind <= OP_RD; op_tag <= 17'd0; fill_sel <= 1'b0;
+        done_seen <= 1'b0;
+        cw0 <= 16'd0; cw1 <= 16'd0; ctag0 <= 17'd0; ctag1 <= 17'd0;
+        cv0 <= 1'b0;  cv1 <= 1'b0;
+        wq[0] <= 26'd0; wq[1] <= 26'd0; wq[2] <= 26'd0; wq[3] <= 26'd0;
+        wq_wp <= 2'd0; wq_rp <= 2'd0; wq_cnt <= 3'd0; wq_lost <= 4'd0;
+        wd <= 13'd0; wd_hits <= 4'd0;
+    end
+    else begin
+        // ---- 1) aterrizaje de la operacion en vuelo ----
+        if (mem_done_t != done_seen) begin
+            done_seen <= mem_done_t;
+            busy <= 1'b0;
+            wd   <= 13'd0;
+            if (op_kind != OP_WR) begin       // fill de la cache
+                if (fill_sel) begin cw1 <= mem_rword; ctag1 <= op_tag; cv1 <= 1'b1; end
+                else          begin cw0 <= mem_rword; ctag0 <= op_tag; cv0 <= 1'b1; end
+                fill_sel <= ~fill_sel;
+            end
+        end
+        else if (busy) begin                  // watchdog
+            wd <= wd + 13'd1;
+            if (wd == 13'h1FFF) begin
+                busy    <= 1'b0;
+                wd_hits <= wd_hits + 4'd1;
+            end
+        end
+
+        // ---- 2) encolado de la escritura de la CPU + coherencia ----
+        // (DESPUES del fill: si la CPU escribe la palabra que acaba de
+        //  aterrizar, gana la invalidacion — el dato en vuelo es rancio)
+        if (wq_push) begin
+            wq[wq_wp] <= {wr_byte_addr, din};
+            wq_wp     <= wq_wp + 2'd1;
+            if (cv0 && (ctag0 == wr_word)) cv0 <= 1'b0;
+            if (cv1 && (ctag1 == wr_word)) cv1 <= 1'b0;
+        end
+        else if (ram_we) wq_lost <= wq_lost + 4'd1;   // el imposible, contado
+        case ({wq_push, wq_pop})
+            2'b10:   wq_cnt <= wq_cnt + 3'd1;
+            2'b01:   wq_cnt <= wq_cnt - 3'd1;
+            default: ;
+        endcase
+
+        // ---- 3) emision (una op en vuelo; el toggle lleva el payload) ----
+        if (!busy) begin
+            if (!wq_empty) begin                          // escritura
+                mem_we    <= 1'b1;
+                mem_addr  <= wq[wq_rp][25:8];
+                mem_wdata <= wq[wq_rp][7:0];
+                op_kind   <= OP_WR;
+                wq_rp     <= wq_rp + 2'd1;
+                busy      <= 1'b1;
+                wd        <= 13'd0;
+                mem_req_t <= ~mem_req_t;
+            end
+            else if (cache_active && !word_hit) begin     // miss de lectura
+                mem_we    <= 1'b0;
+                mem_addr  <= {rd_word, 1'b0};
+                op_kind   <= OP_RD;
+                op_tag    <= rd_word;
+                busy      <= 1'b1;
+                wd        <= 13'd0;
+                mem_req_t <= ~mem_req_t;
+            end
+            else if (cache_active && !pf_present) begin   // prefetch de +1
+                mem_we    <= 1'b0;
+                mem_addr  <= {pf_word, 1'b0};
+                op_kind   <= OP_PF;
+                op_tag    <= pf_word;
+                busy      <= 1'b1;
+                wd        <= 13'd0;
+                mem_req_t <= ~mem_req_t;
+            end
+        end
+    end
+end
 
 // ---------------------------------------------------------------------------
 // cen de muestreo: fs = 3.58MHz/72 = 49.7kHz, ALINEADO con cen3m6
@@ -127,7 +314,13 @@ wire cen_fs = cen3m6 && (fs_div == 7'd71);
 // ---------------------------------------------------------------------------
 wire [16:0] step_sum = {1'b0, now_step[15:0]} + {1'b0, delta_n};
 reg  dec_clr;
-wire engine  = cen_fs && playing && !dec_clr;
+// _159: el motor va ADEMAS gateado por la cache. Sin el dato NO se avanza:
+// perder un tick de 20 us es inaudible, meterle al deltaT un nibble
+// inventado envenena el estado (step + acumulador) durante toda la nota.
+// En los modos que no leen memoria (0x80 sintesis por CPU) y con rom_bank
+// (que devuelve 0 por contrato) el gate es transparente.
+wire mem_rdy = !mode_mem || rd_oob || word_hit;
+wire engine  = cen_fs && playing && !dec_clr && mem_rdy;
 wire adv     = engine && step_sum[16];
 wire [3:0] nib = !ptr[0] ? (mode_mem ? mem_byte[7:4] : reg15[7:4])
                          : adpcm_byte[3:0];
@@ -311,8 +504,19 @@ assign pcm_out = pcm_r;
 
 // ---------------------------------------------------------------------------
 // status compuesto: (raw & (0x87|mask)) | 0x06 — flags enmascarados leen 0
+//
+// _159 — BUF_RDY EFECTIVO. El flag significa "puedo aceptar / ya tengo listo
+// el byte". Con la RAM fuera del chip eso deja de ser instantaneo, asi que se
+// le AÑADE la condicion real: en 0x60 (subida) que quede sitio en la cola de
+// escritura, y en 0x20 (RAM->CPU) que el byte este ya en la cache. Es MAS
+// fiel al chip real que darlo siempre listo (openMSX lo hace porque su RAM
+// es un array de C++), y le da al bucle "in a,(C0)/and 8/jr z" de VGMPlay el
+// control de flujo que ya esta esperando. El resto de modos, sin cambios.
 // ---------------------------------------------------------------------------
-wire [3:0] flags_masked = {ft1, ft2, eos, buf_rdy} & status_mask;
+wire rd_byte_rdy  = rd_oob | word_hit;
+wire buf_rdy_eff  = (mode == 8'h60) ? (buf_rdy & ~wq_full)    :
+                    (mode == 8'h20) ? (buf_rdy &  rd_byte_rdy) : buf_rdy;
+wire [3:0] flags_masked = {ft1, ft2, eos, buf_rdy_eff} & status_mask;
 assign irq    = |flags_masked;
 assign status = {irq, flags_masked, 2'b11, pcm_bsy};
 

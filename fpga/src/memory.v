@@ -73,10 +73,13 @@ module memory_ctrl #(
     output reg  [15:0] wv_dout,       // PALABRA leida (el shim elige byte)
     output reg         wv_done,       // pulso 1 ciclo = operacion completada
 
-    // ---- V9968: puerto WV2 (VRAM del V9968 via v9968_sdram_bridge) ----
-    // Mismo contrato y aislamiento que el puerto wave (filas 4096+); tambien
-    // roba SOLO turnos de CPU vacios, con PRIORIDAD para la wave del OPL4
-    // (audio, poco trafico) — wv2 toma los huecos restantes.
+    // ---- V9968 / ADPCM-B: puerto WV2 ----
+    // Mismo contrato y aislamiento que el puerto wave, pero en su PROPIO
+    // bloque de filas (5120+, ver pre_row): lo usa la VRAM del V9968 en la
+    // linea de respaldo _137 y, en la linea principal, la RAM de muestras de
+    // 256KB del ADPCM-B del Y8950 (_159, adpcm_sdram.v). Tambien roba SOLO
+    // turnos de CPU vacios, con PRIORIDAD para la wave del OPL4 (audio, poco
+    // trafico) — wv2 toma los huecos restantes.
     input  wire        wv2_req,       // nivel: peticion pendiente
     input  wire        wv2_we,
     input  wire [21:0] wv2_addr,      // direccion de BYTE (ventana de 4MB wave)
@@ -381,9 +384,19 @@ module memory_ctrl #(
             pre_wv3 <= (wv3_req == 1 && wv3_inflight == 0)
                        && !(wv_req == 1 && wv_inflight == 0)
                        && !(wv2_req == 1 && wv2_inflight == 0);
+            // _159: wv2/wv3 salen del bloque de la wave (filas 4096-5119, los
+            // 4MB del OPL4) a las filas 5120+. Dos motivos:
+            //  (a) le da al ADPCM-B del Y8950 una ventana de 256KB propia
+            //      (adpcm_sdram.v; filas 5120-5183) sin tocar al OPL4, y
+            //  (b) cierra el bug #3 del INFORME_NIQUELADO: en la linea de
+            //      respaldo _137 (VRAM del V9968 en SDRAM) wv2/wv3 solapaban
+            //      con la RAM de muestras del OPL4 (0x200000-0x3FFFFF).
+            // wv2 y wv3 se mueven JUNTOS: en la _137 son los dos canales del
+            // MISMO shim y direccionan la MISMA VRAM — separarlos partiria
+            // cada palabra de 32 bits en dos filas distintas.
             pre_row <= (wv_req == 1 && wv_inflight == 0)   ? { 1'b1, 2'b00, wv_addr[21:12] } :
-                       (wv2_req == 1 && wv2_inflight == 0) ? { 1'b1, 2'b00, wv2_addr[21:12] } :
-                                                             { 1'b1, 2'b00, wv3_addr[21:12] };
+                       (wv2_req == 1 && wv2_inflight == 0) ? { 1'b1, 2'b01, wv2_addr[21:12] } :
+                                                             { 1'b1, 2'b01, wv3_addr[21:12] };
             pre_ba  <= (wv_req == 1 && wv_inflight == 0)   ? wv_addr[11:10] :
                        (wv2_req == 1 && wv2_inflight == 0) ? wv2_addr[11:10] :
                                                              wv3_addr[11:10];
