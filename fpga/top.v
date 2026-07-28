@@ -2286,10 +2286,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 );
 
     // ===== _161 ESTRUCTURA DE GANANCIA: registro de ganancia maestra =====
-    // 0:x1  1:x1,5  2:x2  3:x3  4:x4  5:x5  6:x6  7:x8   (defecto x3 = +9,5 dB)
+    // 0:x1  1:x1,5  2:x2  3:x3  4:x4  5:x5  6:x6  7:x8   (defecto x5 = +14,0 dB)
+    // x5 = el valor que Albert ajusto a oido en placa (28/07): deja el conjunto
+    // a la altura del OPL4/MoonSound sin tocar el balance entre chips.
     // Se escribe por el puerto #44 del bloque config y se persiste en el
     // byte[5] del bloque de config de la flash (hoy sin usar, se escribe 0xFF).
-    reg [2:0] snd_gain_ff = 3'd3;
+    reg [2:0] snd_gain_ff = 3'd5;
 
 `ifdef ENABLE_SOUND
 
@@ -3651,9 +3653,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 3'd0: gmul = x;                     // x1     0,0 dB
                 3'd1: gmul = x + (x >>> 1);         // x1,5  +3,5 dB
                 3'd2: gmul = x <<< 1;               // x2    +6,0 dB
-                3'd3: gmul = (x <<< 1) + x;         // x3    +9,5 dB  <- defecto
+                3'd3: gmul = (x <<< 1) + x;         // x3    +9,5 dB
                 3'd4: gmul = x <<< 2;               // x4   +12,0 dB
-                3'd5: gmul = (x <<< 2) + x;         // x5   +14,0 dB
+                3'd5: gmul = (x <<< 2) + x;         // x5   +14,0 dB  <- defecto
                 3'd6: gmul = (x <<< 2) + (x <<< 1); // x6   +15,6 dB
                 3'd7: gmul = x <<< 3;               // x8   +18,1 dB
             endcase
@@ -3899,7 +3901,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 config1_ff <= CONFIG1_DEFAULT;
                 config2_ff <= CONFIG2_DEFAULT;
                 config_turbo_boot_ff <= 0;      // rescate S2: boot turbo off
-                snd_gain_ff <= 3'd3;            // rescate S2: ganancia por defecto x3
+                snd_gain_ff <= 3'd5;            // rescate S2: ganancia por defecto x5
             end
             else begin
                 config1_ff <= config_sig[2];
@@ -3907,7 +3909,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 config_turbo_boot_ff <= (config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
                 // byte[5] de la flash: 0xC0..0xC7 = ganancia valida; 0xFF/0x00
                 // (bloques legados) => defecto x3. Mismo patron que 'T'=0x54.
-                snd_gain_ff <= (config_sig[5][7:3] == 5'b11000) ? config_sig[5][2:0] : 3'd3;
+                snd_gain_ff <= (config_sig[5][7:3] == 5'b11000) ? config_sig[5][2:0] : 3'd5;
             end
         end
         // escritura del puerto #45 (menu): mismo bloque que la carga init para un
