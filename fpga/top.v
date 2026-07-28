@@ -3719,25 +3719,39 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // limitador. clk_enable_3m6_27 solo se activa 1 de cada ~7,5 ciclos de 27M,
     // asi que la muestra sigue lista MUCHO antes del siguiente pulso: el retardo
     // extra (37 ns) es inaudible y no cambia ni un bit del resultado.
-    reg signed [22:0] snd_g_l, snd_g_r;
+    // _161e TRES etapas (la de dos seguia siendo MARGINAL: la _161b paso con
+    // setup 0 pero la _161c, que solo anade telemetria, volvio a violar por
+    // -1,66 ns en uopl4fm/pcm_out -> snd_g_r: el cono "arbol sumador de 9
+    // terminos de 19 bits + ganancia de 23" gana o pierde segun la tirada de
+    // placement = loteria). Ahora: (A) SUMA registrada, (B) ganancia, (C)
+    // limitador. B y C corren libres a 27 MHz; como clk_enable_3m6_27 solo
+    // pulsa 1 de cada ~7,5 ciclos, la muestra esta lista muchisimo antes del
+    // siguiente pulso y el resultado no cambia ni un bit.
+    reg signed [18:0] snd_mix_l, snd_mix_r;          // (A) suma
+    reg signed [22:0] snd_g_l,  snd_g_r;             // (B) con ganancia
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
 `ifdef DEBUG_TONE_440
             if (config_enable_8sprites == 1) begin
-                snd_g_l <= {{7{tone_smp[15]}}, tone_smp};
-                snd_g_r <= {{7{tone_smp[15]}}, tone_smp};
+                snd_mix_l <= {{3{tone_smp[15]}}, tone_smp};
+                snd_mix_r <= {{3{tone_smp[15]}}, tone_smp};
             end
             else
 `endif
             if (config_enable_stereo == 1) begin
-                snd_g_l <= gmul(mixL_st);
-                snd_g_r <= gmul(mixR_st);
+                snd_mix_l <= mixL_st;
+                snd_mix_r <= mixR_st;
             end
             else begin
-                snd_g_l <= gmul(mix_mono);
-                snd_g_r <= gmul(mix_mono);
+                snd_mix_l <= mix_mono;
+                snd_mix_r <= mix_mono;
             end
         end
+    end
+
+    always @ (posedge clk_27m) begin
+        snd_g_l <= gmul(snd_mix_l);
+        snd_g_r <= gmul(snd_mix_r);
     end
 
     always @ (posedge clk_27m) begin
