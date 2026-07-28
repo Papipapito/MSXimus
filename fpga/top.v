@@ -2285,8 +2285,11 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .O_sdram_dqm(O_sdram_dqm)
 );
 
-
-
+    // ===== _161 ESTRUCTURA DE GANANCIA: registro de ganancia maestra =====
+    // 0:x1  1:x1,5  2:x2  3:x3  4:x4  5:x5  6:x6  7:x8   (defecto x3 = +9,5 dB)
+    // Se escribe por el puerto #44 del bloque config y se persiste en el
+    // byte[5] del bloque de config de la flash (hoy sin usar, se escribe 0xFF).
+    reg [2:0] snd_gain_ff = 3'd3;
 
 `ifdef ENABLE_SOUND
 
@@ -3546,6 +3549,34 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 	reg [15:0] audio_sample;
 	reg [15:0] audio_sample_r;
 
+    // ===== _161 BUG #10 (INFORME_NIQUELADO): los PSG entraban SIN SIGNO =====
+    // {1'b0, psgSound3, 6'b0} es 0..+16320: un PEDESTAL DE CONTINUA que se comia
+    // la mitad del recorrido positivo del sat16 (y en mono, con los DOS PSG, se
+    // lo comia entero) => el mezclador recortaba SOLO el semiciclo positivo.
+    // Bloqueador de continua de 1 polo por PSG: dc = acc>>>16; ac = x-dc; acc+=ac
+    // A 3,579545 MHz con N=16 la esquina cae en 8,7 Hz (tau 18 ms): es el
+    // condensador de acoplo que el hardware real tiene y nosotros no teniamos.
+    // Aritmetica CERRADA (leccion _85/_115): $signed explicito y extension de
+    // signo escrita a mano; ningun literal sin signo en el camino.
+    reg  signed [31:0] psg1_dcacc = 32'sd0;
+    reg  signed [31:0] psg2_dcacc = 32'sd0;
+    wire signed [16:0] psg1_x  = $signed({2'b00, psgSound3,  6'b000000});   // 0..16320
+    wire signed [16:0] psg2_x  = $signed({2'b00, psg2Sound3, 6'b000000});
+    wire signed [16:0] psg1_dc = psg1_dcacc[31:16];
+    wire signed [16:0] psg2_dc = psg2_dcacc[31:16];
+    wire signed [16:0] psg1_ac = psg1_x - psg1_dc;                          // +-16320
+    wire signed [16:0] psg2_ac = psg2_x - psg2_dc;
+    always @(posedge clk_27m) begin
+        if (~bus_reset_n) begin
+            psg1_dcacc <= 32'sd0;
+            psg2_dcacc <= 32'sd0;
+        end
+        else if (clk_enable_3m6_27) begin
+            psg1_dcacc <= psg1_dcacc + {{15{psg1_ac[16]}}, psg1_ac};
+            psg2_dcacc <= psg2_dcacc + {{15{psg2_ac[16]}}, psg2_ac};
+        end
+    end
+
     wire [15:0] scc_term;
     assign scc_term = (map_sel == 2'b10) ? { scc_wav, 1'b0 } : 16'd0;  // SCC solo en modo SCC (no Konami4/ASCII)
 
@@ -3589,6 +3620,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire signed [15:0] o4fm_att  = o4fm_base >>> opl4_mixfm[2:1];
     wire [15:0] opl4fm_term      = (opl4_mixfm[2:0] == 3'd7) ? 16'd0 : o4fm_att;
 
+    // _161 BALANCE: openMSX pone la portadora del OPLL en 3915 LSB y la del
+    // Y8950 en 5249 (medido) => el OPLL vale 0,746 de una portadora de
+    // MSX-Audio. En el MSXimus las dos valen 4095 (mismo jtopl_acc, INW=13):
+    // el OPLL entraba +2,6 dB de mas. x3/4 = -2,5 dB.
+    wire signed [15:0] opll_s    = $signed(jt2413_wav);
+    wire        [15:0] opll_term = (opll_s >>> 1) + (opll_s >>> 2);
+
     // _89: PCM del MoonSound (motor YMF278B). Mono = (L+R)/2 con extension de
     // signo EXPLICITA (leccion _85: las concatenaciones son unsigned) y >>1
     // de margen como el ADPCM; en estereo, L y R nativos a cada canal.
@@ -3603,22 +3641,52 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // que en notas sostenidas se percibe como "vibracion" + "saturacion de
     // volumen" + "sonido sucio" (sintomas del usuario en la _109). Suma en
     // 19 bits (9 terminos de 16) y clamp simetrico a 16.
-    function [15:0] sat16(input signed [18:0] v);
-        sat16 = (v > 19'sd32767)  ? 16'h7FFF :
-                (v < -19'sd32768) ? 16'h8000 : v[15:0];
+    // _161 GANANCIA MAESTRA: sin multiplicador, sumas de desplazamientos. La
+    // entrada son los 19 bits de la suma (+-262143); x8 => cabe en 23 con signo.
+    function signed [22:0] gmul(input signed [18:0] v);
+        reg signed [22:0] x;
+        begin
+            x = {{4{v[18]}}, v};                   // extension de signo explicita
+            case (snd_gain_ff)
+                3'd0: gmul = x;                     // x1     0,0 dB
+                3'd1: gmul = x + (x >>> 1);         // x1,5  +3,5 dB
+                3'd2: gmul = x <<< 1;               // x2    +6,0 dB
+                3'd3: gmul = (x <<< 1) + x;         // x3    +9,5 dB  <- defecto
+                3'd4: gmul = x <<< 2;               // x4   +12,0 dB
+                3'd5: gmul = (x <<< 2) + x;         // x5   +14,0 dB
+                3'd6: gmul = (x <<< 2) + (x <<< 1); // x6   +15,6 dB
+                3'd7: gmul = x <<< 3;               // x8   +18,1 dB
+            endcase
+        end
     endfunction
-    wire signed [18:0] mixL_st = {{3{1'b0}}, 1'b0, psgSound3, 6'b000000}
-        + {{3{scc_term[15]}}, scc_term} + {{3{jt2413_wav[15]}}, jt2413_wav}
+
+    // _161 LIMITADOR de rodilla suave: unidad por debajo de 0,75 de fondo de
+    // escala y pendiente 1/2 por encima (compresion 2:1 del 25% superior), en
+    // vez del recorte duro de antes. Simetrico.
+    localparam signed [22:0] SND_KNEE = 23'sd24576;
+    function [15:0] sat16k(input signed [22:0] v);
+        reg               neg;
+        reg signed [22:0] a, y;
+        begin
+            neg = v[22];
+            a   = neg ? -v : v;
+            y   = (a <= SND_KNEE) ? a : (SND_KNEE + ((a - SND_KNEE) >>> 1));
+            if (y > 23'sd32767) y = 23'sd32767;
+            sat16k = neg ? (~y[15:0] + 16'd1) : y[15:0];
+        end
+    endfunction
+    wire signed [18:0] mixL_st = {{2{psg1_ac[16]}}, psg1_ac}
+        + {{3{scc_term[15]}}, scc_term} + {{3{opll_term[15]}}, opll_term}
         + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
         + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term_l[15]}}, opl4pcm_term_l};
-    wire signed [18:0] mixR_st = {{3{1'b0}}, 1'b0, psg2Sound3, 6'b000000}
-        + {{3{scc2x_wav[14]}}, scc2x_wav, 1'b0} + {{3{jt2413_wav[15]}}, jt2413_wav}
+    wire signed [18:0] mixR_st = {{2{psg2_ac[16]}}, psg2_ac}
+        + {{3{scc2x_wav[14]}}, scc2x_wav, 1'b0} + {{3{opll_term[15]}}, opll_term}
         + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
         + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term_r[15]}}, opl4pcm_term_r};
-    wire signed [18:0] mix_mono = {{3{1'b0}}, 1'b0, psgSound3, 6'b000000}
-        + {{3{1'b0}}, 1'b0, psg2Sound3, 6'b000000}
+    wire signed [18:0] mix_mono = {{2{psg1_ac[16]}}, psg1_ac}
+        + {{2{psg2_ac[16]}}, psg2_ac}
         + {{3{scc_term[15]}}, scc_term} + {{3{scc2x_wav[14]}}, scc2x_wav, 1'b0}
-        + {{3{jt2413_wav[15]}}, jt2413_wav} + {{3{y8950_wav[15]}}, y8950_wav}
+        + {{3{opll_term[15]}}, opll_term} + {{3{y8950_wav[15]}}, y8950_wav}
         + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
         + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term[15]}}, opl4pcm_term};
     // _127H: TONO DE TEST del bug #14 (440Hz cuadrada -12dB directa al puente,
@@ -3651,12 +3719,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             else
 `endif
             if (config_enable_stereo == 1) begin
-                audio_sample   <= sat16(mixL_st);
-                audio_sample_r <= sat16(mixR_st);
+                audio_sample   <= sat16k(gmul(mixL_st));
+                audio_sample_r <= sat16k(gmul(mixR_st));
             end
             else begin
-                audio_sample   <= sat16(mix_mono);
-                audio_sample_r <= sat16(mix_mono);
+                audio_sample   <= sat16k(gmul(mix_mono));
+                audio_sample_r <= sat16k(gmul(mix_mono));
             end
         end
     end
@@ -3759,6 +3827,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire config1_req;
     wire config2_req;
     wire config3_req;
+    wire config4_req;   // _161: puerto #44 = ganancia maestra de audio
     reg [7:0] config3_ff = 0;       // puerto #43: sram_cfg de la megaram (volatil)
     wire config5_req;
     reg config_turbo_boot_ff = 0;   // puerto #45 bit0: arrancar en turbo (PERSISTIDO en
@@ -3816,11 +3885,15 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 config1_ff <= CONFIG1_DEFAULT;
                 config2_ff <= CONFIG2_DEFAULT;
                 config_turbo_boot_ff <= 0;      // rescate S2: boot turbo off
+                snd_gain_ff <= 3'd3;            // rescate S2: ganancia por defecto x3
             end
             else begin
                 config1_ff <= config_sig[2];
                 config2_ff <= config_sig[3];
                 config_turbo_boot_ff <= (config_sig[4] == 8'h54) ? 1'b1 : 1'b0;
+                // byte[5] de la flash: 0xC0..0xC7 = ganancia valida; 0xFF/0x00
+                // (bloques legados) => defecto x3. Mismo patron que 'T'=0x54.
+                snd_gain_ff <= (config_sig[5][7:3] == 5'b11000) ? config_sig[5][2:0] : 3'd3;
             end
         end
         // escritura del puerto #45 (menu): mismo bloque que la carga init para un
@@ -3828,6 +3901,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         // puede coincidir con config_init (el CPU arranca tras el stream de flash)
         if (config5_req == 1 ) begin
             config_turbo_boot_ff <= cpu_dout[0];
+        end
+        if (config4_req == 1 ) begin
+            snd_gain_ff <= cpu_dout[2:0];       // _161: ganancia de audio 0..7
         end
         if (config_update == 1) begin
             config1_ff <= config1_temp_ff;
@@ -3852,6 +3928,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     assign config1_req = (config_ok == 1 && bus_addr[7:0] == 8'h41 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 1:0;
     assign config2_req = (config_ok == 1 && bus_addr[7:0] == 8'h42 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 1:0;
     assign config3_req = (config_ok == 1 && bus_addr[7:0] == 8'h43 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 1:0;
+    assign config4_req = (config_ok == 1 && bus_addr[7:0] == 8'h44 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 1:0;
     assign config5_req = (config_ok == 1 && bus_addr[7:0] == 8'h45 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0)? 1:0;
     assign config_enable_scanlines = config1_ff[3];
     //assign config_keyboard = config2_ff[4:3];
@@ -3884,6 +3961,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                          ( bus_addr[3:0] == 4'h1 ) ? config1_ff :
                          ( bus_addr[3:0] == 4'h2 ) ? config2_ff :
                          ( bus_addr[3:0] == 4'h3 ) ? config3_ff :
+                         ( bus_addr[3:0] == 4'h4 ) ? {5'b0, snd_gain_ff} :
                          ( bus_addr[3:0] == 4'h5 ) ? {7'b0, config_turbo_boot_ff} : 8'hff;
 
 
@@ -3994,7 +4072,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                         `ifdef ENABLE_CONFIG
                              (flash_write_counter == 8'd02) ? config1_ff :
                              (flash_write_counter == 8'd03) ? config2_ff :
-                             (flash_write_counter == 8'd04) ? (config_turbo_boot_ff ? 8'h54 : 8'h00) : 8'hff;
+                             (flash_write_counter == 8'd04) ? (config_turbo_boot_ff ? 8'h54 : 8'h00) :
+                             (flash_write_counter == 8'd05) ? {5'b11000, snd_gain_ff} : 8'hff;
                         `else
                              (flash_write_counter == 8'd02) ? CONFIG1_DEFAULT :
                              (flash_write_counter == 8'd03) ? CONFIG2_DEFAULT : 8'hff;
