@@ -414,8 +414,19 @@ wire [21:0] e_addr22 = {~e_mcs_n[1], e_ma};
 // (la nota se trituraba su propia cache), y las notas agudas (paso >=2)
 // dejaban atras el lookahead fijo de +2. Con 8 palabras caben cabecera
 // y stream, y el stride por slot predice el salto real.
-reg [15:0]  lb_word [0:255];
-reg [17:0]  lb_tagA [0:255];       // addr[21:4]
+// ERA v3 (sin SSRAM): {tagA, word} viven en UNA BSRAM SDPB 256x34 con
+// lectura SINCRONA. Gowin retiro el SSRAM del GW5AT-60B por un problema de
+// silicio (soporte, 03/08/2026). lb_q corresponde a la direccion del ciclo
+// ANTERIOR; como el motor registra MEM_A y MEM_RD en el MISMO flanco de CE
+// y MRD_N dura >=2 CE, e_slot/e_addr22 son estables durante todo el lookup
+// => la resolucion del hit se desplaza 1 ciclo (rd_edge_d1). El deadline del
+// motor (CYCLE1_CE, >=4 CE tras MEM_START) tiene holgura de sobra: el hit
+// sigue soltando la CE antes de que nadie la espere.
+// Colision fill/lookup al mismo indice y flanco: SDPB lee el dato VIEJO =>
+// tag rancio => miss => fetch redundante (correcto, solo mas lento; raro).
+(* syn_ramstyle = "block_ram" *) reg [33:0] lb_mem [0:255];
+reg [33:0] lb_q;
+reg         rd_edge_d1;            // lookup en vuelo (lb_q valido al salir)
 reg [255:0] lb_v;
 reg [255:0] lb_pfb;                // entrada traida por prefetch (OBL tag)
 reg [20:0]  sl_last [0:31];        // ultima palabra pedida por slot
@@ -463,6 +474,15 @@ wire       pfq_full  = (pfq_wp + 3'd1 == pfq_rp);
 reg        pf_kill;                // _107: el pf en vuelo quedo rancio
 wire       rd_edge = ~e_mrd_n && !mrd_d1;
 wire       wr_edge = ~e_mwr_n && !mwr_d1;
+
+// Puertos de la BSRAM de cache (era v3). Escritura = fill; lectura corre
+// SIEMPRE (la direccion es cuasi-estatica alrededor de rd_edge). Sin reset:
+// una BSRAM no lo tiene; la validez la gobierna lb_v (FF), como siempre.
+always @(posedge clk_eng) begin
+    if (fill_pend)
+        lb_mem[{fill_slot,fill_tag[2:0]}] <= {fill_tag[20:3], mem_rword};
+    lb_q <= lb_mem[{e_slot, e_addr22[3:1]}];
+end
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
         mrd_d1 <= 1'b0; mwr_d1 <= 1'b0; done_d1 <= 1'b0;
@@ -471,6 +491,7 @@ always @(posedge clk_eng or negedge erst_n) begin
         mem_inflight <= 1'b0;
         lb_v <= 256'd0; lb_pfb <= 256'd0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
+        rd_edge_d1 <= 1'b0;
         ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
         fill_pend <= 1'b0; fill_tag <= 21'd0; fill_is_pf <= 1'b0;
         fill_slot <= 5'd0; cur_op_slot <= 5'd0; eng_pend_slot <= 5'd0;
@@ -514,8 +535,8 @@ always @(posedge clk_eng or negedge erst_n) begin
         end
         if (fill_pend) begin
             fill_pend <= 1'b0;
-            lb_word[{fill_slot,fill_tag[2:0]}] <= mem_rword;  // asentado (_96)
-            lb_tagA[{fill_slot,fill_tag[2:0]}] <= fill_tag[20:3];
+            // el dato {tag,word} lo escribe el puerto BSRAM (arriba); aqui
+            // solo la contabilidad FF — asentado (_96)
             lb_v[{fill_slot,fill_tag[2:0]}]    <= 1'b1;
             lb_pfb[{fill_slot,fill_tag[2:0]}]  <= fill_is_pf;
         end
@@ -527,13 +548,20 @@ always @(posedge clk_eng or negedge erst_n) begin
             mem_inflight <= 1'b0;
         end
         if (rd_edge) begin
+            // era v3: la resolucion espera a lb_q (1 ciclo); la CYCLE1 se
+            // sujeta desde YA para que el deadline no se cuele (_94)
+            rd_edge_d1   <= 1'b1;
+            mem_inflight <= 1'b1;
+        end
+        else
+            rd_edge_d1 <= 1'b0;
+        if (rd_edge_d1) begin
             if (lb_v[{e_slot,e_addr22[3:1]}] &&
-                (lb_tagA[{e_slot,e_addr22[3:1]}] == e_addr22[21:4])) begin
+                (lb_q[33:16] == e_addr22[21:4])) begin
                 lb_hit  <= 1'b1;                   // HIT: sin transaccion
-                lb_byte <= e_addr22[0] ? lb_word[{e_slot,e_addr22[3:1]}][15:8]
-                                       : lb_word[{e_slot,e_addr22[3:1]}][7:0];
+                lb_byte <= e_addr22[0] ? lb_q[15:8]
+                                       : lb_q[7:0];
                 lb_fast <= 1'b1;                   // completa en 1 ciclo
-                mem_inflight <= 1'b1;              // sujeta la CYCLE1 (_94)
                 if (lb_pfb[{e_slot,e_addr22[3:1]}]) begin  // OBL etiquetado
                     lb_pfb[{e_slot,e_addr22[3:1]}] <= 1'b0;
                     if (!pfq_full) begin
@@ -609,7 +637,10 @@ always @(posedge clk_eng or negedge erst_n) begin
                 op_is_pf  <= 1'b0;
                 port_busy <= 1'b1;
             end
-            else if (!pfq_empty && !wr_edge && !rd_edge) begin
+            else if (!pfq_empty && !wr_edge && !rd_edge && !rd_edge_d1) begin
+                // (!rd_edge_d1 era v3: un miss resuelve en N+1 y su eng_pend
+                //  no es visible hasta N+2 — sin el guard un pf le robaria
+                //  el puerto y el motor esperaria detras de un fetch ajeno)
                 pfq_rp    <= pfq_rp + 3'd1;
                 mem_req   <= 1'b1;
                 mem_we    <= 1'b0;
@@ -792,8 +823,9 @@ always @(posedge clk_eng or negedge erst_n) begin
         // "miss" en lecturas que la cache real de 8 palabras acertaba; los
         // "44100/6140 constantes" de la saga eran en parte este espejismo).
         // Ahora replica EXACTA del hit real: {slot, addr[3:1]}, tag[21:4].
-        if (rd_edge && !(lb_v[{e_slot,e_addr22[3:1]}] &&
-            (lb_tagA[{e_slot,e_addr22[3:1]}] == e_addr22[21:4]))) c_miss <= c_miss + 16'd1;
+        // era v3: la replica del hit se desplaza con el (rd_edge_d1 + lb_q)
+        if (rd_edge_d1 && !(lb_v[{e_slot,e_addr22[3:1]}] &&
+            (lb_q[33:16] == e_addr22[21:4]))) c_miss <= c_miss + 16'd1;
         if (mem_req && op_is_pf) c_pf <= c_pf + 16'd1;
         if (rf_lvl < lvl_min_w) lvl_min_w <= rf_lvl;
         if (dbg_snap) lvl_min_w <= 4'hF;                  // ventana nueva

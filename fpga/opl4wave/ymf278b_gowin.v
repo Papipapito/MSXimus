@@ -1390,17 +1390,17 @@ module OPL4_PHASE_RAM (
 	input WREN;
 	input [4:0] RDADDR;
 	output wire [13:0] Q;
-	reg [13:0] mem [0:31];
+	(* syn_ramstyle = "block_ram" *) reg [13:0] mem [0:31];
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1)
 		mem[ii] = 0;
-	reg [4:0] ra_q = 0;
+	reg [13:0] rd_q = 0;
 	always @(posedge CLK) begin
 		if (WREN)
 			mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 endmodule
 module OPL4_LFO_RAM (
 	CLK,
@@ -1416,17 +1416,17 @@ module OPL4_LFO_RAM (
 	input WREN;
 	input [4:0] RDADDR;
 	output wire [21:0] Q;
-	reg [21:0] mem [0:31];
+	(* syn_ramstyle = "block_ram" *) reg [21:0] mem [0:31];
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1)
 		mem[ii] = 0;
-	reg [4:0] ra_q = 0;
+	reg [21:0] rd_q = 0;
 	always @(posedge CLK) begin
 		if (WREN)
 			mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 endmodule
 module OPL4_SO_RAM (
 	CLK,
@@ -1442,17 +1442,17 @@ module OPL4_SO_RAM (
 	input WREN;
 	input [4:0] RDADDR;
 	output wire [15:0] Q;
-	reg [15:0] mem [0:31];
+	(* syn_ramstyle = "block_ram" *) reg [15:0] mem [0:31];
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1)
 		mem[ii] = 0;
-	reg [4:0] ra_q = 0;
+	reg [15:0] rd_q = 0;
 	always @(posedge CLK) begin
 		if (WREN)
 			mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 endmodule
 module OPL4_EVOL_RAM (
 	CLK,
@@ -1468,17 +1468,17 @@ module OPL4_EVOL_RAM (
 	input WREN;
 	input [4:0] RDADDR;
 	output wire [11:0] Q;
-	reg [11:0] mem [0:31];
+	(* syn_ramstyle = "block_ram" *) reg [11:0] mem [0:31];
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1)
 		mem[ii] = 0;
-	reg [4:0] ra_q = 0;
+	reg [11:0] rd_q = 0;
 	always @(posedge CLK) begin
 		if (WREN)
 			mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 endmodule
 module OPL4_TL_RAM (
 	CLK,
@@ -1494,17 +1494,17 @@ module OPL4_TL_RAM (
 	input WREN;
 	input [4:0] RDADDR;
 	output wire [16:0] Q;
-	reg [16:0] mem [0:31];
+	(* syn_ramstyle = "block_ram" *) reg [16:0] mem [0:31];
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1)
 		mem[ii] = 0;
-	reg [4:0] ra_q = 0;
+	reg [16:0] rd_q = 0;
 	always @(posedge CLK) begin
 		if (WREN)
 			mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 endmodule
 module OPL4_REG_RAM (
 	CLK,
@@ -1522,15 +1522,15 @@ module OPL4_REG_RAM (
 	input WREN;
 	input [aw - 1:0] RDADDR;
 	output wire [dw - 1:0] Q;
-	reg [dw - 1:0] mem [0:(2 ** aw) - 1];
+	(* syn_ramstyle = "block_ram" *) reg [dw - 1:0] mem [0:(2 ** aw) - 1];
 	integer ii;
 	initial for (ii = 0; ii < (2 ** aw); ii = ii + 1)
 		mem[ii] = 0;
-	reg [aw - 1:0] ra_q = 0;
+	reg [dw - 1:0] rd_q = 0;
 	always @(posedge CLK) begin
 		if (WREN)
 			mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 endmodule

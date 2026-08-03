@@ -331,8 +331,10 @@ always @(posedge clk_eng) begin
     if (dut.rd_edge) begin
         c_rd = c_rd + 1;
         if (tr_n < 600) begin
+            // era v3: replica del hit real (BSRAM lb_mem, particion por slot)
             $fdisplay(ftr, "%0t R %h %b", $time, dut.e_addr22,
-                      dut.lb_v[dut.e_addr22[6:1]] && (dut.lb_tagA[dut.e_addr22[6:1]] == dut.e_addr22[21:7]));
+                      dut.lb_v[{dut.e_slot,dut.e_addr22[3:1]}] &&
+                      (dut.lb_mem[{dut.e_slot,dut.e_addr22[3:1]}][33:16] == dut.e_addr22[21:4]));
             tr_n = tr_n + 1;
         end
     end

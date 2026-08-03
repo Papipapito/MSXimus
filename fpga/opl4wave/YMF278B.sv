@@ -1058,17 +1058,23 @@ module OPL4_PHASE_RAM (
 	input  [ 4: 0] RDADDR,
 	output [13: 0] Q);
 
-	// altsyncram DUAL_PORT 32w: addr_b registrada en CLK, salida sin registrar
-	reg [13:0] mem [0:31];
+	// ERA v3: lectura SINCRONA (dato registrado) => BSRAM SDPB. Antes era
+	// direccion registrada + lectura asincrona (SSRAM), pero Gowin retiro el
+	// SSRAM del GW5AT-60B por un problema de silicio (soporte, 03/08/2026).
+	// Equivalencia: RDADDR es estable >=1 clk antes de cada CE consumidor
+	// (cambia solo en flancos con CE y se consume >=4 clk despues), y
+	// escritura y lectura nunca coinciden en el mismo slot => mismo dato.
+	// De regalo, read-old en colision = la semantica del altsyncram original.
+	(* syn_ramstyle = "block_ram" *) reg [13:0] mem [0:31];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1) mem[ii] = 0;
-	reg [ 4:0] ra_q;
+	reg [13:0] rd_q;
 	always @(posedge CLK) begin
 		if (WREN) mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 
 endmodule
 
@@ -1080,17 +1086,17 @@ module OPL4_LFO_RAM (
 	input  [ 4: 0] RDADDR,
 	output [21: 0] Q);
 
-	// altsyncram DUAL_PORT 32w: addr_b registrada en CLK, salida sin registrar
-	reg [21:0] mem [0:31];
+	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM)
+	(* syn_ramstyle = "block_ram" *) reg [21:0] mem [0:31];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1) mem[ii] = 0;
-	reg [ 4:0] ra_q;
+	reg [21:0] rd_q;
 	always @(posedge CLK) begin
 		if (WREN) mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 
 endmodule
 
@@ -1102,17 +1108,17 @@ module OPL4_SO_RAM (
 	input  [ 4: 0] RDADDR,
 	output [15: 0] Q);
 
-	// altsyncram DUAL_PORT 32w: addr_b registrada en CLK, salida sin registrar
-	reg [15:0] mem [0:31];
+	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM)
+	(* syn_ramstyle = "block_ram" *) reg [15:0] mem [0:31];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1) mem[ii] = 0;
-	reg [ 4:0] ra_q;
+	reg [15:0] rd_q;
 	always @(posedge CLK) begin
 		if (WREN) mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 
 endmodule
 
@@ -1124,17 +1130,17 @@ module OPL4_EVOL_RAM (
 	input  [ 4: 0] RDADDR,
 	output [11: 0] Q);
 
-	// altsyncram DUAL_PORT 32w: addr_b registrada en CLK, salida sin registrar
-	reg [11:0] mem [0:31];
+	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM)
+	(* syn_ramstyle = "block_ram" *) reg [11:0] mem [0:31];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1) mem[ii] = 0;
-	reg [ 4:0] ra_q;
+	reg [11:0] rd_q;
 	always @(posedge CLK) begin
 		if (WREN) mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 
 endmodule
 
@@ -1146,17 +1152,17 @@ module OPL4_TL_RAM (
 	input  [ 4: 0] RDADDR,
 	output [16: 0] Q);
 
-	// altsyncram DUAL_PORT 32w: addr_b registrada en CLK, salida sin registrar
-	reg [16:0] mem [0:31];
+	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM)
+	(* syn_ramstyle = "block_ram" *) reg [16:0] mem [0:31];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1) mem[ii] = 0;
-	reg [ 4:0] ra_q;
+	reg [16:0] rd_q;
 	always @(posedge CLK) begin
 		if (WREN) mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 
 endmodule
 
@@ -1173,16 +1179,16 @@ module OPL4_REG_RAM
 	output [dw-1: 0] Q
 );
 
-	// altsyncram DUAL_PORT: addr_b registrada en CLK, salida sin registrar
-	reg [dw-1:0] mem [0:(2**aw)-1];
+	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM)
+	(* syn_ramstyle = "block_ram" *) reg [dw-1:0] mem [0:(2**aw)-1];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
 	initial for (ii = 0; ii < (2**aw); ii = ii + 1) mem[ii] = 0;
-	reg [aw-1:0] ra_q;
+	reg [dw-1:0] rd_q;
 	always @(posedge CLK) begin
 		if (WREN) mem[WRADDR] <= DATA;
-		ra_q <= RDADDR;
+		rd_q <= mem[RDADDR];
 	end
-	assign Q = mem[ra_q];
+	assign Q = rd_q;
 
 endmodule

@@ -51,13 +51,16 @@ param(
     [Parameter(Mandatory=$true)][string]   $Campana,
     [Parameter(Mandatory=$true)][int[]]    $Dados,
     [switch] $Slim,
-    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSX_up',
+    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSX_up_v3',
     [string] $Scratch = "$env:LOCALAPPDATA\Temp\claude\campanas",
-    [string] $Gowin   = 'C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\gw_sh.exe'
+    [string] $Gowin   = 'C:\Gowin\Gowin_V1.9.12.03_x64\IDE\bin\gw_sh.exe'
 )
 $ErrorActionPreference = 'Stop'
 
-if (-not (Test-Path $Gowin)) { throw "No esta el gw_sh Education en $Gowin. Las builds van SIEMPRE con 1.9.11.03 Education." }
+# NUEVA ERA (v3): builds con 1.9.12.03 comercial. Gowin retiro el SSRAM del
+# GW5AT-60B por un problema de SILICIO (correo de soporte, 03/08/2026): el RTL
+# migra a BSRAM/registros y la 1.9.11 queda solo para la era v2.x congelada.
+if (-not (Test-Path $Gowin)) { throw "No esta el gw_sh en $Gowin. La era v3 compila SIEMPRE con 1.9.12.03." }
 if ($Dados.Count -lt 1)      { throw "Hacen falta dados." }
 
 # El audio grande. Se apagan los OCHO juntos porque tienen dependencias entre si
