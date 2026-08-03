@@ -161,6 +161,92 @@ begin
 end
 endtask
 
+// ============================================================================
+// _164 -DCMDTRAF — TRAFICO DEL MOTOR DE COMANDOS CONTRA LA TABLA DE PATRONES.
+//
+// QUE SE MIDE Y POR QUE. En el shim, el relleno de la sc-cache NO esta
+// filtrado: v9968_vram_shim.v:1549-1557 dice literalmente "TODO consumidor de
+// lectura rellena — bg/sprite/CPU/comando". El victim buffer SI se filtro a
+// sprites en la _150 (fill_sp), pero la cache no. Hipotesis: cuando un comando
+// LEE su destino y ese destino ES la tabla de patrones, inunda la cache y
+// desaloja los patrones que los sprites necesitan ese mismo scanline.
+//
+// De donde sale la sospecha: en placa, con el V9968DM, spMISS/s salta de 3.840
+// (con el LRMM MUERTO, porque la demo no escribia R#21) a 25.000-55.000 (con el
+// LRMM VIVO). El LRMM lee su destino antes de cada escritura y su destino es la
+// SPT. Eso es ~667 fallos/frame; a ~20 px de churro por fallo son ~13.300 px
+// sobre 54.272 = ~25% de pantalla, que es la densidad de rayas observada.
+//
+// POR QUE SOBRE EL BANCO ru66 Y NO SOBRE UNO NUEVO DEL V9968DM: porque el ru66
+// YA TIENE LINEA BASE VALIDADA (DIFFS=0 contra la referencia dorada). Montar
+// una escena nueva cambiaria dos variables a la vez. Aqui se cambia UNA.
+//
+// EL TRUCO PARA NO CONTAMINAR LA MEDIDA: LMMM con operacion logica OR
+// (CMD=0x92) desde una region de VRAM que esta a CEROS. El motor SE VE OBLIGADO
+// A LEER EL DESTINO (lo exige cualquier op distinta de IMP) — que es justo el
+// trafico que se quiere inyectar — pero x OR 0 = x, asi que LOS DATOS NO
+// CAMBIAN y la imagen de sprites sigue siendo comparable pixel a pixel. Con
+// XOR o con IMP el experimento se destruiria a si mismo.
+//
+// Destino: DY=256 => byte 256*128 = 0x8000 = la SPT del ru66; NY=128 cubre
+// 0x8000-0xC000 (16 KB), o sea la tabla de patrones entera.
+// Fuente: SY=800 (byte 0x19000), region nunca precargada => ceros.
+// ============================================================================
+`ifdef CMDLIVE
+// _176 CMDLIVE — el reproductor DEVCON de verdad: LMMM|XOR con FUENTE EN EL
+// BG (SY=0, no-ceros). El OR de CMDTRAF deja los DATOS ESTATICOS: un miss con
+// deadline perdido latchea dato viejo == dato nuevo y NO se ve en el diff
+// (por eso julio "convergia" en sim con la placa rallada). Con XOR el destino
+// ALTERNA con periodo 2 barridos — determinista e identico en la dorada, asi
+// que todo pixel distinto ES un fallo del shim (el latch a fase fija del
+// colector pillando la SPT a medio cambiar: la raya de la DEVCON).
+`define CMDTRAF
+task cmd_or_spt;
+begin
+    vdp_reg(6'd32, 8'd0);    vdp_reg(6'd33, 8'd0);        // SX = 0
+    vdp_reg(6'd34, 8'd0);    vdp_reg(6'd35, 8'd0);        // SY = 0 (bg, NO ceros)
+    vdp_reg(6'd36, 8'd0);    vdp_reg(6'd37, 8'd0);        // DX = 0
+    vdp_reg(6'd38, 8'd0);    vdp_reg(6'd39, 8'd1);        // DY = 256 -> 0x8000
+    vdp_reg(6'd40, 8'd0);    vdp_reg(6'd41, 8'd1);        // NX = 256
+    vdp_reg(6'd42, 8'd128);  vdp_reg(6'd43, 8'd0);        // NY = 128
+    vdp_reg(6'd44, 8'd0);                                  // CLR (no usado)
+    vdp_reg(6'd45, 8'd0);                                  // ARG
+    vdp_reg(6'd46, 8'h94);                                 // LMMM | XOR
+end
+endtask
+`elsif CMDTRAF
+task cmd_or_spt;
+begin
+    vdp_reg(6'd32, 8'd0);    vdp_reg(6'd33, 8'd0);        // SX = 0
+    vdp_reg(6'd34, 8'd800 % 256); vdp_reg(6'd35, 8'd800 / 256); // SY = 800 (ceros)
+    vdp_reg(6'd36, 8'd0);    vdp_reg(6'd37, 8'd0);        // DX = 0
+    vdp_reg(6'd38, 8'd0);    vdp_reg(6'd39, 8'd1);        // DY = 256 -> 0x8000
+    vdp_reg(6'd40, 8'd0);    vdp_reg(6'd41, 8'd1);        // NX = 256
+    vdp_reg(6'd42, 8'd128);  vdp_reg(6'd43, 8'd0);        // NY = 128
+    vdp_reg(6'd44, 8'd0);                                  // CLR (no usado)
+    vdp_reg(6'd45, 8'd0);                                  // ARG
+    vdp_reg(6'd46, 8'h92);                                 // LMMM | OR
+end
+endtask
+`endif
+
+`ifdef CMDTRAF
+integer n_cmds = 0;
+initial begin
+    wait (setup_done);
+    forever begin
+        // sin sondeo de CE (este banco no tiene tarea de lectura de bus): se
+        // espera a que el motor quede OCIOSO mirando su estado por jerarquia,
+        // que es lo que ya hace tb_sc8cmd para su comprobacion de coherencia.
+        wait (u_vdp.u_command.ff_state == 0);
+        cmd_or_spt();
+        n_cmds = n_cmds + 1;
+        repeat (200) @(posedge clk);
+    end
+end
+`endif
+reg setup_done = 0;
+
 // ---- volcado de frame ----
 integer vs_count = 0;
 logic vs_d = 0, hs_d = 0;
@@ -300,8 +386,12 @@ initial begin
     `include "sprite3_setup.svh"
 `endif
     $display("SETUP mode3 cargado en vs=%0d", vs_count);
+    setup_done = 1;
     wait (dump_state == 2);
     #1000;
+`ifdef CMDTRAF
+    $display("*** CMDTRAF: %0d comandos LMMM|OR lanzados contra la SPT ***", n_cmds);
+`endif
     $display("*** SPRITE3 CON SHIM: COMPLETO (vs=%0d) ***", vs_count);
     $finish;
 end

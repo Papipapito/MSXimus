@@ -32,6 +32,22 @@ ruvector.db
 # Artefactos de simulacion (regenerables)
 *.vvp
 *.vcd
+*.bak
+*.raw
+tools/**/.build*/
+tools/v9968_sim/logs/
+tools/v9968_sim/deltas.log
+tools/v9968_sim/*_run*.log
+tools/v9968_sim/s8full_frame.txt
+tools/v9968_sim/*.png
+tools/opl3_sim/obj_timer/
+# Volcados de analisis de la caza del OPL4 (regenerables) y ROMs Yamaha (copyright)
+tools/opl4wave_sim/*.txt
+tools/opl4wave_sim/*.hex
+tools/opl4wave_sim/probe*.v
+
+# Estimacion de sintesis OPL4 para el TN20K (estudio aparte, no es del MSXimus)
+fpga/opl4_20k_est/
 
 # --- Carpeta personal de Albert (release lista para flashear, NO subir) ---
 mi_release/

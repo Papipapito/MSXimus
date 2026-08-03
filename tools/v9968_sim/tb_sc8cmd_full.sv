@@ -488,8 +488,19 @@ function [21:0] phys_addr(input [17:0] la);
 endfunction
 // indice de palabra del modelo W9825: rw_index = {ba, row, col} con el
 // mapeo wv2 de memory.v: row={1'b1,2'b00,a[21:12]} ba=a[11:10] col=a[9:1]
+// _163 BANCO RANCIO ARREGLADO. Este banco llevaba en ROJO desde el cambio _159
+// (fallos_vram=7428 = EL 100% de los pixeles comprobados, todos leyendo 0x00) y
+// nadie lo habia notado: la bateria se paso para la _162 con este banco en rojo.
+// NO era un bug del RTL — las escrituras SI llegaban a la memoria (el propio
+// scan_mem del banco las encontraba en idx=2d0000 val=7b7b, que es el color 123
+// del primer HMMV). El banco las buscaba 0x80000 mas abajo.
+// CAUSA: el _159 movio wv2/wv3 del bloque de filas de la wave a las filas
+// 5120+, para dar al ADPCM-B del Y8950 su ventana de 256KB propia y cerrar el
+// bug #3 del niquelado. En memory.v (linea ~398) la fila de wv2 quedo asi:
+//     pre_row <= { 1'b1, 2'b01, wv2_addr[21:12] }
+// y este banco seguia modelando el prefijo VIEJO 2'b00 => desviado en el bit 19.
 function [23:0] mem_idx(input [21:0] pa);
-    mem_idx = {pa[11:10], 1'b1, 2'b00, pa[21:12], pa[9:1]};
+    mem_idx = {pa[11:10], 1'b1, 2'b01, pa[21:12], pa[9:1]};
 endfunction
 task check_px(input integer x, input integer y, input [7:0] esperado);
     reg [21:0] pa;

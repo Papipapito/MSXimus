@@ -47,9 +47,14 @@
     vdp_reg(6'd9,  8'h80);     // 212 lineas
     vdp_reg(6'd18, 8'h00);
     vdp_reg(6'd19, 8'h00);
-    // R#20 = [S16][EVR][ECOM][EPAL][SCOL][ILNS][SVNS][HS]; SCOL(bit3)=mode3.
-    // La demo lo pone a 0xFF (reg_data[] de msx_vdp.c).
-    vdp_reg(6'd20, 8'hFF);
+    // R#20 = [S16][CEIE][ILN][EPAL][SCOL][ILNS][SVNS][HS]; SCOL(bit3)=mode3.
+    // _163: con el mapa NUEVO de R#20/R#21 (port de 0683e7e) la demo pone 0x9F,
+    // no 0xFF — es EL UNICO byte en que difieren los DEVCON.COM de los dos
+    // arboles (offset 14882) y el binario del upstream vivo ya trae el 0x9F.
+    // Con 0xFF sobre el mapa nuevo se encenderian por accidente el entrelazado
+    // plano (bit5) y la interrupcion de fin de comando (bit6).
+    // Los comandos extendidos y el 256K los da ahora R#21[0] = 0 (V58).
+    vdp_reg(6'd20, 8'h9F);
     vdp_reg(6'd21, 8'h00);
     vdp_reg(6'd23, 8'h00);     // sin offset vertical
     vdp_reg(6'd25, 8'h02);     // left mask; bit7=0 => SIN priority shuffle

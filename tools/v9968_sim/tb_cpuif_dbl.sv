@@ -82,9 +82,11 @@ logic [1:0] z_mode = 2'd0;
 logic [7:0] z_cdo  = 8'd0;
 wire  [7:0] z_cdi;
 
+wire g_wait_n;      // _177: /WAIT del glue hacia el modelo de Z80
 v9968_cpu_glue u_glue (
     .clk_86(clk), .rst_n(reset_n),
     .csw_n(csw_n), .csr_n(csr_n), .mode(z_mode), .cdo(z_cdo), .cdi_r(z_cdi),
+    .wait_n(g_wait_n),
     .bus_address(bus_address), .bus_ioreq(bus_ioreq), .bus_write(bus_write),
     .bus_valid(bus_valid), .bus_ready(bus_ready), .bus_wdata(bus_wdata),
     .bus_rdata(bus_rdata), .bus_rdata_en(bus_rdata_en)
@@ -196,6 +198,30 @@ wire p_exec   = p_bvalid & ~p_busy & ~p_infl;      // == (w_read | w_write)
 
 integer n_exec = 0, n_win = 0, n_deliv = 0;
 integer n_latch = 0, n_glue = 0, n_edgelost = 0;
+reg io_lvl_d = 1'b0;   // _177: para el flanco de entrada del nivel I/O
+
+// ---------------------------------------------------------------------------
+//  _163 SONDA DEL RESIDUO DEL VRAMSOAK: ¿aterriza una pre-lectura que YA fue
+//  invalidada? El buffer se invalida al re-apuntar la direccion, pero la
+//  lectura que ya iba EN VUELO no se cancela: cuando vuelve, la rama
+//  `vram_rdata_en && ff_pf_inflight` publica su dato y pone ff_pf_valid = 1
+//  SIN comprobar que siga siendo el dato que se queria. El siguiente IN lo
+//  sirve tal cual => primera lectura mala, las siguientes buenas (la VRAM
+//  intacta). Si n_pf_stale > 0 el mecanismo esta demostrado.
+// ---------------------------------------------------------------------------
+wire p_pfinv = u_dut.w_pf_invalidate;
+wire p_setrd = u_dut.w_set_read_address;
+reg  pf_dirty = 1'b0;
+integer n_pf_stale = 0, n_pf_land = 0;
+always @(posedge clk) begin
+    if( !reset_n ) pf_dirty <= 1'b0;
+    else if( vram_rdata_en && p_infl ) begin
+        n_pf_land = n_pf_land + 1;
+        if( pf_dirty ) n_pf_stale = n_pf_stale + 1;
+        pf_dirty <= 1'b0;
+    end
+    else if( (p_pfinv || p_setrd) && p_infl ) pf_dirty <= 1'b1;
+end
 
 //	La cuenta que NO puede mentir: cada transferencia que el maestro da por
 //	hecha (bus_valid && bus_ready, y el glue baja bus_valid acto seguido) tiene
@@ -206,11 +232,14 @@ always @(posedge clk) if( reset_n ) begin
     if( bus_valid && ( p_busy || p_infl ) )  n_win   = n_win   + 1;
     if( bus_rdata_en )                       n_deliv = n_deliv + 1;
     if( p_exec )                             n_exec  = n_exec  + 1;
-    //	flancos de csw_n/csr_n que el GLUE descarta por tener otra transaccion en
-    //	vuelo (bug #26 del informe — AJENO a este fix, se cuenta para no
-    //	atribuirle a este bug la corrupcion que causa)
-    if( u_glue.bus_valid && ( u_glue.wr_start || u_glue.rd_start ) )
+    //	flancos de csw_n/csr_n que el glue VIEJO descartaba por tener otra
+    //	transaccion en vuelo (bug #26). _177: el glue nuevo dispara por
+    //	NIVEL+served y ya no puede tirar flancos — se cuenta el evento
+    //	equivalente (ciclo I/O que ARRANCA con bus_valid aun alto = el que
+    //	antes se perdia; ahora solo se DIFIERE) para vigilar la correlacion.
+    if( (u_glue.io_wr || u_glue.io_rd) && !io_lvl_d && u_glue.bus_valid )
         n_edgelost = n_edgelost + 1;
+    io_lvl_d <= (u_glue.io_wr || u_glue.io_rd);
 end
 
 // ---------------------------------------------------------------------------
@@ -235,8 +264,19 @@ begin
     z_mode = m;
     #(TSTATE);
     csr_n = 1'b0;
-    #(2.5*TSTATE);
-    d = z_cdi;
+    if (WAITEN != 0) begin
+        // _177: Z80 con /WAIT — muestrea WAIT en T2 (1.5T tras IORQ) e
+        // inserta estados TW mientras el glue lo retenga; el dato se toma
+        // al final del T3 que sigue a la liberacion (como el Z80 real).
+        #(1.5*TSTATE);
+        while (g_wait_n == 1'b0) #(TSTATE);
+        #(1.0*TSTATE);
+        d = z_cdi;
+    end
+    else begin
+        #(2.5*TSTATE);
+        d = z_cdi;
+    end
     #(0.5*TSTATE);
     csr_n = 1'b1;
     #(8.0*TSTATE);
@@ -302,14 +342,22 @@ endtask
 // ---------------------------------------------------------------------------
 integer NACC = 40;
 integer MODE = 0;
+integer WAITEN = 0;   // _177: 1 = el modelo de Z80 honra el /WAIT del glue
 integer i, bad, exp_addr;
+integer n_first = 0, n_other = 0;       // _163: clasificacion del patron VRAMSOAK
+integer STEP = 7817;                    // _163: paso del recorrido (+STEP)
+integer n_prev = 0;                     // _163: byte malo = el de la lectura previa
+integer n_minus1 = 0;                   // _163b: byte malo = f(dir-1)  <<< la de placa
 logic [7:0] got;
+logic [7:0] g1, g2, g3;                 // _163: las tres lecturas de cada direccion
 localparam [17:0] BASE = 18'h00100;
 
 initial begin
+    if( !$value$plusargs("WAITEN=%d", WAITEN) ) WAITEN   = 0;   // _177
     if( !$value$plusargs("LAT=%d",  LAT     ) ) LAT      = 40;
     if( !$value$plusargs("N=%d",    NACC    ) ) NACC     = 40;
     if( !$value$plusargs("MODE=%d", MODE    ) ) MODE     = 0;
+    if( !$value$plusargs("STEP=%d", STEP    ) ) STEP     = 7817;
     if( !$value$plusargs("FCPU=%d", FCPU_KHZ) ) FCPU_KHZ = 3580;
     TSTATE = 1000000.0 / FCPU_KHZ;
 
@@ -378,6 +426,81 @@ initial begin
                 bad = bad + 1;
             end
         end
+    end
+    else if( MODE == 5 ) begin
+        //	_163 PATRON VRAMSOAK (el que corre en placa). Por CADA direccion,
+        //	TRES ciclos INDEPENDIENTES de "fijar direccion + leer" — no tres
+        //	lecturas encadenadas: por eso el programa compara las tres contra el
+        //	MISMO valor esperado. Firma en placa (v2.1-rc1, 9 de 9 casos):
+        //	  la 1a lectura MALA, la 2a y la 3a BUENAS
+        //	  => la VRAM esta intacta; el defecto vive en el camino de lectura.
+        //	  y el byte malo difiere del bueno SOLO en los bits 0-2/0-3.
+        //	Direcciones DISPERSAS (como el soak), para que cada primera lectura
+        //	llegue con el buffer apuntando a otra zona.
+        //	_163b EL PATRON REAL DEL VRAMSOK2, sacado de su propia pantalla de
+        //	titulo ("Patron: dir^(dir>>8)^A5h (5Ah b4-7)"): asi los bytes que
+        //	imprime este banco son DIRECTAMENTE comparables con la captura de
+        //	placa. Zona 0x04000-0x1FFFF, bancos 1-7 de 16KB.
+        for( i = 18'h04000; i < 18'h20000; i = i + 1 )
+            vram[i] = ( i & 8'hFF ) ^ ( ( i >> 8 ) & 8'hFF )
+                      ^ ( ( (i >> 14) >= 4 ) ? 8'h5A : 8'hA5 );
+        $display("  (patron VRAMSOAK REAL: dir^(dir>>8)^A5/5A, 3 x [SETRD(A)+IN] por direccion)");
+        //	ORACULO CORREGIDO. La firma de placa (9 de 9 casos decodificados con
+        //	el patron real) es que el byte malo vale EXACTAMENTE f(dir-1): la
+        //	primera lectura tras re-apuntar lee UNA DIRECCION POR DEBAJO. El
+        //	contraste de la version anterior (¿es el byte de la lectura anterior
+        //	en el TIEMPO?) medía OTRO bug — el cdi_r rancio por falta de /WAIT,
+        //	que solo aparece a LAT>=340 y no es este.
+        //	Se cuentan las TRES hipotesis por separado para que el banco no pueda
+        //	confundirlas nunca mas.
+        for( i = 0; i < NACC; i = i + 1 ) begin
+            exp_addr = 18'h04000 + ( ( i * STEP ) % 18'h1C000 );
+            vram_set_rd(exp_addr[17:0]);  z80_in(2'd0, g1);
+            vram_set_rd(exp_addr[17:0]);  z80_in(2'd0, g2);
+            vram_set_rd(exp_addr[17:0]);  z80_in(2'd0, g3);
+            if( (g1 !== vram[exp_addr]) && (g2 === vram[exp_addr]) && (g3 === vram[exp_addr]) ) begin
+                n_first = n_first + 1;
+                //	hipotesis A (la de placa): el byte es f(dir-1)
+                if( g1 === vram[exp_addr - 1] ) n_minus1 = n_minus1 + 1;
+                //	hipotesis B: el byte es el de la direccion anterior del recorrido
+                else if( i > 0 &&
+                         g1 === vram[18'h04000 + ( ( (i-1) * STEP ) % 18'h1C000 )] )
+                    n_prev = n_prev + 1;
+                if( n_first <= 10 )
+                    $display("  1a LECTURA MALA en %0d:%04h  e=%02h l=%02h %02h %02h  (XOR=%02h)  f(dir-1)=%02h%0s",
+                             exp_addr >> 14, exp_addr & 18'h3FFF,
+                             vram[exp_addr], g1, g2, g3, vram[exp_addr] ^ g1,
+                             vram[exp_addr - 1],
+                             (g1 === vram[exp_addr - 1]) ? "  <== ES f(dir-1)" : "");
+                bad = bad + 1;
+            end
+            else if( (g1 !== vram[exp_addr]) || (g2 !== vram[exp_addr]) || (g3 !== vram[exp_addr]) ) begin
+                n_other = n_other + 1;
+                if( n_other <= 6 )
+                    $display("  FALLO DISTINTO en %0d:%04h  e=%02h l=%02h %02h %02h",
+                             exp_addr >> 14, exp_addr & 18'h3FFF,
+                             vram[exp_addr], g1, g2, g3);
+                bad = bad + 1;
+            end
+        end
+        $display("");
+        $display("  --- firma del VRAMSOAK (LAT=%0d, paso %0d) ---", LAT, STEP);
+        $display("    direcciones probadas                       : %0d", NACC);
+        $display("    SOLO la 1a lectura mala (firma de placa)   : %0d", n_first);
+        $display("      A) el byte malo es f(dir-1)  <<< PLACA   : %0d", n_minus1);
+        $display("      B) el byte malo es el de la lectura previa: %0d", n_prev);
+        $display("      C) ninguna de las dos                    : %0d", n_first - n_minus1 - n_prev);
+        $display("    otros fallos (2a o 3a tambien malas)       : %0d", n_other);
+        $display("    pre-lecturas que aterrizaron               : %0d", n_pf_land);
+        $display("      ... de ellas YA INVALIDADAS (rancias)    : %0d", n_pf_stale);
+        if( n_minus1 > 0 )
+            $display("  *** REPRODUCIDO EL DE PLACA: la 1a lectura devuelve f(dir-1) (%0d casos).", n_minus1);
+        else if( n_prev > 0 )
+            $display("  *** OTRO BUG: byte de la lectura previa (cdi_r rancio), NO el de placa.");
+        else if( n_first > 0 )
+            $display("  *** Sintoma reproducido pero el byte no encaja con ninguna hipotesis.");
+        else
+            $display("  *** NO REPRODUCE con LAT=%0d.", LAT);
     end
     else begin
         //	ESCRITURAS encadenadas: cada OUT al puerto 0 cae dentro de la

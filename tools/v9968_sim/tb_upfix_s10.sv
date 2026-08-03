@@ -143,9 +143,10 @@ initial begin
     reset_n = 1;
     repeat (30) @(posedge clk);
 
-    // 1. CEIE = R#21[7] (generacion vieja del arbol MSXimus)
-    vdp_reg(6'd21, 8'h80);
-    check(u_dut.ff_command_end_interrupt_enable === 1'b1, "R#21[7] arma el CEIE");
+    // 1. CEIE. _163: con el mapa NUEVO de R#20/R#21 (port de 0683e7e) el CEIE
+    //    se mudo de R#21[7] a R#20[6]. Antes esto era vdp_reg(6'd21, 8'h80).
+    vdp_reg(6'd20, 8'h40);
+    check(u_dut.ff_command_end_interrupt_enable === 1'b1, "R#20[6] arma el CEIE");
 
     // 2. fin de comando -> flag + INT
     pulse_cmd_end;

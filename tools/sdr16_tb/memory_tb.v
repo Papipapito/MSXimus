@@ -692,6 +692,116 @@ module memory_tb;
         end
         $display("W5 cuatro bandas OK (100 wave + 200 wv2 + 200 wv3 + %0d CPU)", 2*NRAND);
 
+        // ---- _174 TS: STREAMING del pack (protocolo REAL del loader de flash) ----
+        // El loader NO usa el handshake ram_busy: ram_req=ram_write=flash_busy
+        // (top.v:4092) es un NIVEL que dura toda la transaccion SPI, con
+        // addr/din estables; el FSM-A acepta una vez por nivel y sirve EN
+        // BUCLE ABIERTO (nadie confirma). Durante la carga el Z80 esta en
+        // RESET (bus_rfsh_n=1):
+        //   - sin refresco autonomo: CERO refrescos en toda la carga = el bug
+        //     del arranque en caliente (pack podrido, "Syntax error in 0");
+        //   - con refresco autonomo SIN guarda: el refresco roba medias con
+        //     aceptaciones en vuelo y pierde escrituras = s010 pantalla negra.
+        // Este test exige LAS DOS COSAS a la vez: ni un byte perdido Y
+        // refrescos vivos durante el stream.
+        begin : t_stream
+            integer si, blen, refS0, refS1;
+            real tS0, tS1;
+            $display("TS streaming: 400 bytes protocolo-loader, rfsh_n=1 (Z80 en reset)...");
+            bus_rfsh_n = 1;
+            refS0 = sdram.refresh_count;
+            tS0 = $realtime;
+            for (si = 0; si < 400; si = si + 1) begin
+                // longitud del busy variable: SPI rapida/media/lenta
+                blen = (si % 3 == 0) ? 16 : (si % 3 == 1) ? 40 : 100;
+                @(negedge clk54);
+                ram_addr  = 23'h008000 + si[22:0];
+                ram_din   = si[7:0] ^ 8'h5A;
+                ram_write = 1;
+                ram_req   = 1;                 // nivel largo, SIN mirar ram_busy
+                repeat (blen) @(negedge clk54);
+                ram_req   = 0;                 // fin de la transaccion SPI
+                ram_write = 0;
+                repeat (3) @(negedge clk54);   // hueco del FSM entre bytes
+            end
+            tS1 = $realtime;
+            refS1 = sdram.refresh_count;
+            if (refS1 - refS0 == 0) begin
+                errors = errors + 1;
+                $display("FAIL TS-b: CERO refrescos durante el streaming (%0.0f ns de carga)", tS1 - tS0);
+            end
+            begin : ts_verify
+                integer sv;
+                reg [7:0] tsr;
+                for (sv = 0; sv < 400; sv = sv + 1) begin
+                    cpu_op(1'b0, 23'h008000 + sv[22:0], 8'h00, tsr);
+                    check8(tsr, sv[7:0] ^ 8'h5A, "TS-a byte del stream");
+                end
+            end
+            $display("TS streaming: +%0d refrescos en %0.0f ns de carga", refS1 - refS0, tS1 - tS0);
+        end
+
+        // ---- _178 TS-w: LA WAVE BAJO PRESION DE REFRESCO ----
+        // La tabla de ondas del OPL4 lee sus muestras por el puerto wave, que
+        // SOLO toma turnos de CPU vacios — los mismos que el refresco autonomo
+        // del _175 consume ahora al tope de cadencia (antes solo entraba al
+        // coincidir con el RFSH del Z80). Sintoma en placa (rc7, 04/08):
+        // wavetable distorsionada. Este test mide el ritmo sostenido y la
+        // PEOR latencia de una lectura wave con el Z80 corriendo (RFSH
+        // realista) — la metrica que decide si el refresco le roba turnos.
+        begin : t_wave_rfsh
+            integer wi, refW0, refW1;
+            real tW0, tW1, wlat, wmax;
+            reg rfsh_stop;
+            rfsh_stop = 0;
+            fork
+                begin : rfsh_z80    // RFSH del Z80: ~560ns bajo cada ~1.5us
+                    while (!rfsh_stop) begin
+                        bus_rfsh_n = 0;
+                        repeat (30) @(negedge clk54);
+                        bus_rfsh_n = 1;
+                        repeat (50) @(negedge clk54);
+                    end
+                end
+                begin : wave_hammer
+                    wmax = 0;
+                    tW0 = $realtime;
+                    refW0 = sdram.refresh_count;
+                    for (wi = 0; wi < 2000; wi = wi + 1) begin
+                        tW1 = $realtime;
+                        wv_op(0, 22'h100000 + wi[21:0], 8'h00, wv_rd);
+                        wlat = $realtime - tW1;
+                        if (wlat > wmax) wmax = wlat;
+                    end
+                    refW1 = sdram.refresh_count;
+                    tW1 = $realtime;
+                    rfsh_stop = 1;
+                end
+            join
+            $display("TSW wave bajo refresco: 2000 ops en %0.0f ns -> %0.2f Mops/s | lat MAX=%0.0f ns | refrescos=+%0d",
+                     tW1 - tW0, 2000.0 * 1000.0 / (tW1 - tW0), wmax, refW1 - refW0);
+            if (wmax > 3000.0) begin
+                errors = errors + 1;
+                $display("FAIL TSW: latencia maxima de la wave %0.0f ns (>3us = deadline del PCM roto)", wmax);
+            end
+        end
+
+        // ---- _174 TS-c: Z80 parado SIN trafico (ventana de reset puro) ----
+        // Cadencia minima exigida: 1 refresco cada ~15us (7.8us/fila nominal
+        // del W9825 con margen 2x). Sin autonomo esto da +0.
+        begin : t_idle_rfsh
+            integer refI0, refI1;
+            bus_rfsh_n = 1;
+            refI0 = sdram.refresh_count;
+            repeat (10800) @(posedge clk108);    // ~100 us sin nada
+            refI1 = sdram.refresh_count;
+            if (refI1 - refI0 < 6) begin
+                errors = errors + 1;
+                $display("FAIL TS-c: refresco insuficiente con Z80 parado (+%0d en ~100us)", refI1 - refI0);
+            end
+            $display("TS-c refresco en reposo: +%0d en ~100us", refI1 - refI0);
+        end
+
         if (errors == 0)
             $display("*** ALL TESTS PASS ***");
         else

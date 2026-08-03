@@ -68,6 +68,15 @@ while True:
         d_lock = (lock - prev[1]) & 0xFFFF
         d_miss = (bgmiss - (prev[2] & 0xFFFF)) & 0xFFFF
         d_spm  = (spmiss - ((prev[2] >> 16) & 0xFFFF)) & 0xFFFF
+        # ⚠️ WRAP DE 16 BITS (_173): los contadores del shim son de 16 bits, asi
+        # que el TECHO de medida es 65535 por intervalo de muestreo. Con el
+        # periodo lento (1301 ms) eso son ~50.373/s; con el rapido (181 ms),
+        # ~362.072/s. Una tasa REAL por encima da la vuelta y se lee como un
+        # numero pequeño y bonito — asi se compararon mal s006 y s007. Si el
+        # delta se acerca al techo, AVISAR: el numero ya no es una medida.
+        if d_miss > 0xE000 or d_spm > 0xE000:
+            print("  ⚠️ WRAP? bgMISS/spMISS cerca del techo de 16 bits: la tasa "
+                  "real puede ser MAYOR (multiplo de 65536/intervalo)")
         d_pkt  = (pkt  - prev[3]) & 0xFFFF
         d_ovr  = (ovr  - prev[4]) & 0xFF
         lock_s = d_lock / dt if dt > 0 else 0
