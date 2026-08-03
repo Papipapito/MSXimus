@@ -52,9 +52,11 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 
 | # | File | Address | Required? |
 |---|---|---|---|
-| 1 | `msximus_60k_*.fs` | **`0x000000`** | Yes — this is the core |
+| 1 | `MSXimus_v*.fs` | **`0x000000`** | Yes — this is the core |
 | 2 | BIOS pack (`goauld_rom_int_*.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
 | 3 | `yrw801.rom` | **`0x500000`** | No — only for MoonSound/OPL4 |
+
+The release also includes `MSXimus_v*_jtag.bin`: the **same core**, packaged for direct JTAG loading (quick testing without touching the flash). It is **not** the BIOS pack — nothing named `MSXimus_*` goes to `0x400000`.
 
 ### How to flash
 
