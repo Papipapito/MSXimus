@@ -1,0 +1,9 @@
+# ESP32-C6 4MB - MSXnano WiFi (firmware UNAPI de ducasp)
+# App grande SIN OTA doble + particion FAT (FFat) para certificados.
+# El firmware usa FFat.begin() -> necesita una particion data/fat (aqui ~1.19MB).
+# App = 2.75MB (el firmware ~1.5-1.8MB entra de sobra). 4MB total = 0x400000.
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x5000,
+otadata,    data, ota,     0xe000,   0x2000,
+app0,       app,  ota_0,   0x10000,  0x2C0000,
+ffat,       data, fat,     0x2D0000, 0x130000,
