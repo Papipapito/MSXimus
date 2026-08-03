@@ -165,7 +165,8 @@ module phase_generator
         .DEPTH(NUM_OPERATORS_PER_BANK),
         .OUTPUT_DELAY(2),
         .DEFAULT_VALUE(0),
-        .NUM_BANKS(NUM_BANKS)
+        .NUM_BANKS(NUM_BANKS),
+        .USE_BRAM(1)            // era v3: el mayor consumidor FF del opl3
     ) phase_acc_mem (
         .clk,
         .wea(sample_clk_en_p[3]),

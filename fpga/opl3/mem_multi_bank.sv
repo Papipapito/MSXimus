@@ -47,6 +47,7 @@ module mem_multi_bank #(
     parameter OUTPUT_DELAY = 0, // 0, 1, or 2
     parameter DEFAULT_VALUE = 0,
     parameter NUM_BANKS = 0,
+    parameter USE_BRAM = 0,     // era v3: 1 = bancos en BSRAM (solo delay>=1)
     parameter BANK_WIDTH = $clog2(NUM_BANKS)
 ) (
     input wire clk,
@@ -92,6 +93,29 @@ module mem_multi_bank #(
                 .dia,
                 .dob(dob_array[i])
             );
+        else if (USE_BRAM) begin
+            // era v3: banco en BSRAM (sin SSRAM en el GW5AT-60B); misma
+            // semantica que mem_simple_dual_port con delay>=1
+            logic reb_mem;
+
+            always_comb reb_mem = reb && bankb == i;
+
+            mem_simple_dual_port_bram #(
+                .DATA_WIDTH(DATA_WIDTH),
+                .DEPTH(DEPTH),
+                .OUTPUT_DELAY(OUTPUT_DELAY),
+                .DEFAULT_VALUE(DEFAULT_VALUE)
+            ) mem_bank (
+                .clka(clk),
+                .clkb(clk),
+                .wea(wea_array[i]),
+                .reb(reb_mem),
+                .addra,
+                .addrb,
+                .dia,
+                .dob(dob_array[i])
+            );
+        end
         else begin
             logic reb_mem;
 

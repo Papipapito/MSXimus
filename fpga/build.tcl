@@ -30,6 +30,7 @@ add_file opl3/mem_multi_bank.sv
 add_file opl3/mem_multi_bank_reset.sv
 add_file opl3/mem_simple_dual_port.sv
 add_file opl3/mem_simple_dual_port_async_read.sv
+add_file opl3/mem_simple_dual_port_bram.sv
 add_file opl3/operator.sv
 add_file opl3/opl3.sv
 add_file opl3/opl3_exp_lut.sv
