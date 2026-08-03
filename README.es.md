@@ -53,10 +53,8 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
 | 1 | `MSXimus_v*.fs` | **`0x000000`** | Sí — es el core |
-| 2 | Pack de BIOS (`goauld_rom_int_*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
+| 2 | Pack de BIOS (`pack_bios_*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.rom` | **`0x500000`** | No — solo para MoonSound/OPL4 |
-
-La release incluye también `MSXimus_v*_jtag.bin`: es el **mismo core**, empaquetado para cargarlo directo por JTAG (pruebas rápidas sin tocar la flash). **No** es el pack de BIOS — nada que se llame `MSXimus_*` va a `0x400000`.
 
 ### Cómo grabarlo
 
