@@ -227,12 +227,13 @@ module vdp_cpu_interface (
 	reg					ff_interrupt_line_nonR23_mode;
 	reg					ff_sprite_mode3;
 	reg					ff_ext_palette_mode;
-	reg					ff_ext_command_mode;
-	reg					ff_vram256k_mode;
 	reg					ff_sprite16_mode;
 	reg					ff_flat_interlace_mode;
 	reg					ff_force_highspeed;
-	reg					ff_fakeID;
+	//	MSXimus _163 (port de 0683e7e): ff_ext_command_mode / ff_vram256k_mode /
+	//	ff_fakeID se fusionan en ESTE bit. V58=1 => se comporta como un V9958
+	//	(ID de V9958 en S#1, sin comandos extendidos, sin 256K).
+	reg					ff_v9958_mode;
 
 	reg					ff_2nd_access;
 	reg		[7:0]		ff_1st_byte;
@@ -546,7 +547,7 @@ module vdp_cpu_interface (
 			else if( ff_screen_mode[4:3] == 2'b00 ) begin
 				ff_vram_address[13:0]	<= w_next_vram_address[13:0];
 			end
-			else if( ff_vram256k_mode ) begin
+			else if( !ff_v9958_mode ) begin
 				ff_vram_address			<= w_next_vram_address;
 			end
 			else begin
@@ -557,7 +558,7 @@ module vdp_cpu_interface (
 			//	R#14 = [N/A][N/A][N/A][N/A][A17][A16][A15][A14]
 			//	MSXimus _125: VR=0 tampoco fuerza aqui el banco a 0
 			//	(misma justificacion que arriba).
-			if( ff_vram256k_mode ) begin
+			if( !ff_v9958_mode ) begin
 				ff_vram_address[17:14]	<= ff_1st_byte[3:0];
 			end
 			else begin
@@ -632,12 +633,13 @@ module vdp_cpu_interface (
 			ff_interrupt_line_nonR23_mode <= 1'b0;
 			ff_sprite_mode3 <= 1'b0;
 			ff_ext_palette_mode <= 1'b0;
-			ff_ext_command_mode <= 1'b0;
-			ff_vram256k_mode <= 1'b0;
 			ff_sprite16_mode <= 1'b0;
 			ff_command_end_interrupt_enable <= 1'b0;
 			ff_flat_interlace_mode <= 1'b0;
-			ff_fakeID <= 1'b1;
+			//	_163: arranca en modo V9958 (igual que el ff_fakeID <= 1 de antes)
+			//	=> comandos extendidos y 256K DESACTIVADOS tras el reset, que es
+			//	el comportamiento que ya teniamos.
+			ff_v9958_mode <= 1'b1;
 		end
 		else if( ff_register_write ) begin
 			case( ff_register_num )
@@ -733,22 +735,31 @@ module vdp_cpu_interface (
 				begin
 					ff_interrupt_line <= ff_1st_byte;
 				end
-			8'd20:	//	R#20 = [S16][EVR][ECOM][EPAL][SCOL][ILNS][SVNS][HS]
+			//	MSXimus _163: MAPA NUEVO de R#20/R#21 — port del commit 0683e7e de
+			//	HRA ("Register R#20, R#21 Modified", tag v0.6). Un solo bit
+			//	(R#21[0] = V58) conmuta las TRES cosas de golpe: el ID que
+			//	devuelve S#1, los comandos extendidos y el direccionamiento de
+			//	256K. Eso libera R#20[5] y R#20[6], que pasan a llevar el
+			//	entrelazado plano y la interrupcion de fin de comando.
+			//	⚠️ El comentario de cabecera de R#20 del upstream NO se actualizo
+			//	y por eso alli MIENTE; aqui va corregido.
+			//	⚠️ Requiere el byte 14 de DEVCON.COM a 0x9F (era 0xFF) y el
+			//	offset 0x377 de V9968DM.COM. Sin eso las dos herramientas de
+			//	diagnostico de HRA programan el VDP con el mapa viejo.
+			8'd20:	//	R#20 = [S16][CEIE][ILN][EPAL][SCOL][ILNS][SVNS][HS]
 				begin
 					ff_command_high_speed_mode <= ff_1st_byte[0];
 					ff_sprite_nonR23_mode <= ff_1st_byte[1];
 					ff_interrupt_line_nonR23_mode <= ff_1st_byte[2];
 					ff_sprite_mode3 <= ff_1st_byte[3];
 					ff_ext_palette_mode <= ff_1st_byte[4];
-					ff_ext_command_mode <= ff_1st_byte[5];
-					ff_vram256k_mode <= ff_1st_byte[6];
+					ff_flat_interlace_mode <= ff_1st_byte[5];
+					ff_command_end_interrupt_enable <= ff_1st_byte[6];
 					ff_sprite16_mode <= ff_1st_byte[7];
 				end
-			8'd21:	//	R#21 = [CEIE][N/A][N/A][N/A][N/A][N/A][N/A][N/A]
+			8'd21:	//	R#21 = [N/A][N/A][N/A][N/A][N/A][N/A][N/A][V58]
 				begin
-					ff_fakeID <= ff_1st_byte[0];
-					ff_flat_interlace_mode <= ff_1st_byte[6];
-					ff_command_end_interrupt_enable <= ff_1st_byte[7];
+					ff_v9958_mode <= ff_1st_byte[0];
 				end
 			8'd23:	//	R#23 = [DO7][DO6][DO5][DO4][DO3][DO2][DO1][DO0]
 				begin
@@ -856,7 +867,7 @@ module vdp_cpu_interface (
 	always @( posedge clk ) begin
 		case( ff_status_register_pointer )
 		4'd0:		ff_status_register <= { ff_frame_interrupt, sprite_overmap, sprite_collision, sprite_overmap_id };
-		4'd1:		ff_status_register <= { 2'd0, ff_fakeID ? c_v9958id: c_v9968id, ff_line_interrupt };
+		4'd1:		ff_status_register <= { 2'd0, ff_v9958_mode ? c_v9958id: c_v9968id, ff_line_interrupt };
 		4'd2:		ff_status_register <= { status_transfer_ready, status_vsync, status_hsync, status_border_detect, 2'b11, status_field, status_command_execute };
 		4'd3:		ff_status_register <= sprite_collision_x[7:0];
 		4'd4:		ff_status_register <= { 7'b1111111, sprite_collision_x[8] };
@@ -1061,8 +1072,8 @@ module vdp_cpu_interface (
 	assign reg_interrupt_line_nonR23_mode			= ff_interrupt_line_nonR23_mode;
 	assign reg_sprite_mode3							= ff_sprite_mode3;
 	assign reg_ext_palette_mode						= ff_ext_palette_mode;
-	assign reg_ext_command_mode						= ff_ext_command_mode;
-	assign reg_vram256k_mode						= ff_vram256k_mode;
+	assign reg_ext_command_mode						= ~ff_v9958_mode;
+	assign reg_vram256k_mode						= ~ff_v9958_mode;
 	assign reg_sprite16_mode						= ff_sprite16_mode;
 	assign reg_flat_interlace_mode					= ff_flat_interlace_mode;
 endmodule

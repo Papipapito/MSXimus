@@ -81,8 +81,31 @@ module v9968_vram_shim #(
     output wire [31:0] dbg_drops             // _154: {s1_pfq[15:0], wq_full[15:0]} — drops REALES, sano=0
 );
 
-localparam C_BG     = 3'd1;
-localparam C_SPRITE = 3'd2;
+// ============================================================================
+// _170 SC_FILL_POLICY — politica de relleno de la sc-cache, SELECCIONABLE.
+// Existe para poder iterar EN PLACA en ciclos de 5 minutos (build ligera ~2 min
+// + flasheo + arranque), porque el fallo que hay que cazar —un CUELGUE DE
+// ARRANQUE— NO ES DETECTABLE EN SIMULACION: ningun banco arranca una BIOS, y por
+// eso la rc5 paso TODAS las pruebas y colgo la maquina igual.
+//
+//   0 = TODOS rellenan (bg/sprite/CPU/comando).  <-- el de la rc3, el que
+//       funciona. Es el estado seguro al que volver.
+//   1 = todos MENOS el motor de comandos.  Curo el desalojo (c_spmiss/frame de
+//       ~1300 a 1) y dejo el texto byte-identico y la bateria igual... pero
+//       COLGO EL ARRANQUE en la build completa (rc5). Sin diagnosticar.
+//   2 = SOLO sprites.  ⛔ ROMPE EL MODO TEXTO (rc4). No usar; esta aqui para que
+//       quede constancia de que se probo.
+//
+// El detalle de los dos fracasos esta en el bloque grande del relleno, mas
+// abajo. LEERLO antes de tocar esto.
+// ============================================================================
+localparam SC_FILL_POLICY = 3'd1;
+
+localparam C_BG      = 3'd1;
+localparam C_SPRITE  = 3'd2;
+// _165b: faltaban las otras dos etiquetas del arbitro (vdp_vram_interface.v:115-118).
+localparam C_CPU     = 3'd3;
+localparam C_COMMAND = 3'd4;
 
 // ============================================================================
 // VENTANA DE PREFETCH de pantalla (v4: EN BSRAM — leccion _119: los conos
@@ -204,6 +227,13 @@ reg        wrk_p1;
 reg [15:0] wrk_addr1;
 reg [31:0] wrk_data1;
 reg [3:0]  wrk_mask1;                    // DQM (0 = escribir byte)
+reg [2:0]  wrk_cls1;                     // _176: clase del escritor (tag[4:2])
+// _176: refill de escrituras no-residentes (write-allocate diferido)
+reg        refill_p;
+reg [15:0] refill_addr;
+// _179: reintento ansioso del fill de VENTANA descartado por pf_dirty
+reg        wretry_p;
+reg [15:0] wretry_addr;
 
 // OBL en dos fases (v4): obl_pend lanza la lectura BSRAM de la ventana
 // (ciclo 2 del fetch), obl_chk consume pwq y encola (ciclo 3)
@@ -262,6 +292,64 @@ reg [15:0] stride;                       // zancada aprendida (0 = no)
 // cada ~3 ciclos). Efecto: el 2o pase pre-calienta la linea N+1 ENTERA con
 // su patron de wrap del scroll H incluido, a coste CERO de trafico.
 reg        obl_walked;                   // correa: 1 walk por slot OBL
+// ============================================================================
+// _163 ARREGLO DEL SCROLL DE DOS PAGINAS (SP2, R#25 bit0) — ACTIVO EN LA BUILD.
+// MEDIDO en tb_sp2.sv (dos pilas en lockstep, misma config y semilla), antes ->
+// despues, con logs/sp2_split.log de referencia:
+//   control sin SP2          :   64 px /   2 fallos  ->   64 px /   2  (igual)
+//   SP2 estatico             :    0 px / 262 fallos  ->    0 px /   2
+//   SP2 + scroll MOVIENDOSE  : 7312 px / 387 fallos  ->  144 px / 385   <<< 50x
+//   recentrado               :   64 px / 262 fallos  ->   64 px /   2
+// El caso del scroll en movimiento es el del logo del MSX2+ y el de SCREEN 7/8.
+// ⚠️ HONESTIDAD: en ese caso los FALLOS no bajan (385 vs 387) pero el dano
+// visible cae 50x. El desacople no esta explicado del todo: lo mas probable es
+// que el prefetch ponga el dato en camino y la respuesta tardia llegue a tiempo
+// para la pantalla aunque el contador ya haya apuntado el fallo, pero eso es
+// hipotesis, NO medida.
+// ⚠️ EFECTO SECUNDARIO REAL: el caminante pasa de ~6650 disparos/frame a ~385 y
+// TODOS van a fronteras. Es un cambio de POLITICA (de "precalentar la linea
+// siguiente en linea recta" a "precalentar fronteras"), no una simple adicion.
+// Los frames de control salen identicos, asi que sin SP2 no se pierde nada.
+// ============================================================================
+// _163 SP2: fronteras de pagina predichas. Hay DOS por linea (ida y vuelta:
+// A->B y B->A) y el caminante solo dispone de un slot por oportunidad, asi que
+// se guardan por SEPARADO o se precalentaria solo la mitad. Se distinguen por
+// el SIGNO del salto (ida = +~8192, vuelta = -~8192), no por un bit concreto:
+// asi vale igual para SC7/8 (pagina en v[13]) que para SC5/6 (en v[12]).
+// flip_tgt_* van REGISTRADOS por la misma razon que wk_tgt — meter ese sumador
+// en linea hizo violar nueve dados seguidos (ver _127J arriba).
+// _163 v2: ranuras POR STREAM. Medido: con SP2 el detector dispara 766 veces
+// para 384 conmutaciones (= 2x), porque el entrelazado parte el fondo en DOS
+// streams (bit 14) y el salto se ve en los dos. Con una sola ranura por
+// direccion, la segunda deteccion sobrescribia a la primera y se perdia media
+// frontera. Indice = spr_addr1[14].
+reg [15:0] flip_dst_p [0:1];             // tras salto POSITIVO, por stream
+reg [15:0] flip_tgt_p [0:1];
+reg [15:0] flip_dst_n [0:1];             // tras salto NEGATIVO, por stream
+reg [15:0] flip_tgt_n [0:1];
+reg [1:0]  flip_pf_p, flip_pf_n;         // frontera pendiente, por stream
+// Ventana de magnitud que cuenta como conmutacion de pagina. Cota inferior muy
+// por encima del wrap del scroll H (<=64) y superior por debajo del retorno de
+// campo (~13568), dejando margen ancho alrededor de 4096 y 8192.
+localparam [15:0] FLIP_LO = 16'd2048;
+localparam [15:0] FLIP_HI = 16'd12288;
+// ⚠️ PENDIENTE (no bloqueante, medido): este detector discrimina por MAGNITUD y
+// el retorno de campo (~6784 palabras/stream) esta a un 20% de la conmutacion
+// (8192), asi que se cuela 1-2 veces por frame. NO cuesta fallos (2 en los dos
+// casos), solo mueve 32 px de la huella residual entre frames. El criterio bueno
+// seria la FORMA del salto (un bit alto contra muchos bits), no el tamano. Se
+// deja para otra campana: no se toca lo que no se ha medido.
+`ifdef SHIM_DBG_SPLIT
+// _163 CONTADORES DE LA PROPIA MAQUINARIA — sin esto no se puede distinguir
+// "el arreglo no sirve" de "el arreglo NO SE EJECUTA NUNCA", que es una
+// posibilidad real: la rama del caminante exige stride != 0, y con SP2 las
+// conmutaciones machacan bg_prev0/1, asi que la zancada podria no aprenderse
+// nunca y el caminante estar MUERTO. Un arreglo que no corre no es una
+// hipotesis refutada, es una hipotesis sin probar.
+reg [31:0] c_flipdet;                    // conmutaciones DETECTADAS
+reg [31:0] c_flippf;                     // veces que el caminante precalento
+reg [31:0] c_walk;                       // veces que el caminante disparo (total)
+`endif
 reg [15:0] wk_tgt;                       // objetivo del walk REGISTRADO (el
                                          // sumador +stride-2 fuera del cono
                                          // de obl_w: obl_w es estable desde
@@ -392,6 +480,9 @@ reg [15:0] c_wqdrop, c_s1drop;           // _154: drops silenciosos (wq lleno / 
 //   c_spmiss = los que fallan la sc-cache (van al backend)
 // Sano tras el FIX A: c_spmiss/c_spfet < 0.1%.
 reg [31:0] c_spmiss, c_spfet;
+`ifdef SHIM_DBG_SPLIT
+reg [31:0] c_wnhit, c_schit;             // _163: fondo servido por VENTANA / sc-cache
+`endif
 // PALABRA A DE COM11 (dbg_uart.cnt_a) REEMPAQUETADA:
 //   bits [31:16] = c_spmiss[15:0]   (miss de SPRITE)
 //   bits [15: 0] = c_miss[15:0]     (miss de FONDO, como siempre pero a 16b)
@@ -510,6 +601,55 @@ wire pf_dirty = |pf_dm;
 // _122: ventana a 256 palabras (8 medias-lineas SC7/8 por mitad) — el
 // re-fetch de frontera aun pillaba el realineo de indices cada 4 lineas
 // (~500 misses/s residuales en placa = guiones transitorios visibles).
+// ============================================================================
+// [_163 2026-07-30] EL SCROLL DE DOS PAGINAS (SP2, R#25 bit0) — MEDIDO Y CON
+// UNA HIPOTESIS PROPIA REFUTADA. Banco: tools/v9968_sim/tb_sp2.sv
+// (SC8 + sprites ON + R#2=0x3F, que es IMPRESCINDIBLE: el core solo activa SP2
+//  si reg_pattern_name_table_base[15]=1 — ver vdp_timing_control_screen_mode.v
+//  linea 228 — y la pagina la elige w_pos_x[8], o sea el scroll HORIZONTAL).
+//
+// MEDIDO (misma config y semilla, A=shim real / B=VRAM perfecta en lockstep):
+//     SP2 apagado             : bgmiss =   2   pxdiff =    64
+//     SP2 on, se enciende     : bgmiss = 384   pxdiff =   152   pgflips = 384
+//     SP2 on, estatico        : bgmiss = 262   pxdiff =     0
+//     SP2 on + R#26 CAMBIANDO : bgmiss = 387   pxdiff =  7336
+//     SP2 on + scroll v+h     : bgmiss = 387   pxdiff = 13064
+// El dano visible aparece cuando el scroll SE MUEVE. Y cuadra la aritmetica:
+// la pantalla exige respuesta a 8 ciclos EXACTOS (contrato de la cabecera), asi
+// que un miss NO llega a tiempo => 1 miss = 1 palabra mala = 4 px MSX x 3
+// columnas del magnificador x 2 del doblado de linea ~= 19 px de pantalla;
+// 7336/387 = 19.
+//
+// ⛔ HIPOTESIS REFUTADA (no repetirla): "las dos paginas alias-an en el mismo
+// indice de la ventana y cada conmutacion desaloja lo que la otra necesita".
+// Se probo plegando el bit de pagina en el indice:
+//     w_idx = v[7:0] ^ {v[14],7'b0} ^ {1'b0, v[13]^v[12], 6'b0}
+// (biyectivo, verificado por enumeracion de las 65536 palabras, 0 colisiones;
+//  y exonerado del fallo preexistente de tb_sc8cmd_full por A/B). Resultado:
+// BYTE-IDENTICO en todos los frames — bgmiss seguia siendo 384/262 clavado.
+// CERO efecto. RETIRADO. Y ojo: BYTE-IDENTICO en los 5 frames comparados, ni
+// un miss de diferencia — eso es MAS de lo que explicaria "el fix no ayuda", y
+// deja abierta la posibilidad de que la ventana no sea quien sirve el grueso
+// del fondo en este caso (la sc-cache de 8192 lineas, con su propio indice
+// c_idx13 que NO se toco, podria estar absorbiendolo).
+//
+// LO QUE LOS DATOS SI DICEN, sin adornos:
+//   flips=384 en las tres fases, pero misses = 384 (1,00 por flip) al encender
+//   SP2, 262 (0,68) en estatico y 387 (1,01) con el scroll moviendose.
+//   Que en estatico UN TERCIO de las conmutaciones acierte descarta un modelo
+//   de fallo puramente EN FRIO: algo se retiene entre lineas. Y que al mover el
+//   scroll suba a 1,01 encaja con que el desplazamiento invalida esa retencion.
+//   O sea que hay las dos cosas: falta de prefetch a traves de la frontera Y
+//   perdida de retencion. Cual pesa mas NO esta medido.
+//
+// SIGUIENTE PASO (campana aparte, no improvisar): instrumentar el shim para
+// separar miss-de-ventana de miss-de-sc-cache antes de proponer nada mas. El
+// candidato de arreglo sigue siendo predecir el salto y precalentar el bloque
+// de la otra pagina — p.ej. retargetear el CAMINANTE del _127J a "ultima
+// direccion vista en la OTRA pagina + zancada", que usa slots ociosos y por
+// tanto no anade trafico (la unica clase de cambio que ha funcionado nunca
+// aqui). Pero primero MEDIR quien falla.
+// ============================================================================
 function [7:0] w_idx(input [15:0] v);
     w_idx = v[7:0] ^ {v[14], 7'b0};
 endfunction
@@ -561,8 +701,55 @@ endfunction
 //     {v[14]->bit i, v[13]->bit j} que respetan 0x0000-0x1FFF, este par
 //     (bits 12/11) es el UNICO que da 0 miss/frame en la escena ru66 en las
 //     4 fases de animacion de los conejos (el siguiente mejor da 20).
+// ===========================================================================
+// _172 SEGUNDO PLIEGUE — ahora separa TAMBIEN la escena del V9968DM.
+//
+//   _151 (viejo): { v[12]^v[14], v[11]^v[13], v[10:0] }
+//   _172 (este) : { v[12]^v[13], v[11]^v[14], v[10:0] }
+// Solo cambia CON QUIEN se empareja cada bit alto. MISMO COSTE EXACTO: dos XOR
+// de dos entradas. Mismo tag (v[15:12]), mismo comparador, ni un FF de mas.
+//
+// POR QUE. El pliegue del _151 se eligio para la ru66 y deja el caso del
+// V9968DM sin cubrir: su SAT (0x7600) y la linea 44 de sus patrones (0xD600)
+// caen en el MISMO indice 7552 con tags 1 y 3 -> se desalojan mutuamente cada
+// scanline. Es la RAYA que quedaba en placa tras curar el desalojo por comandos.
+//
+// VERIFICADO POR ENUMERACION (tools/v9968_sim/alias_idx.py, con la geometria
+// sacada del RTL y el SZ REAL de cada plano):
+//                      colisiones vivas SAT<->SPT
+//   funcion        ru66      V9968DM
+//   _151 (vieja)      0           26     <- el defecto
+//   _172 (esta)       0            0
+// Los 26 son exactamente 13 patrones x 2 mitades, que cuadra con la cota de
+// <=78 fallos/frame medida antes.
+//
+// ⚠️ EL MODELO SE VALIDA A SI MISMO, y esto importa: con la funcion VIEJA el
+// script da 0 colisiones en la ru66 — que es justo lo que sabemos que pasa en
+// placa. Si el modelo no reprodujera ese cero, no habria que creerle nada.
+//
+// ⚠️ Y CORRIGE UN ERROR DEL PRIMER ANALISIS, que se hizo con la huella MALA de
+// la SAT de la ru66. Se supuso base[8:7]=0 en las dos escenas (SAT de 128 B),
+// pero la ru66 programa R#5=0x03/R#11=0x02 -> base=0x10180 -> base[8:7]=0b11, y
+// la mascara (base[8:7] & plane[5:4]) de
+// vdp_sprite_select_visible_planes.v:136 NO anula plane[5:4]: su SAT ocupa el
+// DOBLE. Con la huella mala la busqueda de candidatas no valia.
+//
+// SE CONSERVAN LAS DOS GARANTIAS DEL _151:
+//   * BIYECTIVO con el tag (enumeracion de las 65536 palabras) -> cero falsos
+//     aciertos.
+//   * IDENTIDAD en 0x0000-0x1FFF (ahi v[13]=v[14]=0): las tablas de SCREEN
+//     0/1/2/3 y el bg de SC5 pagina 0 conservan idx13 = v[12:0] bit a bit. La
+//     leccion _117 queda intacta.
+// Y sigue SIN SER una garantia universal: en una cache direct-mapped de 8192
+// palabras, una pagina de patrones de 8192 cubre todo el indice y siempre puede
+// existir UN alias. La red de seguridad general es el victim buffer.
+//
+// GUARDIAN: tb_sprite3 -DRU66 tiene que seguir dando DIFFS=0 contra la
+// referencia. Es la prueba automatica de que el caso VALIDADO EN PLACA no se
+// rompe — correrla SIEMPRE antes de sintetizar esto.
+// ===========================================================================
 function [12:0] c_idx13(input [15:0] v);
-    c_idx13 = { v[12] ^ v[14], v[11] ^ v[13], v[10:0] };
+    c_idx13 = { v[12] ^ v[13], v[11] ^ v[14], v[10:0] };
 endfunction
 
 // ---- write-mux de la cache de sprites (1 solo write-site por array):
@@ -831,6 +1018,9 @@ always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
         pw_v <= 256'd0; scv_swp <= 14'd0; pfq_wp <= 0; pfq_rp <= 0;
         wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 8'd0;
+        refill_p <= 0;                       // _176
+        wretry_p <= 0;                       // _179
+
         bsy <= 0; done_d <= 0; done2_d <= 0; got_lo <= 0; got_hi <= 0;
         pwv_set_p <= 0; pwv_set_i <= 0;
         cur_kind <= 0; cur_half <= 0; cur_addrw <= 0; cur_tag <= 0;
@@ -843,6 +1033,9 @@ always @(posedge clk_vdp or negedge rst_n) begin
         c_miss <= 0; c_bka <= 0; c_bkb <= 0;
         c_wqdrop <= 0; c_s1drop <= 0;             // _154
         c_spmiss <= 0; c_spfet <= 0;                  // _148 FIX C
+`ifdef SHIM_DBG_SPLIT
+        c_wnhit <= 0; c_schit <= 0;                   // _163
+`endif
         // _150 VICTIM BUFFER: se resetea SOLO el CONTROL (valids, puntero de
         // reemplazo y los dos FF de veredicto de la etapa 2). Las claves y los
         // datos (vb_a/vb_w = 384 FF) y vb_addr2/vb_tag2/vb_dat2 NO llevan reset
@@ -857,6 +1050,19 @@ always @(posedge clk_vdp or negedge rst_n) begin
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
         bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0; obl_walked <= 0;
+        // _163 v2: reset de las ranuras de frontera. ⚠️ Esto NO puede ir bajo
+        // ifdef: si no se resetean, flip_pf_* arranca indefinido en hardware y
+        // el caminante puede desviarse a una direccion basura en el primer
+        // frame. (Se colo asi al hacer el arreglo incondicional; Icarus compila
+        // igual y no lo habria cantado.)
+        flip_dst_p[0] <= 0; flip_dst_p[1] <= 0;
+        flip_tgt_p[0] <= 0; flip_tgt_p[1] <= 0;
+        flip_dst_n[0] <= 0; flip_dst_n[1] <= 0;
+        flip_tgt_n[0] <= 0; flip_tgt_n[1] <= 0;
+        flip_pf_p <= 2'b00; flip_pf_n <= 2'b00;
+`ifdef SHIM_DBG_SPLIT
+        c_flipdet <= 0; c_flippf <= 0; c_walk <= 0;
+`endif
         obl_w_c <= 0; obl_w_d <= 0;
         bgp_wp <= 0; bgp_rp <= 0; c_park <= 0; c_pkov <= 0; pkov_p <= 0;
         ecq_wp <= 0; ecq_rp <= 0; bg_quiet <= 0;      // _135
@@ -911,6 +1117,57 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // fill_addr) que solo llega al D de fill_pend — NO toca el cono del WE
         // de las BSRAM ni el de wrk_hit (riesgo 1 del gate).
         if (wrk_p1 && fill_pend && (wrk_addr1 == fill_addr)) fill_pend <= 1'b0;
+
+        // ---------- _176 REFILL de escrituras no-residentes (write-allocate
+        // diferido y DESCARTABLE). El suelo de ~10 miss/frame "inducido por
+        // las escrituras" (nota del obl_la): una palabra escrita SIN tag-match
+        // queda no-residente, y si es la SPT/SAT que el LRMM o la CPU
+        // reescriben cada frame, el sprite la falla justo despues — y un miss
+        // de sprite ES una raya: el colector latchea a fase fija (sub_phase
+        // 14, vdp_sprite_info_collect.v:207) y el backend no llega. DEVCON.COM
+        // en placa: rayas ligeras aleatorias (03/08).
+        // CURA: tras un write-check de COMANDO o CPU sin tag-match se encola
+        // una RELECTURA-prefetch con clase MUDA (tag 5'd0: el router del
+        // interface no la entrega a nadie, no toca ventana ni VB, y pasa la
+        // SC_FILL_POLICY). rq va por DEBAJO de wq => la relectura devuelve el
+        // dato POST-escritura: fill coherente por construccion. DESCARTABLE
+        // dos veces: (a) solo encola con rq_used<=10 (no toca ninguna
+        // reserva); (b) este push va ANTES en el texto que el del vb y el del
+        // aparcamiento — si coinciden en el ciclo, la asignacion posterior
+        // GANA y el refill se pierde en silencio (= quedarse como hoy, el
+        // miss se autocura). CONVERGE: al siguiente barrido la palabra es
+        // residente y la escritura pasa a ser update puro — coste cero en
+        // regimen. La decision va REGISTRADA (refill_p) para no colgar logica
+        // nueva del cono DO->wrk_hit (leccion _121b). El tope rq_used<=4 va
+        // POR DEBAJO del umbral de vram_stall (rq_used>=6): un refill jamas
+        // provoca un stall del motor/CPU.
+        refill_p <= wrk_p1 && !wrk_hit &&
+                    (wrk_cls1 == C_COMMAND || wrk_cls1 == C_CPU);
+        if (wrk_p1) refill_addr <= wrk_addr1;
+        if (refill_p && (rq_used <= 4'd4)) begin
+            rq[rq_wp] <= {5'd0, refill_addr};
+            rq_wp <= rq_wp + 4'd1;
+        end
+
+        // ---------- _179 REINTENTO ANSIOSO del fill de ventana descartado ----
+        // El suelo del bg en bitmap ("~10 miss/frame inducidos por las
+        // ESCRITURAS", nota del obl_la): cuando el LMMM redibuja una zona, la
+        // colision fill<->escritura pendiente (pf_dirty) DESCARTA el fill de
+        // la ventana y el hueco se rescata TARDE al llegar el display = la
+        // rayita en el bg animado (DEVCON v2 en placa, 04/08 — el _176 no la
+        // toco porque el bg bitmap no usa la sc-cache). CURA: el descarte
+        // re-encola la palabra como lectura-demanda con tag 5'b00001 (clase
+        // muda: el interface la ignora) POR DEBAJO de wq => llega POST-
+        // escritura y rellena la ventana ANTES de que el display la pida.
+        // Solo los fills del pfq (cur_kind==0) generan reintento — un
+        // reintento descartado NO se re-reintenta (sin lazos). Descartable
+        // (rq_used<=4) y con la misma semantica de colision que el _176:
+        // este push va antes en el texto, los de vb/aparcamiento GANAN.
+        if (wretry_p && (rq_used <= 4'd4)) begin
+            rq[rq_wp] <= {5'b00001, wretry_addr};
+            rq_wp <= rq_wp + 4'd1;
+        end
+        if (wretry_p) wretry_p <= 1'b0;
 
         // ---------- _150 VICTIM BUFFER: captura, insercion e invalidacion ----
         // (1) CAPTURA del veredicto del CAM en la etapa 1 del lookup. Solo hace
@@ -992,17 +1249,70 @@ always @(posedge clk_vdp or negedge rst_n) begin
         obl_chk  <= obl_read_now;
         obl_w_c  <= obl_w;
         wk_tgt   <= obl_w + stride - obl_la;  // = addr_hit + stride en fase 3 (_147: -obl_la casa con el lookahead)
+        // _163 v2 ⚠️ SIN el "- obl_la". El wk_tgt de arriba lo lleva para
+        // CANCELAR el +obl_la que obl_w ya tiene dentro (se carga como
+        // spr_addr1 + obl_la en el hit). flip_dst guarda la direccion CRUDA,
+        // asi que restarlo dejaba el objetivo en frontera+30 en vez de
+        // frontera+32: dos palabras corto, y el OBL prefetchea de una en una.
+        // MEDIDO con ese error: 382 precalentamientos y los fallos INTACTOS
+        // en 384. Los contadores de maquinaria son los que lo delataron.
+        flip_tgt_p[0] <= flip_dst_p[0] + stride;
+        flip_tgt_p[1] <= flip_dst_p[1] + stride;
+        flip_tgt_n[0] <= flip_dst_n[0] + stride;
+        flip_tgt_n[1] <= flip_dst_n[1] + stride;
         obl_do   <= obl_chk && !(pwqB_v && pwqB_tag == obl_w_c[15:6]);
         obl_w_d  <= obl_w_c;
         // _127J: caminante (ver arriba) — slot OBL ocioso + zancada => se
         // re-arma la maquinaria de 3 fases hacia la linea siguiente. Un hit
         // bg simultaneo PISA obl_pend/obl_w mas abajo (el hit vivo manda) y
         // eso es exactamente la prioridad deseada.
+        // _163 SP2: el caminante atiende PRIMERO la frontera de pagina.
+        // Medido: con SP2 el fondo falla EXACTAMENTE una vez por conmutacion y
+        // es un fallo EN FRIO (la ventana acierta 12666/12672 sin SP2, o sea
+        // que no hay conflicto de capacidad: el dato NUNCA SE PIDIO, porque
+        // este OBL avanza +2 en linea recta y la frontera salta ~8192).
+        // La frontera es PREDECIBLE: donde aterrizo el salto de la linea
+        // anterior + una zancada. Se prefetchea en el MISMO slot ocioso que ya
+        // usaba el caminante => CERO trafico nuevo, que es la unica clase de
+        // cambio que ha funcionado nunca en este fichero.
         if (obl_chk && pwqB_v && pwqB_tag == obl_w_c[15:6]
             && stride != 16'd0 && !obl_walked) begin
             obl_pend   <= 1'b1;
-            obl_w      <= wk_tgt;                    // = addr_hit + stride
             obl_walked <= 1'b1;
+`ifdef SHIM_DBG_SPLIT
+            c_walk     <= c_walk + 32'd1;
+`endif
+            // prioridad: fronteras pendientes primero (son las que fallan en
+            // frio), y si no hay ninguna, el caminante de siempre.
+            if (flip_pf_p[0]) begin
+                obl_w        <= flip_tgt_p[0];
+                flip_pf_p[0] <= 1'b0;       // una sola vez por conmutacion
+`ifdef SHIM_DBG_SPLIT
+                c_flippf     <= c_flippf + 32'd1;
+`endif
+            end
+            else if (flip_pf_p[1]) begin
+                obl_w        <= flip_tgt_p[1];
+                flip_pf_p[1] <= 1'b0;
+`ifdef SHIM_DBG_SPLIT
+                c_flippf     <= c_flippf + 32'd1;
+`endif
+            end
+            else if (flip_pf_n[0]) begin
+                obl_w        <= flip_tgt_n[0];
+                flip_pf_n[0] <= 1'b0;
+`ifdef SHIM_DBG_SPLIT
+                c_flippf     <= c_flippf + 32'd1;
+`endif
+            end
+            else if (flip_pf_n[1]) begin
+                obl_w        <= flip_tgt_n[1];
+                flip_pf_n[1] <= 1'b0;
+`ifdef SHIM_DBG_SPLIT
+                c_flippf     <= c_flippf + 32'd1;
+`endif
+            end
+            else obl_w <= wk_tgt;           // comportamiento de siempre
         end
         pfB_pend <= 1'b0;                // default; las ramas de spr_p1 lo
                                          // suben (asignacion posterior gana)
@@ -1014,6 +1324,36 @@ always @(posedge clk_vdp or negedge rst_n) begin
             d = spr_addr1 - (spr_addr1[14] ? bg_prev1 : bg_prev0);
             if (spr_addr1[14]) bg_prev1 <= spr_addr1;
             else               bg_prev0 <= spr_addr1;
+            // _163 SP2: DETECTAR LA CONMUTACION DE PAGINA. No se mira un bit
+            // concreto a proposito (SC7/8 la pagina esta en v[13], SC5/6 en
+            // v[12]): se detecta por la MAGNITUD del salto dentro del stream.
+            //   avance normal        = +1
+            //   wrap del scroll H    = -8..-64
+            //   conmutacion de pagina= ~±4096 (SC5/6) o ~±8192 (SC7/8)
+            //   retorno de CAMPO     = ~±13568  <-- NO es una conmutacion
+            // ⚠️ MEDIDO: con un umbral suelto de 1024 el retorno de campo se
+            // colaba como conmutacion y disparaba un prefetch inutil por frame.
+            // No cambiaba el numero de fallos (los 2 residuales seguian siendo
+            // 2) pero los movia de sitio, y con ellos su huella visible: 64 px
+            // el frame anterior y 96 el siguiente. Ruido que no debe estar.
+            // La cota SUPERIOR lo separa con margen ancho por los dos lados:
+            // cubre 4096 y 8192 de sobra y excluye 13568.
+            if (d[15]) begin
+                if (~d >= FLIP_LO && ~d <= FLIP_HI) begin  // NEGATIVO (vuelta)
+                    flip_dst_n[spr_addr1[14]] <= spr_addr1;
+                    flip_pf_n[spr_addr1[14]]  <= 1'b1;
+`ifdef SHIM_DBG_SPLIT
+                    c_flipdet <= c_flipdet + 32'd1;
+`endif
+                end
+            end
+            else if (d >= FLIP_LO && d <= FLIP_HI) begin   // POSITIVO (ida)
+                flip_dst_p[spr_addr1[14]] <= spr_addr1;
+                flip_pf_p[spr_addr1[14]]  <= 1'b1;
+`ifdef SHIM_DBG_SPLIT
+                c_flipdet <= c_flipdet + 32'd1;
+`endif
+            end
             // salto negativo con magnitud <= 64 = wrap del ring por stream
             if (d[15] && (&d[14:6])) begin
                 if ((16'd1 - d) == 16'd8  || (16'd1 - d) == 16'd16 ||
@@ -1034,6 +1374,20 @@ always @(posedge clk_vdp or negedge rst_n) begin
         if (spr_p1) begin
             // _148 FIX C: denominador de la tasa de miss de sprite
             if (spr_tag1[4:2] == C_SPRITE) c_spfet <= c_spfet + 32'd1;
+`ifdef SHIM_DBG_SPLIT
+            // _163: DE QUIEN vive el fondo. La campana de SP2 se quedo sin
+            // saber si el grueso lo sirve la VENTANA o la sc-cache, y sin eso
+            // no se puede proponer un arreglo con fundamento (el pliegue del
+            // bit de pagina en w_idx salio BYTE-IDENTICO, que es justo lo que
+            // pasaria si la ventana no fuese la que manda aqui).
+            // Solo diagnostico: bajo ifdef, cero coste en la build real.
+            if (spr_tag1[4:2] == C_BG) begin
+                if (pwq_v && pwq[41:32] == spr_addr1[15:6])
+                    c_wnhit <= c_wnhit + 32'd1;
+                else if (scq_v && scq_tag == spr_addr1[15:12])
+                    c_schit <= c_schit + 32'd1;
+            end
+`endif
             if (spr_tag1[4:2] == C_BG && pwq_v &&
                 pwq[41:32] == spr_addr1[15:6]) begin
                 // HIT de VENTANA: dato + OBL (fase 2)
@@ -1253,6 +1607,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 wrk_addr1 <= vram_address;
                 wrk_data1 <= vram_wdata;
                 wrk_mask1 <= vram_wdata_mask;
+                wrk_cls1  <= vram_tag[4:2];   // _176: quien escribe
             end
             else begin
                 // sprite / CPU / comando: lookup en la CACHE (v3c: la CPU
@@ -1305,6 +1660,13 @@ always @(posedge clk_vdp or negedge rst_n) begin
                         pwv_set_p <= 1'b1;
                         pwv_set_i <= w_idx(cur_addrw);
                     end
+                    // _179: descarte por escritura pendiente -> reintento
+                    // ansioso (re-lectura por rq, ver el push arriba). Con
+                    // wu_hit NO: el update ya dejo la entrada fresca.
+                    else if (pf_dirty) begin
+                        wretry_p    <= 1'b1;
+                        wretry_addr <= cur_addrw;
+                    end
                 end
                 else begin
                     late_v    <= 1'b1;
@@ -1315,7 +1677,11 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     late_data <= {w_hi, w_lo};
                     // y de paso a la ventana si es bg
                     // (_140: cede pww al write-through-update, !wu_hit)
-                    if (cur_tag[4:2] == C_BG && !pf_dirty && !wu_hit) begin
+                    // _179: el reintento (tag 5'b00001) tambien rellena la
+                    // ventana — es su unico proposito; el refill _176
+                    // (tag 5'b00000) NO la toca (palabras de tablas).
+                    if ((cur_tag[4:2] == C_BG || cur_tag == 5'b00001)
+                        && !pf_dirty && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
@@ -1325,7 +1691,86 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     end
                     // ...y a la CACHE (v3c: TODO consumidor de lectura
                     // rellena — bg/sprite/CPU/comando) — via fill_pend
-                    if (!pf_dirty) begin
+                    //
+                    // _164 FIX — EL RELLENO SE FILTRA A LECTURAS DE SPRITE.
+                    // La linea de arriba describe el comportamiento ANTERIOR
+                    // (v3c: rellenaba TODO consumidor). Se deja escrita porque
+                    // explica de donde venia el defecto.
+                    //
+                    // DEFECTO: cuando un comando LEE SU DESTINO —cosa que hace
+                    // toda operacion logica distinta de IMP, y que el LRMM hace
+                    // en CADA pixel— y ese destino es la tabla de patrones,
+                    // inunda esta cache y desaloja los patrones que los sprites
+                    // piden en el mismo scanline. La _150 ya habia visto la
+                    // distincion y filtro el VICTIM BUFFER (fill_sp, justo
+                    // debajo), pero dejo la cache abierta.
+                    //
+                    // MEDIDO (run_cmdthrash.sh, escena ru66, una sola variable):
+                    //   c_spmiss/frame  vs1   vs2   vs3   vs4   vs5
+                    //     base          2484   256    25     1     0  CONVERGE
+                    //     +comandos     1414  1427  1133   617  1306  NUNCA
+                    //     +comandos+fix 2627   135    10     0     0  CONVERGE
+                    // En placa (V9968DM con su LRMM vivo): spMISS/s 25.000-55.000
+                    // = ~667/frame; 1300x60 = 78.000/s en simulacion. Mismo orden.
+                    //
+                    // COSTE, medido con la bateria estandar corrida sin y con el
+                    // filtro (run_battery_scfill.sh): los TRES bancos siguen OK
+                    // (sc8cmd_full fallos_vram=0, sc5line diffs=0, cpu_bulk
+                    // 0/8192); bkA 93264 -> 93363 (+0,11%), bg_miss 73 -> 79,
+                    // TURNOS total IDENTICO. El motor de comandos y el puerto de
+                    // CPU NO dependian de esta cache.
+                    //
+                    // ============================================================
+                    // ⛔⛔ DOS INTENTOS DE FILTRAR ESTE RELLENO, DOS BUILDS ROTAS.
+                    // NO VOLVER A TOCAR ESTA CONDICION SIN LEER ESTO ENTERO.
+                    // ============================================================
+                    // EL DEFECTO QUE SE INTENTABA CURAR (real y medido, sigue
+                    // ABIERTO): cuando un comando LEE SU DESTINO —toda operacion
+                    // logica != IMP, y el LRMM en CADA pixel— y ese destino cae en
+                    // la tabla de patrones, inunda esta cache y desaloja los
+                    // patrones que los sprites piden en el mismo scanline.
+                    // Medido (run_cmdthrash.sh): con trafico de comandos el
+                    // c_spmiss/frame se queda en ~1300 y NO CONVERGE, contra ~0 sin
+                    // el. En placa, el V9968DM: spMISS/s 3.840 -> 25.000-55.000.
+                    //
+                    // INTENTO 1 (rc4): `&& (cur_tag[4:2] == C_SPRITE)`
+                    //   ROMPIO EL MODO TEXTO. Razone "el fondo va por la VENTANA,
+                    //   no por esta cache": cierto en BITMAP (barrido lineal), FALSO
+                    //   en TEXTO, donde la tabla de patrones se accede INDEXADA POR
+                    //   EL CODIGO DE CARACTER y el prefetch lineal no la cubre.
+                    //   Reproducido despues en run_textgeom_roto.sh: el ancho de un
+                    //   pixel MSX pasa de {2:239} uniforme a {2:150 4:15 8:14}, con
+                    //   caracteres estirados hasta 14 px de pantalla.
+                    //
+                    // INTENTO 2 (rc5): `&& (cur_tag[4:2] != C_COMMAND)`
+                    //   Paso TODO lo que se le puso delante —texto byte-identico,
+                    //   bateria estandar con contadores CLAVADOS a la linea base,
+                    //   desalojo curado (1300 -> 1 por frame)— y AUN ASI COLGO LA
+                    //   MAQUINA EN PLACA: arranca, el menu se ve bien, pero al
+                    //   pulsar ESC sale el logo y NO CONTINUA (ni BIOS ni MSX-DOS).
+                    //   Identico en dos dados distintos. Sin diagnosticar.
+                    //   Sospecha sin confirmar: al no rellenar, TODA lectura de
+                    //   comando falla y va a rq; `vram_stall = (wq_used>=2) ||
+                    //   (rq_used>=6)` (linea ~471) y el motor OBEDECE ese stall
+                    //   (vdp_vram_interface.v:259/276) => posible realimentacion.
+                    //
+                    // LECCION: NINGUN banco de simulacion arranca una BIOS, asi que
+                    // esta clase de fallo NO ES DETECTABLE con la infraestructura
+                    // actual. Cualquier intento futuro necesita PRIMERO un banco que
+                    // haga boot, o se prueba directamente en placa asumiendo el
+                    // coste de una campana.
+                    //
+                    // ESTADO: se vuelve al comportamiento original (rellena TODO
+                    // consumidor). El desalojo queda como DEFECTO CONOCIDO, con su
+                    // coste acotado y sus bancos ya escritos para el dia que se
+                    // retome.
+                    // _170: la condicion la elige SC_FILL_POLICY (arriba del
+                    // fichero). Con 0 es EXACTAMENTE `!pf_dirty`, o sea el
+                    // comportamiento de la rc3 que funciona.
+                    if (!pf_dirty &&
+                        ( (SC_FILL_POLICY == 3'd0) ? 1'b1 :
+                          (SC_FILL_POLICY == 3'd1) ? (cur_tag[4:2] != C_COMMAND) :
+                                                     (cur_tag[4:2] == C_SPRITE) )) begin
                         fill_pend <= 1'b1;
                         fill_addr <= cur_addrw;
                         fill_word <= {w_hi, w_lo};

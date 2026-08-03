@@ -99,7 +99,10 @@ module vdp_timing_control_sprite (
 	input				reg_sprite_nonR23_mode,
 	input				reg_sprite_mode3,
 	input				reg_sprite16_mode,
-	input				reg_sprite_priority_shuffle
+	input				reg_sprite_priority_shuffle,
+	//	_167 (port de 167b7cf de HRA): R#20 bit4 (EPAL). Solo lo usa el
+	//	makeup_pixel, para decidir si en sprite mode2 aplica el PaletteSet#.
+	input				reg_ext_palette_mode
 );
 	localparam			c_mode_g3	= 5'b010_00;	//	Graphic3 (SCREEN4)
 	localparam			c_mode_g4	= 5'b011_00;	//	Graphic4 (SCREEN5)
@@ -124,6 +127,7 @@ module vdp_timing_control_sprite (
 	wire				w_sprite_mode2;
 	wire		[9:0]	w_plane_x;
 	wire		[7:0]	w_color;
+	wire		[3:0]	w_palette_set;		//	_167: PaletteSet# del atributo (info_collect -> makeup_pixel)
 	wire				w_color_plane_x_en;
 	wire		[31:0]	w_pattern;
 	wire				w_pattern_left_en;
@@ -263,6 +267,7 @@ module vdp_timing_control_sprite (
 		.makeup_plane								( w_makeup_plane							),
 		.plane_x									( w_plane_x									),
 		.color										( w_color									),
+		.palette_set								( w_palette_set								),	//	_167
 		.mgx										( w_info_mgx								),
 		.color_plane_x_en							( w_color_plane_x_en						),
 		.pattern									( w_pattern									),
@@ -301,6 +306,8 @@ module vdp_timing_control_sprite (
 		.makeup_plane								( w_makeup_plane							),
 		.plane_x									( w_plane_x									),
 		.color										( w_color									),
+		.palette_set								( w_palette_set								),	//	_167
+		.reg_ext_palette_mode						( reg_ext_palette_mode						),	//	_167
 		.info_mgx									( w_info_mgx								),
 		.color_plane_x_en						    ( w_color_plane_x_en						),
 		.pattern									( w_pattern									),

@@ -5,7 +5,12 @@ module tmds_channel
 #(
     // TMDS Channel number.
     // There are only 3 possible channel numbers in HDMI 1.4a: 0, 1, 2.
-    parameter int CN = 0
+    parameter int CN = 0,
+    // _169 MSXimus: 1 = registra q_m/N1q_m07/N0q_m07 para partir el cono
+    // combinacional del 8b/10b. Ver el bloque grande de mas abajo. Por defecto 0
+    // => netlist IDENTICO al original de hdl-util (este fichero es de terceros y
+    // lo comparte la linea del V9958 clasico, que esta publicada).
+    parameter bit PIPELINE_QM = 1'b0
 )
 (
     input logic clk_pixel,
@@ -51,6 +56,14 @@ logic signed [4:0] acc_add;
 
 integer i;
 
+// _169: las senales EFECTIVAS que entran en la parte dependiente de acc. Con
+// PIPELINE_QM=0 son las combinacionales de siempre (netlist identico); con 1 son
+// su version registrada. Declaradas AQUI, antes de usarse.
+logic [8:0]        q_m_eff;
+logic signed [4:0] N1q_m07_eff;
+logic signed [4:0] N0q_m07_eff;
+
+// ---- PARTE 1: feed-forward. Solo depende de video_data. -------------------
 always_comb
 begin
     if (N1D > 4'd4 || (N1D == 4'd4 && video_data[0] == 1'd0))
@@ -67,33 +80,96 @@ begin
             q_m[i + 1] = q_m[i] ^ video_data[i + 1];
         q_m[8] = 1'b1;
     end
-    if (acc == 5'sd0 || (N1q_m07 == N0q_m07))
+end
+
+// ---- PARTE 2: aqui empieza el lazo de realimentacion (acc). ----------------
+always_comb
+begin
+    if (acc == 5'sd0 || (N1q_m07_eff == N0q_m07_eff))
     begin
-        if (q_m[8])
+        if (q_m_eff[8])
         begin
-            acc_add = N1q_m07 - N0q_m07;
-            q_out = {~q_m[8], q_m[8], q_m[7:0]};
+            acc_add = N1q_m07_eff - N0q_m07_eff;
+            q_out = {~q_m_eff[8], q_m_eff[8], q_m_eff[7:0]};
         end
         else
         begin
-            acc_add = N0q_m07 - N1q_m07;
-            q_out = {~q_m[8], q_m[8], ~q_m[7:0]};
+            acc_add = N0q_m07_eff - N1q_m07_eff;
+            q_out = {~q_m_eff[8], q_m_eff[8], ~q_m_eff[7:0]};
         end
     end
     else
     begin
-        if ((acc > 5'sd0 && N1q_m07 > N0q_m07) || (acc < 5'sd0 && N1q_m07 < N0q_m07))
+        if ((acc > 5'sd0 && N1q_m07_eff > N0q_m07_eff) || (acc < 5'sd0 && N1q_m07_eff < N0q_m07_eff))
         begin
-            q_out = {1'b1, q_m[8], ~q_m[7:0]};
-            acc_add = (N0q_m07 - N1q_m07) + (q_m[8] ? 5'sd2 : 5'sd0);
+            q_out = {1'b1, q_m_eff[8], ~q_m_eff[7:0]};
+            acc_add = (N0q_m07_eff - N1q_m07_eff) + (q_m_eff[8] ? 5'sd2 : 5'sd0);
         end
         else
         begin
-            q_out = {1'b0, q_m[8], q_m[7:0]};
-            acc_add = (N1q_m07 - N0q_m07) - (~q_m[8] ? 5'sd2 : 5'sd0);
+            q_out = {1'b0, q_m_eff[8], q_m_eff[7:0]};
+            acc_add = (N1q_m07_eff - N0q_m07_eff) - (~q_m_eff[8] ? 5'sd2 : 5'sd0);
         end
     end
 end
+
+// ============================================================================
+// _169 PIPELINE_QM — parte el cono combinacional del codificador 8b/10b.
+//
+// EL PROBLEMA (medido, no supuesto): el camino video_data -> acc es el peor
+// SETUP del diseño entero. 15 niveles de LUT, 13,38 ns contra 13,0 de
+// presupuesto (clk_hdmi = 74,25 MHz, msx_console60k.sdc:32). De esos, 7,4 ns son
+// CELDA: aunque el rutado fuera perfecto NO cerraria. No es congestion ni mala
+// suerte de placement — sale en 1 de cada 3 dados tanto al 91% de CLS como al
+// 67%. Es el algoritmo de la Figura 5-7 tal cual: popcount de video_data ->
+// cadena XOR/XNOR de 8 etapas (irreducible) -> popcount de q_m -> comparadores
+// -> aritmetica con signo de acc_add.
+//
+// EL CORTE. Los pasos hasta N1q_m07/N0q_m07 son PURAMENTE feed-forward: solo
+// dependen de video_data. El lazo de realimentacion de verdad (acc) empieza
+// despues. Registrando ahi se parte en ~7,1 / ~6,3 ns, los dos holgados.
+//
+// ⚠️ POR QUE NO AÑADE NI UN PIXEL DE LATENCIA — esto es lo que desbloqueo la
+// decision. NO se añade una etapa: se MUEVE la que ya existe. hdmi.sv:396 es
+// `video_data_q <= video_data;`, un FF->FF sin nada de logica en medio. Al
+// alimentar este modulo con video_data CRUDO y registrar aqui q_m/N1q_m07,
+// queda q_m_q[t] = f(video_data[t-1]), que es EXACTAMENTE lo que hoy vale q_m
+// combinacional (= f(video_data_q[t]) = f(video_data[t-1])). Mismo valor, mismo
+// ciclo, mismo numero de registros de rgb a tmds.
+// Por eso la leccion _134/_135 (pantalla negra por desplazamiento sin
+// compensar) NO aplica aqui. Y es DEMOSTRABLE en simulacion, gratis:
+// tools/v9968_sim/tb_tmds_equiv.sv compara las dos variantes ciclo a ciclo.
+//
+// control_data / data_island_data / mode siguen llegando por el camino _q de
+// hdmi.sv, asi que en el mux de salida todo queda alineado.
+//
+// ⚠️ VA PARAMETRIZADO Y POR DEFECTO A 0 A PROPOSITO. Este fichero es de terceros
+// (hdl-util, MIT) y NUNCA se habia tocado: un solo commit en toda su historia.
+// Lo comparten TRES back-ends, incluida la linea del V9958 clasico que YA ESTA
+// PUBLICADA (msx2hdmi.sv:502 y :529, 6 instancias). Con PIPELINE_QM=0 el netlist
+// de esa linea es IDENTICO BIT A BIT y no hay nada que re-validar. Se quitara el
+// parametro cuando la clasica este re-probada en placa.
+// ============================================================================
+generate
+if (PIPELINE_QM) begin : g_pipe_qm
+    (* syn_preserve = 1 *) logic [8:0]        q_m_q       = 9'h100;
+    (* syn_preserve = 1 *) logic signed [4:0] N1q_m07_q   = 5'sd0;
+    (* syn_preserve = 1 *) logic signed [4:0] N0q_m07_q   = 5'sd8;
+    always_ff @(posedge clk_pixel) begin
+        q_m_q     <= q_m;
+        N1q_m07_q <= N1q_m07;
+        N0q_m07_q <= N0q_m07;
+    end
+    assign q_m_eff     = q_m_q;
+    assign N1q_m07_eff = N1q_m07_q;
+    assign N0q_m07_eff = N0q_m07_q;
+end
+else begin : g_comb_qm
+    assign q_m_eff     = q_m;
+    assign N1q_m07_eff = N1q_m07;
+    assign N0q_m07_eff = N0q_m07;
+end
+endgenerate
 
 always_ff @(posedge clk_pixel) acc <= mode != 3'd1 ? 5'sd0 : acc + acc_add;
 

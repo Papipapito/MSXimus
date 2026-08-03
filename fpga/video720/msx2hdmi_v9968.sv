@@ -72,7 +72,29 @@
 //   * hs/vs ACTIVO ALTO (display_hs/vs del V9968), blank = ~display_en.
 // Back-ends hdmi_ntsc/hdmi_pal, serializer, ELVDS y audio: SIN CAMBIOS.
 // ============================================================================
-module msx2hdmi_v9968 (
+module msx2hdmi_v9968 #(
+    // ========================================================================
+    // _168 ENABLE_PAL — 0 = solo back-end NTSC (720p60). Es lo que hay HOY.
+    //
+    // POR QUE ESTE PARAMETRO. El modulo instancia DOS codificadores HDMI
+    // completos (hdmi_ntsc VIC 4 = 720p60 y hdmi_pal VIC 19 = 720p50) y
+    // multiplexa sus salidas TMDS con pal_x. Pero pal_mode llega CABLEADO A
+    // CERO desde el top (top.v:1969 `.pal_mode (1'b0)`, y el V9968 fuerza
+    // ff_50hz_mode <= 1'b0 en vdp_cpu_interface.v:613 y :697): el back-end PAL
+    // es LOGICA MUERTA — 606 FF y 835 de logica sintetizados para nada.
+    //
+    // El sintetizador NO lo podaba solo porque pal_mode cruza un sincronizador
+    // de 2 registros (pal_sync, ~linea 341) y eso BLOQUEA la propagacion de
+    // constantes. Con este parametro, pal_x pasa a ser una constante de
+    // ELABORACION y la poda ocurre sola: se van hdmi_pal, su mux, cx_pal y
+    // cy_pal, sin tocar ni una linea de la estructura.
+    //
+    // El camino PAL queda INTACTO en el fuente. Para recuperarlo: poner este
+    // parametro a 1 y darle a .pal_mode una senal de verdad. Sigue pendiente
+    // medir la geometria 50 Hz del V9968 (top.v:1746).
+    // ========================================================================
+    parameter ENABLE_PAL = 0
+) (
     input  wire        clk,          // 85.909 MHz, dominio del V9968
     input  wire        resetn,       // reset del dominio VDP (activo bajo)
     input  wire        ce,           // pixel-enable (1 de cada 2 ciclos)
@@ -339,7 +361,10 @@ module msx2hdmi_v9968 (
     reg [1:0] pal_sync = 2'b00;
     always @(posedge clk_pixel)
         pal_sync <= {pal_sync[0], pal_mode};
-    wire pal_x = pal_sync[1];
+    // _168: con ENABLE_PAL=0 esto es una CONSTANTE, no una senal. Ver la
+    // cabecera del modulo: es lo que permite al sintetizador podar el back-end
+    // PAL entero, que hoy esta muerto porque pal_mode llega cableado a cero.
+    wire pal_x = (ENABLE_PAL != 0) ? pal_sync[1] : 1'b0;
 
     // _56: aspecto cuasi-estático desde la config del menú (2FF por higiene)
     reg [1:0] aspect_sync = 2'b00;
@@ -676,7 +701,15 @@ module msx2hdmi_v9968 (
             .SOURCE_DEVICE_INFORMATION(8'h00),
             .START_X(0),
             .START_Y(720),                      // reset → inicio del vblank
-            .NUM_CHANNELS(NUM_CHANNELS)
+            .NUM_CHANNELS(NUM_CHANNELS),
+            // _169: parte el cono del codificador 8b/10b, que es el peor SETUP
+            // del diseño (ver el bloque grande en tmds_channel.sv). Se activa
+            // SOLO en la linea del V9968: msx2hdmi.sv (la clasica del V9958, ya
+            // publicada, 6 instancias) se queda con el valor por defecto 0 y su
+            // netlist es identico bit a bit al de siempre.
+            // Bit-exactitud demostrada en tb_tmds_equiv.sv: 320.010 ciclos,
+            // cero discrepancias en tmds y en acc.
+            .PIPELINE_QM(1'b1)
             )
     hdmi_ntsc ( .clk_pixel_x5(clk_5x_pixel),
           .clk_pixel(clk_pixel),
@@ -707,31 +740,62 @@ module msx2hdmi_v9968 (
     assign dbg_apkt = {aovr_cnt, 8'h00, apkt_cnt};
 
     logic [9:0] tmds_pal [NUM_CHANNELS-1:0];
-    hdmi #( .VIDEO_ID_CODE(19),                 // 720p50, frame 1980×750
-            .DVI_OUTPUT(0),
-            .VIDEO_REFRESH_RATE(50.0),
-            .IT_CONTENT(1),
-            .AUDIO_RATE(AUDIO_RATE),
-            .AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),
-            .VENDOR_NAME({"Unknown", 8'd0}),
-            .PRODUCT_DESCRIPTION({"FPGA", 96'd0}),
-            .SOURCE_DEVICE_INFORMATION(8'h00),
-            .START_X(0),
-            .START_Y(720),
-            .NUM_CHANNELS(NUM_CHANNELS)
-            )
-    hdmi_pal ( .clk_pixel_x5(clk_5x_pixel),
-          .clk_pixel(clk_pixel),
-          .audio_ce(audio_ce),
-          .rgb(rgb_out),       // _58: con dim de scanlines aplicado
-          .reset( hdmi_rst ),
-          .reset_cx( rst_cx[11:0] ),   // _136: anclaje compensado
-          .audio_sample_word(audio_sample_word),
-          .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
-          .cx(cx_pal),
-          .cy(cy_pal),
-          .tmds_internal(tmds_pal)
-        );
+
+    // ========================================================================
+    // _168 BACK-END PAL BAJO generate. Ver la cabecera del modulo: hoy es
+    // LOGICA MUERTA (pal_mode llega cableado a 0 desde top.v:1969).
+    //
+    // ⚠️ POR QUE UN generate Y NO SOLO LA CONSTANTE. El primer intento fue
+    // hacer `pal_x` constante de elaboracion y confiar en que la propagacion de
+    // constantes podara la instancia sola. NO FUNCIONA: medido en la campana
+    // s003, el informe de sintesis seguia listando
+    //     name="hdmi_pal" T_Register="606" T_Lut="808"
+    // y el CLS no bajo ni un punto. Gowin NO elimina instancias de jerarquia
+    // aunque ninguna de sus salidas se use. Hace falta que la instancia no
+    // llegue a elaborarse, y eso solo lo da un generate sobre un parametro.
+    // (Coste de averiguarlo en la linea ligera: 2 minutos. En la completa
+    // habrian sido 50.)
+    // ========================================================================
+    generate
+    if (ENABLE_PAL != 0) begin : g_hdmi_pal
+        hdmi #( .VIDEO_ID_CODE(19),                 // 720p50, frame 1980×750
+                .DVI_OUTPUT(0),
+                .VIDEO_REFRESH_RATE(50.0),
+                .IT_CONTENT(1),
+                .AUDIO_RATE(AUDIO_RATE),
+                .AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),
+                .VENDOR_NAME({"Unknown", 8'd0}),
+                .PRODUCT_DESCRIPTION({"FPGA", 96'd0}),
+                .SOURCE_DEVICE_INFORMATION(8'h00),
+                .START_X(0),
+                .START_Y(720),
+                .NUM_CHANNELS(NUM_CHANNELS),
+                .PIPELINE_QM(1'b1)          // _169, igual que el NTSC
+                )
+        hdmi_pal ( .clk_pixel_x5(clk_5x_pixel),
+              .clk_pixel(clk_pixel),
+              .audio_ce(audio_ce),
+              .rgb(rgb_out),       // _58: con dim de scanlines aplicado
+              .reset( hdmi_rst ),
+              .reset_cx( rst_cx[11:0] ),   // _136: anclaje compensado
+              .audio_sample_word(audio_sample_word),
+              .aspect_16_9(1'b0),  // v3.0: con VIC 4/19 el hack VIC+aspect del AVI InfoFrame anunciaria 1080i
+              .cx(cx_pal),
+              .cy(cy_pal),
+              .tmds_internal(tmds_pal)
+            );
+    end
+    else begin : g_sin_pal
+        // Sin back-end PAL: se atan las salidas para no dejarlas sin conducir.
+        // Con pal_x constante 0 no las lee nadie (el mux de mas abajo y los
+        // cx/cy de la linea ~390 se pliegan al lado NTSC en elaboracion).
+        assign cx_pal = 12'd0;
+        assign cy_pal = 10'd0;
+        for (genvar gp = 0; gp < NUM_CHANNELS; gp = gp + 1) begin : tie_pal
+            assign tmds_pal[gp] = 10'd0;
+        end
+    end
+    endgenerate
 
     logic [2:0] tmds;
     logic [9:0] tmds_internal [NUM_CHANNELS-1:0];

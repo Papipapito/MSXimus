@@ -382,6 +382,16 @@ end
     // una vez encendido sopla el doble antes de parar y cicla la mitad.
     //   K_ON  2->3 : arranca a ~17.5 grados sobre el frio (antes ~11.7)
     //   K_OFF 1    : para    a  ~5.9 grados sobre el frio (SIN CAMBIO)
+    // _173 EXPERIMENTO (peticion de Albert, 03/08): VENTILADOR SIEMPRE ON.
+    // Motivo doble: (1) en placa el ventilador NO gira NUNCA, ni siquiera
+    // pasados los 360 s de la garantia FORCE_ON_SEC — o sea que o el control
+    // no llega al pin o el camino fisico (conector/polaridad/fan) esta mal, y
+    // clavar el pin a 1 separa las dos cosas; (2) hay sospecha de margen
+    // TERMICO en el arranque (bucle de resets en SCREEN 1 con la placa
+    // caliente): con el fan fijo la temperatura deja de ser variable.
+    // El fan_ctrl se queda instanciado SOLO como termometro: fan_dbg_cnt
+    // sigue saliendo por el COM11 (columna T), su decision se ignora.
+    wire fan_en_ctrl;  // decision del control, hoy ignorada (telemetria)
     fan_ctrl #(.WIN_CYC(32'd262144), .K_ON(10'd3), .K_OFF(10'd1),
                .FORCE_ON_SEC(32'd360)) u_fanctrl (
         .clk        (clk_27m),
@@ -389,9 +399,16 @@ end
         .ro_en      (fan_ro_en),
         .ro_cnt_rst (fan_ro_rst),
         .ro_cnt     (fan_ro_cnt),
-        .fan_en     (fan_en_o),
+        .fan_en     (fan_en_ctrl),
         .dbg_cnt    (fan_dbg_cnt)
     );
+    // _175: experimento _173 CERRADO — con el pin a 1 el ventilador giro
+    // perfecto en placa (03/08): el camino fisico (AB12/conector/fan) esta
+    // BIEN. El "no gira nunca" de las s006/s007 tiene explicacion mundana:
+    // sesiones con power-cycle cada 100-200s (up_sec nunca llega a los 360
+    // de FORCE_ON_SEC) + baseline envenenada por reflasheo en caliente
+    // (leccion _124). Vuelta al control automatico como en la v2.0.
+    assign fan_en_o = fan_en_ctrl;
     ro_osc u_roosc (
         .ro_en   (fan_ro_en),
         .cnt_rst (fan_ro_rst),
@@ -1301,6 +1318,16 @@ assign keyboard_addr = ppi_port_c[3:0];
     // v1.9b: un warm reset EN CURSO debe CRUZAR la entrada del reset a 3.58
     // (la grabacion en flash tarda decenas de ms con bus_reset_n aun alto).
     wire warm_reset_pending = flash_write_busy | config_reset_req;
+    // _177: /WAIT del puerto CPU del V9968 (glue en clk_86) re-sincronizado
+    // al dominio del T80 con 2FF. Latencia de asercion total ~60-70ns desde
+    // la caida de IORQ — dentro de la ventana de muestreo de WAIT del Z80
+    // incluso en turbo (T=186ns). Seguro por diseno: el glue lo gatea al
+    // ciclo I/O del VDP y lleva timeout fail-open (~12us); el stall ya no
+    // puede matar de hambre al refresco de la SDRAM (autonomo desde _175).
+    wire v68_wait86_n;
+    reg [1:0] v68_wait_s = 2'b11;
+    always @(posedge clk_54m) v68_wait_s <= {v68_wait_s[0], v68_wait86_n};
+    wire vdp_wait54_n = v68_wait_s[1];
     // (reg turbo_eff adelantado junto al FSM de waits, P1-iter.2)
     always @ (posedge clk_54m) begin
         if (!(bus_reset_n & reset3_n & flash_idle & esp_boot_ok))
@@ -1356,15 +1383,15 @@ assign keyboard_addr = ppi_port_c[3:0];
     `endif
     `ifdef ENABLE_WIFI
       `ifndef ENABLE_WAIT_ADAPTIVE
-        .WAIT_n    (bus_wait_n & wait_uart & opl4pcm_wait_n),
+        .WAIT_n    (bus_wait_n & wait_uart & opl4pcm_wait_n & vdp_wait54_n),
       `else
-        .WAIT_n    (wait_uart & opl4pcm_wait_n),
+        .WAIT_n    (wait_uart & opl4pcm_wait_n & vdp_wait54_n),
       `endif
     `else
       `ifndef ENABLE_WAIT_ADAPTIVE
-        .WAIT_n    (bus_wait_n & opl4pcm_wait_n),
+        .WAIT_n    (bus_wait_n & opl4pcm_wait_n & vdp_wait54_n),
       `else
-        .WAIT_n    (opl4pcm_wait_n),
+        .WAIT_n    (opl4pcm_wait_n & vdp_wait54_n),
       `endif
     `endif
     `ifdef ENABLE_V9958
@@ -1766,6 +1793,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         .clk_86(clk_86), .rst_n(rst86_n),
         .csw_n(vdp_csw_n), .csr_n(vdp_csr_n),
         .mode(bus_addr[1:0]), .cdo(cpu_dout), .cdi_r(vdp_dout),
+        .wait_n(v68_wait86_n),   // _177: /WAIT del puerto CPU del V9968
         .bus_address(v68_bus_address), .bus_ioreq(v68_ioreq),
         .bus_write(v68_write), .bus_valid(v68_valid), .bus_ready(v68_ready),
         .bus_wdata(v68_wdata), .bus_rdata(v68_rdata), .bus_rdata_en(v68_rdata_en)
@@ -3677,20 +3705,31 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             sat16k = neg ? (~y[15:0] + 16'd1) : y[15:0];
         end
     endfunction
+    // _180 (regresion de la rc7 cazada por Albert, 04/08: "la tabla de ondas
+    // suena como con el volumen subido y distorsiona"; la v2.0 pre-_161 suena
+    // limpia): la ganancia maestra _161d (x5, +14dB) multiplicaba TAMBIEN al
+    // OPL4 — cuando su proposito declarado era subir los chips flojos "a la
+    // altura del OPL4/MoonSound". El OPL4 ya estaba en su sitio: x5 lo metia
+    // de lleno en la rodilla del limitador (knee 0,75 FS + techo) = mas
+    // volumen y distorsion sostenida. FIX: el grupo CLASICO (PSG/SCC/OPLL/
+    // Y8950/ADPCM) pasa por gmul; el OPL4 (FM + wave) entra x1 DESPUES de la
+    // ganancia. El mando del puerto #44 vuelve a significar lo que Albert
+    // ajusto a oido: el volumen de los clasicos RESPECTO al MoonSound.
     wire signed [18:0] mixL_st = {{2{psg1_ac[16]}}, psg1_ac}
         + {{3{scc_term[15]}}, scc_term} + {{3{opll_term[15]}}, opll_term}
-        + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
-        + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term_l[15]}}, opl4pcm_term_l};
+        + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term};
     wire signed [18:0] mixR_st = {{2{psg2_ac[16]}}, psg2_ac}
         + {{3{scc2x_wav[14]}}, scc2x_wav, 1'b0} + {{3{opll_term[15]}}, opll_term}
-        + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
-        + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term_r[15]}}, opl4pcm_term_r};
+        + {{3{y8950_wav[15]}}, y8950_wav} + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term};
     wire signed [18:0] mix_mono = {{2{psg1_ac[16]}}, psg1_ac}
         + {{2{psg2_ac[16]}}, psg2_ac}
         + {{3{scc_term[15]}}, scc_term} + {{3{scc2x_wav[14]}}, scc2x_wav, 1'b0}
         + {{3{opll_term[15]}}, opll_term} + {{3{y8950_wav[15]}}, y8950_wav}
-        + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term}
-        + {{3{opl4fm_term[15]}}, opl4fm_term} + {{3{opl4pcm_term[15]}}, opl4pcm_term};
+        + {{3{y8950_adpcm_term[15]}}, y8950_adpcm_term};
+    // _180: suma propia del OPL4 (FM + wave), fuera de la ganancia maestra
+    wire signed [16:0] o4mix_l    = {opl4fm_term[15], opl4fm_term} + {opl4pcm_term_l[15], opl4pcm_term_l};
+    wire signed [16:0] o4mix_r    = {opl4fm_term[15], opl4fm_term} + {opl4pcm_term_r[15], opl4pcm_term_r};
+    wire signed [16:0] o4mix_mono = {opl4fm_term[15], opl4fm_term} + {opl4pcm_term[15], opl4pcm_term};
     // _127H: TONO DE TEST del bug #14 (440Hz cuadrada -12dB directa al puente,
     // puenteando el mezclador). DESARMADO en release (niquelado B, bug #4 del
     // informe): iba colgado del toggle "Sprite Limit" del menu (config2[3]) y
@@ -3727,7 +3766,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // limitador. B y C corren libres a 27 MHz; como clk_enable_3m6_27 solo
     // pulsa 1 de cada ~7,5 ciclos, la muestra esta lista muchisimo antes del
     // siguiente pulso y el resultado no cambia ni un bit.
-    reg signed [18:0] snd_mix_l, snd_mix_r;          // (A) suma
+    reg signed [18:0] snd_mix_l, snd_mix_r;          // (A) suma (grupo clasico)
+    reg signed [16:0] snd_o4_l,  snd_o4_r;           // (A) suma OPL4 (_180: x1)
     reg signed [22:0] snd_g_l,  snd_g_r;             // (B) con ganancia
     always @ (posedge clk_27m) begin
         if (clk_enable_3m6_27 == 1 ) begin
@@ -3735,23 +3775,31 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             if (config_enable_8sprites == 1) begin
                 snd_mix_l <= {{3{tone_smp[15]}}, tone_smp};
                 snd_mix_r <= {{3{tone_smp[15]}}, tone_smp};
+                snd_o4_l  <= 17'sd0;
+                snd_o4_r  <= 17'sd0;
             end
             else
 `endif
             if (config_enable_stereo == 1) begin
                 snd_mix_l <= mixL_st;
                 snd_mix_r <= mixR_st;
+                snd_o4_l  <= o4mix_l;
+                snd_o4_r  <= o4mix_r;
             end
             else begin
                 snd_mix_l <= mix_mono;
                 snd_mix_r <= mix_mono;
+                snd_o4_l  <= o4mix_mono;
+                snd_o4_r  <= o4mix_mono;
             end
         end
     end
 
     always @ (posedge clk_27m) begin
-        snd_g_l <= gmul(snd_mix_l);
-        snd_g_r <= gmul(snd_mix_r);
+        // _180: gmul solo al grupo clasico; el OPL4 entra x1 (sin tocar).
+        // Rango: gmul max +-2097144 + OPL4 +-131068 < 2^22: cabe en 23 bits.
+        snd_g_l <= gmul(snd_mix_l) + {{6{snd_o4_l[16]}}, snd_o4_l};
+        snd_g_r <= gmul(snd_mix_r) + {{6{snd_o4_r[16]}}, snd_o4_r};
     end
 
     always @ (posedge clk_27m) begin

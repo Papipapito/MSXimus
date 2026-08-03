@@ -37,12 +37,26 @@ snapshot th9958). Verificados uno a uno contra el repo:
                       <-- VERIFICADO NO-OP _157: nuestro estado neto (sy CON
                       c_lrmm, sx SIN) ya coincide termino a termino
   0683e7e 2026-06-02  **Register R#20, R#21 Modified** (ver abajo)
-                      <-- INVESTIGADO 27/07: cambio A MEJOR con permanencia
-                      ALTA (spec+RTL+demos atomico, tag v0.6, un solo bit V58
-                      conmuta ID+comandos+256K; coste de migrar = 26 lineas
-                      RTL + 2 bytes de software: DEVCON.COM off 14883 y
-                      V9968DM.COM off 0x377). DECISION Albert: mapa viejo en
-                      v2.0; migracion prevista para v2.1 con demos parcheadas
+                      <-- APLICADO _163 (2026-07-30). Un solo bit V58 (R#21[0])
+                      conmuta ID+comandos+256K; R#20[5]/[6] quedan libres para
+                      el entrelazado plano y la interrupcion de fin de comando.
+                      Nuestra divergencia local del acarreo VR (_125) se
+                      preserva: solo se cambia ff_vram256k_mode -> !ff_v9958_mode
+                      en las dos condiciones, sin reponer los gates de
+                      !ff_vram_type del upstream.
+                      LADO SOFTWARE (offsets VERIFICADOS byte a byte, la nota
+                      anterior los tenia desviados en uno):
+                        DEVCON.COM  offset 14882 (0x3A22): 0xFF -> 0x9F
+                        V9968DM.COM offset   888 (0x0378): 0xFF -> 0x9F
+                      NO hay que parchear nada: los binarios del upstream VIVO
+                      (clon proyectosAI/msx/V9968_Cartridge) YA traen 0x9F, y
+                      difieren del arbol th9958 en ESE UNICO byte cada uno.
+                      ⚠️ HALLAZGO: el V9968DM.COM que Albert ya tenia en
+                      files/v9968_tests/ es BYTE-IDENTICO al del upstream vivo,
+                      o sea que YA era el de 0x9F => con el mapa VIEJO llevaba
+                      todo este tiempo poniendo ECOM=0 y EVR=0 (sin comandos
+                      extendidos ni 256K) en un demo que los quiere. Con esta
+                      migracion pasa a ser el correcto.
   167b7cf 2026-06-03  Sprite Mode2 con PaletteSet# cuando EPAL=1 (FEATURE nueva;
                       es el delta de 154 lineas de vdp_sprite_makeup_pixel.v)
   4148742 2026-06-03  Bugfix direccion de la tabla de blink + periodo
@@ -363,12 +377,479 @@ VERIFICACION (Icarus, antes -> despues, Z80 5,37 MHz salvo el modo 4):
   Con latencias bajas (<=120 ciclos) NINGUNA peticion cae en la ventana y el
   antes/despues es bit-identico: el fix solo actua en el caso patologico.
 
-RESIDUO CONOCIDO (NO tocado, NO demostrado): si una pre-lectura se lanza en el
-MISMO ciclo en que el maestro da por aceptada una transaccion, ff_pf_inflight
-sube antes de que w_read/w_write disparen y esa transaccion se pierde
-(n_exec < n_glue). El barrido de fase del MODE=4 (48 fases x LAT 60..180) NO
-lo reproduce ni antes ni despues del fix. Si algun dia aparece, la cura es
-ceder el ciclo: `... && !w_bus_accept` en la rama que lanza la pre-lectura.
+RESIDUO (ya CURADO en esta misma build — ojo, esta nota decia lo contrario):
+si una pre-lectura se lanza en el MISMO ciclo en que el maestro da por aceptada
+una transaccion, ff_pf_inflight sube antes de que w_read/w_write disparen y esa
+transaccion se PIERDE (n_exec < n_glue). El barrido de fase del MODE=4 (48
+fases x LAT 60..180) no lo reproducia, pero el verificador lo cazo: sin ceder
+el ciclo, el parche cambiaba 115 dobles ejecuciones por 101 perdidas
+SILENCIOSAS (mismo sintoma final: par de bytes desincronizado).
+  => `&& !w_bus_accept` ESTA APLICADO en la rama que lanza la pre-lectura
+     (vdp_cpu_interface.v, la rama `else if( ff_pf_req && ... )`). Medido a
+     LAT=200 (la de placa ~190): 230/230 aciertos, 0 perdidas, 0 dobles.
+  [_163 2026-07-30] NO CONFUNDIR con el residuo del VRAMSOAK de placa
+  (v2.1-rc1). RESUELTO EN DIAGNOSTICO — es el BUG #26, no este:
+  SINTOMA: 9 casos en los que SOLO la primera lectura tras fijar la direccion
+  devuelve un byte equivocado; la 2a y la 3a salen bien => la VRAM esta
+  INTACTA (el propio VRAMSOK2 lo separa: E=estables, V=volatiles; en placa
+  E:00000 SIEMPRE).
+  DECODIFICADO: el patron del VRAMSOK2 esta impreso en su pantalla de titulo,
+  "dir^(dir>>8)^A5h (5Ah b4-7)" => f(dir) = dir_lo ^ dir_hi ^ K. Aplicandolo a
+  los 9 casos, el byte malo vale EXACTAMENTE f(dir-1) en los 9:
+    F7:3538 e=97 l=98 | F2:354C 5C/5B | F2:2D14 1C/1B | F2:3378 6E/61
+    F2:28C4 C9/CE | F2:2D18 10/1F | F2:35B8 A8/A7 | F2:290C 00/07
+  El XOR confinado a los bits bajos (0F,07,07,0F,07,0F,0F,07) NO era corrupcion
+  de bits: es el patron de acarreo de restar UNO al byte bajo de la direccion.
+  MECANISMO (medido, tb_cpuif_dbl MODE=5 + run_soak3.sh): la primera lectura
+  devuelve el DATO DE LA LECTURA ANTERIOR — cdi_r se queda con el byte viejo
+  porque v9968_cpu_glue.v NO tiene /WAIT y el Z80 muestrea antes de que llegue
+  bus_rdata_en (lo dice la cabecera del propio glue; es el bug #26 del
+  INFORME_NIQUELADO). En un recorrido CONTIGUO como el del soak, "byte de la
+  lectura anterior" == f(dir-1): las dos hipotesis coinciden, y por eso la
+  firma parecia un cambio de bits bajos.
+  UMBRAL MEDIDO: 0 fallos con latencia de VRAM <= 260 ciclos (3,0 us); 60/60
+  con >= 340 (4,0 us). El buffer de pre-lectura de la _149 subio el margen pero
+  no lo elimino. La peor latencia medida en placa es ~190 ciclos, asi que el
+  fallo salta solo en la cola de la distribucion de la DDR3 bajo contencion.
+  Refutada por el camino una hipotesis propia: NO es una pre-lectura invalidada
+  que aterriza (sonda n_pf_stale = 0 en todas las pasadas).
+  CURA REAL = /WAIT al Z80 mientras una lectura del puerto 0 esta en vuelo
+  (tb_cpuif_dbl ya modela un Z80 con /WAIT en el MODE=3). Es un cambio
+  ESTRUCTURAL del camino de CPU: no entra en una build de vídeo sin su propia
+  campana de regresion.
 Lo que SI se ve en el banco a latencias >2 us es el bug #26 del informe (el
 glue descarta flancos de csw_n/csr_n sin cola ni /WAIT): ese contador va
 aparte en el banco para no atribuirselo a este fix.
+
+================================================================================
+_167 / _168 (31/07/2026) — LINEA LIGERA: PORT DE 167b7cf Y PODA DEL PAL
+================================================================================
+
+CONTEXTO: desde hoy hay DOS LINEAS DE BUILD con un solo codigo fuente
+(tools/lanzar_campana.ps1). La COMPLETA es la de produccion; la LIGERA apaga el
+audio grande (8 defines) y baja de 90% a 67-69% de CLS, con lo que el rutado
+pasa de 40-50 min a ~2 min y los dados entregan siempre. Todo lo de abajo se
+hizo en la ligera: cinco campanas en el tiempo que antes costaba una.
+
+--- _167 PORT DE 167b7cf ("Sprite Mode2 with PaletteSet# when EPAL=1") --------
+
+Era el UNICO commit funcional de HRA que quedaba sin portar. Cinco ficheros:
+  vdp_sprite_info_collect.v     +2 lineas. La extraccion ya existia
+                                (w_selected_m3_palette_set = ff_selected_q[27:24])
+                                pero era un CABLE MUERTO que nadie consumia.
+  vdp_timing_control_sprite.v   quirurgico: puerto + wire + 2 conexiones.
+  vdp_timing_control.v          puerto + 1 conexion.
+  vdp.v                         1 conexion.
+  vdp_sprite_makeup_pixel.v     TRAIDO ENTERO del upstream.
+
+⚠️ POR QUE UNO SE COPIA Y LOS OTROS NO — comprobarlo ANTES de copiar nada:
+  * vdp_timing_control_sprite.v lleva el arreglo _120 (la resta del scroll se
+    hizo en el SSG porque aqui era "el peor camino de la matriz de rutados,
+    hasta -1,9 ns con CLS 84%"). El upstream TODAVIA tiene esa resta en la ruta
+    combinacional: un copy habria REINTRODUCIDO una violacion de -1,9 ns.
+  * vdp_sprite_makeup_pixel.v NO tiene ni una divergencia propia (verificado:
+    cero marcas MSXimus, y todas las lineas que se van pertenecen al commit).
+    Ahi copiar es MAS SEGURO que 30 ediciones a mano.
+  * El cambio de `assign color` en info_collect es COSMETICO: las dos formas son
+    la misma expresion por De Morgan.
+
+RESULTADO EN CAMPANA (s002, ligera): 3 de 3 dados con el gate nuevo. CLS 20526/
+20668/20617 — DENTRO DEL RUIDO de la linea base sin el port (20480/20593/20687).
+El ensanchamiento de 8 a 12 bits de los 16 registros de color no cuesta nada
+medible. Verilator elabora la jerarquia completa sin %Error ni PINNOTFOUND.
+Contadores de sprite CLAVADOS a la linea base (11424 fetches, 2484 miss en vs=1):
+el port NO toca el patron de accesos.
+
+⚠️ CAMBIA EL COMPORTAMIENTO, Y YO PREDIJE QUE NO. Predije DIFFS=0 razonando que
+en modo 3 los dos caminos leen los mismos 4 bits (cierto: en mode3 `color` ES el
+byte de modo del atributo, asi que color[3:0] == ff_selected_q[27:24]). Pero solo
+mire esa rama. La linea nueva
+    ff_palette_set <= (sprite_mode2 && reg_ext_palette_mode) ? ff_color_3[11:8] : 4'd0;
+SI dispara en la escena ru66, porque SCREEN 5 es pantalla de sprites modo 2 Y
+R#20=0x9F lleva EPAL. Antes ahi habia un cero fijo. DIFFS medido: 397.044.
+=> NO es cierto que "no puede alterar nada que funcionara antes". SI altera
+   cualquier escena con EPAL + sprites modo 2, que son las demos de HRA.
+=> Como el fichero es BYTE-IDENTICO al del upstream, nuestro comportamiento ES
+   el de HRA por construccion. Si se ve mal, el fallo seria suyo: se arregla y
+   se le reporta (decision de Albert, 31/07).
+PENDIENTE: confirmacion VISUAL en placa con las demos de HRA. No hay oraculo
+independiente en simulacion — es el agujero que la auditoria de hoy nombro.
+
+⚠️ LA REFERENCIA DORADA HAY QUE REGENERARLA, y no es opcional. s3r_frame.txt NO
+es una fotografia de "asi se veia bien": sale de tb_sprite3r, que es EL MISMO RTL
+con una VRAM perfecta. Es un CO-MODELO para medir cuanto ensucia el shim. Tras un
+cambio de RTL hay que rehacerla o el banco se queda en ROJO PERMANENTE marcando
+397.044 — el mismo fallo que ya tuvieron tb_sc8cmd_full y tb_t2cursor.
+
+--- _168 PODA DEL BACK-END PAL (-629 CLS) ------------------------------------
+
+msx2hdmi_v9968.sv instanciaba DOS codificadores HDMI completos (hdmi_ntsc VIC 4 =
+720p60 y hdmi_pal VIC 19 = 720p50) y multiplexaba sus TMDS con pal_x. Pero
+pal_mode llega CABLEADO A CERO (top.v:1969) y el V9968 fuerza ff_50hz_mode<=0
+(vdp_cpu_interface.v:613 y :697): el back-end PAL era LOGICA MUERTA.
+No lo podaba el sintetizador porque pal_mode cruza un sincronizador de 2FF, y eso
+bloquea la propagacion de constantes.
+
+⛔ PRIMER INTENTO FALLIDO, medido: hacer `pal_x` CONSTANTE DE ELABORACION con un
+parametro. NO BASTA. Campana s003: el informe seguia listando
+    name="hdmi_pal" T_Register="606" T_Lut="808"
+y el CLS no bajo (20754/20813/20676, incluso algo por encima).
+=> GOWIN NO ELIMINA INSTANCIAS DE JERARQUIA aunque ninguna salida se use. Hace
+   falta que la instancia NO LLEGUE A ELABORARSE.
+
+✅ CURA: `generate if (ENABLE_PAL != 0)` alrededor de la instancia, con la rama
+else atando cx_pal/cy_pal/tmds_pal. El camino PAL queda INTACTO en el fuente:
+para recuperarlo, parametro a 1 y una senal de verdad en .pal_mode (sigue
+pendiente medir la geometria 50 Hz, top.v:1746).
+RESULTADO (s004): hdmi_pal FUERA del netlist en los 3 dados.
+    CLS   20604 -> 19975 de media   (-629)
+    Logic 27419 -> 26526            (-893)
+En la ligera es 69% -> 67%; en la COMPLETA serian ~90% -> ~88%, que es donde
+importa.
+
+❌ LO QUE **NO** ARREGLO, y yo esperaba que si: la violacion de SETUP de
+u_msx2hdmi68/hdmi_ntsc/video_data_q_* -> tmds_gen. Sigue apareciendo en 1 de cada
+3 dados, la MISMA tasa que antes. El camino que viola es INTERNO al codificador,
+asi que quitarle el gemelo de al lado alivia congestion pero no lo acorta.
+=> Es la UNICA violacion de timing REAL que queda, y ahora esta aislada: no es
+   congestion, no es el PAL, es el propio TMDS.
+
+--- _169 CORTE DEL CODIFICADOR TMDS — el peor SETUP del diseño, cerrado -------
+
+EL DEFECTO: el camino video_data -> acc dentro de tmds_channel.sv era el peor
+SETUP de todo el diseño. 15 niveles de LUT, 13,38 ns contra 13,0 de presupuesto
+(clk_hdmi 74,25 MHz), de los cuales 7,4 son CELDA: con rutado PERFECTO tampoco
+cerraria. Salia en ~1 de cada 3 dados al 91% de CLS Y TAMBIEN al 67% — no era
+congestion. Es la Figura 5-7 de la spec HDMI tal cual: popcount de video_data ->
+cadena XOR/XNOR de 8 etapas (irreducible) -> popcount de q_m -> comparadores ->
+aritmetica con signo de acc_add.
+
+LA CURA: registrar q_m/N1q_m07/N0q_m07, que es donde acaba la parte feed-forward
+y empieza el lazo de acc. Parte el cono en ~7,1 / ~6,3 ns.
+
+⚠️ POR QUE NO AÑADE LATENCIA — esto es lo que desbloqueo la decision. NO se añade
+una etapa: se MUEVE la que ya existia. hdmi.sv:396 es `video_data_q <=
+video_data;`, un FF->FF sin logica. Alimentando el canal con video_data CRUDO y
+registrando tras el popcount+XOR queda
+    antes : q_m[t]   = f(video_data_q[t]) = f(video_data[t-1])
+    ahora : q_m_q[t] = f(video_data[t-1])        <- el MISMO valor
+Mismo valor, mismo ciclo, mismos registros de rgb a tmds. Por eso la leccion
+_134/_135 (pantalla negra por desplazamiento sin compensar) NO aplica.
+⚠️ El video crudo va SOLO a video_data; control/islands/mode siguen por el camino
+_q o el mux de salida se desalinea. Es el error facil aqui.
+
+DEMOSTRADO, NO RAZONADO (tools/v9968_sim/tb_tmds_equiv.sv, paso 0 gratis antes de
+sintetizar nada): 320.010 ciclos con modos realistas (control, guardas de video,
+islas, guardas de isla) + tramo final de video puro. CERO discrepancias en `tmds`
+y CERO en `acc`. Tolerancia cero: una sola habria parado el frente.
+Y tb_defer_rst (guardian declarado del camino HDMI) pasa: "FASE IDENTICA + ISLA A
+SALVO".
+
+EFECTO MEDIDO — el modulo HDMI DESAPARECE del analisis de timing:
+    s004 (sin corte): 155 referencias a u_msx2hdmi68, encabezando la lista
+                      (peor setup +0,789 en hdmi_ntsc/video_data_q_10)
+    s005 (con corte):   0 referencias. El peor setup pasa a ser
+                      u_v9968/u_command/ff_screen_mode_6 a +0,834.
+Registros de tmds_channel 14 -> 36 (+22 = 9 de q_m + 5 + 5 + margen): los
+syn_preserve funcionaron, Gowin no los fusiono. 3 de 3 dados pasan el gate.
+
+VA PARAMETRIZADO (PIPELINE_QM, por defecto 0) Y SOLO ACTIVO EN LA LINEA DEL
+V9968. Ese fichero es de terceros (hdl-util, MIT) y NUNCA se habia tocado: un
+solo commit en su historia. Lo comparte msx2hdmi.sv, la linea del V9958 clasico
+que YA ESTA PUBLICADA con 6 instancias. Con el parametro a 0 su netlist es
+IDENTICO bit a bit y no hay nada que re-validar. Se quitara el parametro cuando
+la clasica se re-pruebe en placa.
+
+FALSO POSITIVO DEL GATE QUE APARECIO AQUI: u_roosc (fpga/src/ro_osc.v) es un
+OSCILADOR EN ANILLO deliberado — un lazo de NANDs que hace de termometro del die.
+Su "reloj" es el propio lazo, asi que su timing no significa nada; lo reporta
+solo porque NO esta constreñido en ningun .sdc. Se tolera en gate_check.ps1.
+⚠️ EL ARREGLO DE VERDAD es un set_false_path sobre u_roosc en constraints/, pero
+eso afecta TAMBIEN a la linea clasica y merece su propia revision.
+
+--- _170 EL DESALOJO, CURADO Y MEDIDO EN PLACA. EL CUELGUE ERA CONTENCION -----
+
+RECORDATORIO DEL ATASCO: la politica "todos rellenan MENOS el motor de comandos"
+curaba el desalojo (c_spmiss/frame de ~1300 a 1), dejaba el texto byte-identico y
+la bateria igual... y COLGABA EL ARRANQUE (rc5). Nunca se diagnostico, y no habia
+forma de hacerlo: NINGUN banco arranca una BIOS.
+
+LA SALIDA: no montar el banco imposible, sino BAJAR EL COSTE DEL INTENTO hasta
+poder usar la PLACA como oraculo. Con la linea ligera (67% de CLS, ~2 min de
+campana) un experimento cuesta 5 minutos. Se añadio `localparam SC_FILL_POLICY`
+al shim para iterar cambiando un numero.
+
+EXPERIMENTO s006 (politica 1, linea LIGERA) — MEDIDO EN PLACA POR ALBERT:
+    ARRANCA. Menu, ESC, MSX-DOS y el V9968DM, todo el camino que colgaba la rc5.
+    spMISS/s   25.000-55.000  ->  ~3.600 SOSTENIDO   (11 veces menos)
+    bgMISS/s   0-2      wq=0 (ni una escritura perdida)    DDR3 sin reintentos
+    Veredicto visual de Albert: "se veia muy bien, salvo una raya, la mejor de
+    todas".
+
+=> EL CUELGUE DE LA rc5 ERA CONTENCION DE MEMORIA, NO LOGICA. La cura siempre
+   fue correcta; lo que fallaba era la presion sobre la DDR3 con el audio dentro
+   (uopl4pcm streamea de ahi). La linea ligera lo demuestra por construccion:
+   mismo RTL, misma politica, menos clientes de memoria => arranca.
+
+⚠️ Y LA RAYA QUE QUEDA ESTABA PREDICHA. En mi_release/v2.1_rc5/LEEME.txt se dejo
+escrito: "SI QUEDA UNA RAYA FINA, CONCENTRADA EN UNA SOLA LINEA, en vez de churro
+por toda la pantalla: eso NO es esto, es el ALIAS SAT/SPT". Se cumplio.
+=> ESO REABRE EL FRENTE DEL ALIAS con una justificacion MUCHO mejor que cuando se
+   descarto: entonces era el 10% de un problema cuyo 90% estaba abierto; ahora el
+   90% esta curado y el alias es EL ULTIMO DEFECTO DE VIDEO, con cota conocida
+   (<=78 fallos/frame) y una scanline concreta.
+   La prescripcion sigue en pie: banco de medida ANTES de tocar c_idx13, y con la
+   huella CORRECTA de la SAT de la ru66 (R#5=0x03 => base[8:7]=3 => 256 B, no 128;
+   el error que invalido la busqueda de candidatas la primera vez).
+
+SIGUIENTE: campana b171, LINEA COMPLETA con la politica 1. Hay razon concreta
+para esperar que ahora aguante donde la rc5 no: desde entonces la poda del PAL
+libero 629 CLS y el corte del TMDS quito el peor camino de setup. La rc5 iba al
+91% con el TMDS violando; esta iria al ~88% y sin esa violacion.
+
+--- OTRAS DOS COSAS QUE SE APRENDIERON, Y CUESTAN CARO SI SE OLVIDAN ----------
+
+1. EL GATE ESTABA MAL. Ver la cabecera de tools/gate_check.ps1. Los holds de
+   ~40 ps FF->BSRAM son el SUELO FISICO del GW5AT-60B (skew 0,197 + tHold 0,037
+   = 0,234 necesarios contra un minimo alcanzable de 0,195). La propia IP DDR3 de
+   Gowin los incumple en el 100% de los dados, y van dentro de CADA bitstream
+   entregado, incluida la v2.0 en manos de usuarios. El criterio viejo rechazaba
+   un -0,036 mientras aceptaba un -0,043 en el MISMO informe: tiraba ~1 de cada 3
+   dados por nada. `-correct_hold 1` ya viene por defecto (impl/pnr/cmd.do:14):
+   no habia opcion que activar.
+2. project.fs NO ES LA MARCA DE FIN. Gowin escribe los informes de timing
+   DESPUES. Un monitor que dispare al ver el .fs lee ficheros a medio escribir y
+   canta "SETUP: 0" habiendo violaciones (paso en s004/bx_c1: dijo 0, y gate_check
+   encontro -0,188 y -0,002). Correr gate_check.ps1 al FINAL, nunca dentro del
+   monitor.
+
+================================================================================
+_164 (30/07/2026 tarde) — DOS CIERRES, LOS DOS POR MEDICION
+================================================================================
+
+--- A) EL V9968DM.COM NO FUNCIONABA, Y NO ERA CULPA NUESTRA -------------------
+
+SINTOMA (placa, IDENTICO en rc1, rc2 y rc3 => preexistente, no regresion):
+banda de ruido estatica en el tercio superior sobre fondo azul correcto.
+Telemetria: spMISS ~3840/s SOSTENIDO, bgMISS = 0, rd/s colapsado a ~1300.
+
+CAUSA RAIZ (cadena verificada linea a linea, upstream y arbol nuestro):
+  V9968DM.ASM:450        db 0x30           ; CMD (LRMM)  <- rotate_logo
+  vdp_command.v          c_lrmm: ff_state <= reg_ext_command_mode
+                                             ? c_state_lrmm : c_state_stop;
+  vdp_cpu_interface.v:932  assign reg_ext_command_mode = ~ff_v9958_mode;
+  vdp_cpu_interface.v:544  ff_v9958_mode <= 1'b1;        <- VALOR DE RESET
+  vdp_cpu_interface.v:646  8'd21: ff_v9958_mode <= ff_1st_byte[0];
+  V9968DM.ASM              NO ESCRIBE R#21 EN NINGUNA LINEA
+                           (va R#20 -> R#23 -> R#25 -> R#26 -> R#27)
+
+=> reg_ext_command_mode = 0 => el LRMM muere en c_state_stop => la tabla de
+patrones de sprites (destino del LRMM, DY=384 = 0xC000) NUNCA SE ESCRIBE. El
+logo del MSX de esa demo NO es un bitmap: son 13 sprites de 16x128 en fila. Sin
+patrones, pintan VRAM sin inicializar.
+
+Encaja todo lo medido: bgMISS=0 (el borrado es un HMMV, comando ESTANDAR, y ese
+si corre), spMISS alto (sprites leyendo basura), e identico bajo los DOS mapas
+de R#20/R#21 — con 0x9F sobre el mapa nuevo y con el mismo byte sobre el viejo
+la demo acaba igual, con los comandos extendidos apagados. Por eso el port de
+0683e7e es funcionalmente NEUTRO para esta demo y por eso rc1==rc2==rc3.
+
+ES UN FALLO DE LA DEMO DE HRA: actualizo el R#20 al mapa nuevo (su comentario de
+la linea 72 encaja bit a bit con el layout nuevo) pero no le anadio la escritura
+de R#21. Su otra demo, la ru66, SI la lleva. Candidato a reportar upstream.
+
+PARCHE (software, cero coste de sintesis): V9968DM2.COM, offset 0x380
+0x17 -> 0x15, es decir "ld e,23" pasa a ser "ld e,21". Asi el
+"xor a / call write_control_register" que ponia R#23=0 pone R#21=0x00. Se pierde
+el R#23=0 explicito (offset vertical), que ya vale 0 al entrar desde DOS.
+Verificado: 3373 bytes, UN SOLO byte distinto. En mi_release/v2.1_rc3/.
+
+HALLAZGO COLATERAL QUE QUEDA VIVO — ALIAS REAL EN LA SC-CACHE, de la familia del
+_151 pero con OTRAS direcciones (el fix de entonces se hizo a la medida de la
+ru66). Aritmetica cerrada, con el interleave descartado (vram_interleave lo
+fuerza a 0 reg_sprite_mode3, vdp_timing_control_screen_mode.v:208):
+    c_idx13(v) = { v[12]^v[14], v[11]^v[13], v[10:0] }   (shim:674-676)
+    SAT 0x7600 -> idx 7552, tag 1      SPT 0xD600 -> idx 7552, tag 3
+0xD600 es la linea fuente yl=44 de los patrones, y el emparejamiento es 1:1: el
+patron del sprite N choca con SU PROPIO atributo (plano N). Tags distintos =>
+desalojo mutuo cada scanline, no falso hit. Cota <=78 miss/frame; medido en
+placa 64/frame. Cabe justo, pero la CAUSALIDAD no esta demostrada: en la misma
+escena hay otro consumidor que llena la sc-cache (el LRMM lee su destino, que es
+la propia SPT). Si el parche de un byte no basta, ESTO es lo siguiente — y se
+mide con un banco (clon de tb_sprite3 con el layout del V9968DM, moviendo la SAT
+a 0x7400 para ver si la scanline afectada SE MUEVE con ella) ANTES de tocar RTL.
+
+--- B) FRENTE 2 (/WAIT): EL COSTE SUBIO Y EL BENEFICIO NO. NO ENTRA -----------
+
+Banco nuevo tools/v9968_sim/run_soak4.sh: barrido LAT x STEP en MODE=5 sacando
+la salida COMPLETA (run_soak3.sh filtraba n_edgelost con su grep, y por eso no
+se veia la correlacion). 12 combinaciones, N=60.
+
+    LAT 40 / 120 / 190 / 260  (STEP 1 y 211) : 0 fallos, n_edgelost = 0
+    LAT 340 y 420             (STEP 1 y 211) : 60/60 fallos, n_edgelost = 0
+
+DOS CONCLUSIONES:
+ 1. HIPOTESIS DEL FLANCO PERDIDO: REFUTADA POR MEDICION. n_edgelost = 0 en LAS
+    DOCE configuraciones, incluidas las que SI reproducen la firma de placa. El
+    agujero de v9968_cpu_glue.v:58-72 (sin cola: un flanco que llega con
+    bus_valid alto se tira en silencio) EXISTE en el codigo, pero NO es
+    alcanzable con el patron del VRAMSOAK y NO produce los 9 fallos. Era la
+    unica cura barata y segura; se cae.
+ 2. El umbral sigue en 340 ciclos y la peor latencia de placa es ~190. El fallo
+    vive en la COLA de la distribucion de la DDR3.
+
+Y LA CURA CLASICA ESTA BLOQUEADA POR UN ACOPLAMIENTO QUE NO SE HABIA MIRADO:
+    memory.v:302  else if( bus_rfsh_n == 0 && video_dlclk == 1 && ... )
+                      SdrSta <= 3'b010;   // refresh
+El refresco de la SDRAM SOLO ocurre en el ciclo RFSH DEL Z80. No hay temporizador
+autonomo (el unico otro refresh del fichero es la secuencia de init, :293-300).
+=> PARAR LA CPU PARA EL REFRESCO ENTERO. Y memory.v:309-316 documenta que matar
+de hambre al refresh ya reventó esta placa: "la SDRAM se descargaba en segundos
+(cuelgue total, MSXnano 20K y 60K)". Presupuesto: rfsh_gap concede un refresh
+cada >=16 medias VDP (~4,7 us) contra los 7,8 us/fila del W9825 — ~1,6x de
+margen. Un stall que cubra el caso de 340 ciclos de clk_86 (3,96 us) se come
+practicamente TODO ese margen en un solo evento, y los eventos no vienen solos.
+
+VEREDICTO: se cambiaria un defecto COSMETICO Y DE COLA (9 bytes malos en una
+pasada entera de una herramienta de diagnostico, sin efecto observado en ningun
+software real) por el riesgo de un CUELGUE TOTAL ya sufrido dos veces. No entra.
+La unica forma sana de desbloquearlo es DESACOPLAR EL REFRESCO del RFSH del Z80
+(temporizador autonomo en memory.v) — cirugia en el bloque mas critico del
+diseno, que merece campana propia y no se cuelga de esto.
+
+--- C) EL MOTOR DE COMANDOS REVIENTA LA CACHE DE SPRITES — DEMOSTRADO Y CURADO -
+
+CONTEXTO. Con el V9968DM ya arrancando (ver A), en placa quedaban rayas y el
+logo salia troceado. Telemetria: spMISS/s = 25.000-55.000 (~667/frame) contra
+3.840 antes, bgMISS/s ~= 0 y !DROPS wq=0. Con el fondo leyendose fiel y nadie
+perdiendo escrituras, el sospechoso era el DESALOJO de la cache de sprites.
+
+EL AGUJERO, en el propio codigo (v9968_vram_shim.v:1549-1557):
+    // ...y a la CACHE (v3c: TODO consumidor de lectura
+    // rellena — bg/sprite/CPU/comando) — via fill_pend
+    if (!pf_dirty) begin
+        fill_pend <= 1'b1; ... fill_sp <= (cur_tag[4:2] == C_SPRITE);
+El relleno NO esta filtrado. Y el contraste es elocuente: la _150 YA filtro el
+victim buffer a sprites (fill_sp, dos lineas mas abajo) pero dejo la cache
+abierta. El LRMM LEE SU DESTINO antes de cada escritura y su destino es la SPT.
+
+EXPERIMENTO (tools/v9968_sim/run_cmdthrash.sh, tres variantes, UNA variable
+entre cada par). Se hizo sobre la escena ru66, que YA tiene linea base validada
+(DIFFS=0 contra la dorada), en vez de montar la del V9968DM: montar escena nueva
+habria cambiado dos variables a la vez.
+  A = base
+  B = A + LMMM|OR continuo con DESTINO en la SPT (0x8000)
+  C = B + -DSC_FILL_SPRITE_ONLY
+EL TRUCO PARA NO CONTAMINAR: LMMM con operacion logica OR desde una region a
+CEROS. El motor SE VE OBLIGADO A LEER EL DESTINO (lo exige toda op != IMP), que
+es el trafico que se quiere inyectar, pero x OR 0 = x => LOS DATOS NO CAMBIAN.
+Con XOR o con IMP el experimento se destruye a si mismo.
+
+  c_spmiss POR FRAME:   vs1     vs2     vs3    vs4    vs5
+    A  base             2484     256      25      1      0    <- CONVERGE
+    B  +comandos        1414    1427    1133    617   1306    <- NUNCA converge
+    C  B + filtro       2627     135      10      0      0    <- CONVERGE como A
+  Rellenos por frame en regimen (SPCLS): A spt=0-1 | B spt=5348 bg=5135 | C 0.
+
+  CORROBORACION CRUZADA: 1300 x 60 = 78.000/s en simulacion contra 25.000-55.000
+  medidos en placa. Mismo orden, y el trafico sintetico es mas agresivo que el
+  LRMM real. Dos medidas independientes (Icarus y la Tang) cuentan lo mismo.
+
+REGRESION (tools/v9968_sim/run_battery_scfill.sh, la bateria estandar corrida
+DOS VECES, sin y con el define):
+    tb_sc8cmd_full  fallos_vram=0  ce_colgados=0   OK en las dos
+    tb_sc5line      diffs=0                        OK en las dos
+    tb_cpu_bulk     0/8192                         OK en las dos
+    coste: bkA 93264 -> 93363 (+0,11%), bg_miss 73 -> 79, TURNOS total IDENTICO,
+           pfqdrop/rqdrop identicos. El motor de comandos y el puerto de CPU NO
+           dependian de esa cache.
+
+--- D) _165 ROMPIO EL MODO TEXTO EN PLACA. LA CURA ERA DEMASIADO ANCHA --------
+
+La rc4 (filtro "== C_SPRITE", solo los sprites rellenan) se flasheo y ROMPIO EL
+MODO TEXTO: menu y MSX-DOS ilegibles, caracteres emborronados y estirados.
+
+POR QUE ME LO SALTE, que es lo que importa:
+  * RAZONAMIENTO MALO: "el fondo va por la VENTANA, no por esta cache". Es cierto
+    EN MODOS BITMAP —barrido lineal, el prefetch lo cubre— y por eso Parodius o
+    Aleste no lo habrian enseñado. En TEXTO la tabla de patrones se accede
+    INDEXADA POR EL CODIGO DE CARACTER: un prefetch lineal NO puede servir eso, y
+    quien lo servia era esta cache.
+  * REGRESION INCAPAZ DE CAZARLO: los tres bancos de la bateria estandar son
+    tb_sc8cmd_full (SCREEN 8), tb_sc5line (SCREEN 5) y tb_cpu_bulk (escrituras de
+    CPU). NINGUNO configura un modo de texto. Los que si lo hacen —tb_textgeom y
+    tb_screen1, ambos con R#0=0x00 y con el shim REAL— estaban en el directorio
+    SIN USAR.
+  * LA LECCION: al tocar un recurso COMPARTIDO (esta cache la usan fondo,
+    sprites, CPU y comandos) la regresion tiene que cubrir A CADA CONSUMIDOR. No
+    "la bateria de siempre".
+
+DIAGNOSTICO DEMOSTRADO (run_textgeom_roto.sh — corriendo la variante ROTA, que es
+lo que faltaba: la primera regresion comparaba BASE contra FIX, y en un banco SIN
+comandos esos dos son IDENTICOS POR CONSTRUCCION, asi que no reproducia nada):
+    tb_textgeom MODE=0, ancho de cada pixel MSX en columnas nativas
+      BASE (rc3) : { 2:239 }                    min=2  max=2   uniforme
+      ROTO (rc4) : { 2:150 4:15 8:14 }          min=2  max=8
+    en pixeles de PANTALLA
+      BASE : { 3:159 4:80 }                     min=3  max=4
+      ROTO : { 3:100 4:50 6:5 7:10 13:9 14:5 }  min=3  max=14
+    transiciones de color: 241 -> 181
+  Un fallo de cache detiene la busqueda y el pixel anterior se mantiene muchas
+  columnas mas: caracteres estirados hasta 14 px cuando deben medir 3-4. Es
+  EXACTAMENTE la captura de placa.
+
+--- E) _165b LA CURA ESTRECHA: TODOS MENOS EL MOTOR DE COMANDOS ---------------
+
+    if (!pf_dirty && (cur_tag[4:2] != C_COMMAND)) begin
+(y se añaden los localparam C_CPU=3 y C_COMMAND=4, que faltaban).
+El unico consumidor que INUNDA es el motor leyendo su destino en bucle. Fondo,
+sprites y CPU conservan su cache.
+
+VERIFICADO:
+ * tb_textgeom (MODE 0/1/2), tb_t2cursor : BASE y FIX BYTE-IDENTICOS.
+ * Bateria estandar con el filtro estrecho: los tres bancos OK, y los contadores
+   salen IDENTICOS HASTA EL ULTIMO DIGITO a la linea base sin filtro
+   (bkA=93264 bkB=91248 miss=71 bg_miss=73). Con el filtro AGRESIVO de la rc4
+   daban bkA=93363 y bg_miss=79.
+   => ESO CIERRA EL MODELO: el FONDO SI usaba la cache (por eso el filtro ancho
+      le subio el trafico de backend y le rompio el texto) y el MOTOR DE COMANDOS
+      NO LA USABA PARA NADA (excluirlo cuesta CERO operaciones). El motor era
+      puro CONTAMINANTE: desalojaba a los demas sin sacar provecho.
+ * ⚠️ INCONCLUSOS, y se dicen en vez de contarlos como aprobados: tb_screen8,
+   tb_screen5c y tb_screen1 vuelcan un frame a FICHERO y el timeout de 900 s los
+   corto antes de acabar (solo imprimieron "VRAM cargada"). No probaron nada.
+   Para usarlos hay que darles horas y comparar el FICHERO de frame, no stdout.
+ * ⚠️ tb_t2cursor falla 1 de 395 celdas (MAPEO BLINK) IGUAL en BASE y en FIX:
+   defecto PREEXISTENTE. Otro banco en rojo permanente, como el tb_sc8cmd_full
+   del _163. Merece su propia mirada: un gate que siempre sale rojo no protege.
+
+BANCOS NUEVOS QUE DEJA esta tanda, y que deberian entrar en la bateria:
+    run_cmdthrash.sh        desalojo por trafico de comandos (A/B/C)
+    run_regresion_165b.sh   modos de TEXTO, comparando dos shims
+    run_textgeom_roto.sh    reproduce la rotura de la rc4 (guardian)
+    run_soak4.sh            discrimina los dos mecanismos del bug #26
+
+CIERRE DE LA MEDIDA (run_cmdthrash con el filtro ESTRECHO, 5 frames):
+    c_spmiss/frame            vs1    vs2    vs3   vs4   vs5
+      base, sin comandos     2484    256     25     1     0
+      + comandos SIN filtro  1414   1427   1133   617  1306   <- nunca baja
+      + comandos filtro ANCHO 2627   135     10     0     0   (rompia texto)
+      + comandos ESTRECHO    2627    123      1     1     1   <- ENTREGADO
+  Con el trafico de comandos a tope el estrecho deja 1 fallo/frame: igual que la
+  base SIN comandos. Y esta ACOTADO entre dos variantes que ya convergian a 0
+  (la base rellena todo, la ancha solo sprites), asi que el resultado no
+  sorprende: era el unico desenlace posible.
+
+CAMPANA _166 (rc5), dados 1181/1187/1193:
+  dado 1181 ENTREGADO. EL MEJOR GATE DE LA SERIE: setup 0, y UNA sola violacion
+  de hold (-0,039 ns) dentro de la IP de la DDR3. CLS 26920/29952 = 90% (MENOS
+  que la rc3, 26928, y que la rc4, 27060). Rutado 40m27s, total 47m50s.
+  Los otros dos dados seguian rutando a la hora (60% y 70%): al 90-91% de CLS
+  la fase de rutado tarda 13-23x mas que al 66% y ~1 de cada 3 dados no entrega
+  (en la _165 el dado 1151 supero las 2h sin bitstream y hubo que matarlo).
+  => ESE, y no el area, es hoy el limite real del diseño. Cualquier cosa que se
+     quiera añadir (por ejemplo el OSD) choca antes con el rutado que con los
+     2892 CLS libres. Palanca identificada para hacer sitio: hdmi_ntsc y
+     hdmi_pal son DOS codificadores separados; unificarlos libera ~835 de logica
+     (~543 CLS) segun project_syn_rsc.xml:69/78.
+================================================================================

@@ -82,6 +82,10 @@ module vdp_sprite_info_collect (
 	//	to makeup_pixel
 	output		[3:0]	makeup_plane,
 	output		[7:0]	color,
+	//	_167 (port de 167b7cf de HRA): el PaletteSet# del atributo de sprite.
+	//	La extraccion ya existia aqui (w_selected_m3_palette_set, ff_selected_q[27:24])
+	//	pero era un cable MUERTO: nadie la consumia. Ahora sale al makeup_pixel.
+	output		[3:0]	palette_set,
 	output		[9:0]	plane_x,
 	output		[7:0]	mgx,
 	output				color_plane_x_en,
@@ -352,6 +356,9 @@ module vdp_sprite_info_collect (
 
 	assign makeup_plane		= ff_current_plane[3:0];
 	assign color			= (reg_sprite_mode3 || !sprite_mode2) ? w_selected_color: vram_rdata8;
+	//	_167: sale tal cual; quien decide si se usa o se ignora es el makeup_pixel
+	//	(en mode3 siempre; en mode2 solo con EPAL=1).
+	assign palette_set		= w_selected_m3_palette_set;
 	assign plane_x			= ff_active ? (reg_sprite_mode3 ? w_selected_m3_x: { 2'd0, w_selected_m12_x }) : 10'd0;
 	assign mgx				= ff_active ? w_selected_m3_mgx : 8'd0;
 	assign color_plane_x_en	= (ff_active && w_sub_phase == 4'd15 && ff_state == 2'd1);

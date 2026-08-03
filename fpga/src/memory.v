@@ -212,6 +212,18 @@ module memory_ctrl #(
     // refresh aunque vram_write siga activo. Ver comentario del slot abajo.
     reg [5:0] rfsh_skip_cnt = 6'd0;
     reg [4:0] rfsh_gap = 5'd0;      //-- _121: limitador de tasa del refresh
+    //-- _174: REFRESCO AUTONOMO. El disparo historico dependia de bus_rfsh_n,
+    //-- es decir, DEL Z80 — pero durante el streaming del pack flash->SDRAM
+    //-- (y en cualquier reset) el Z80 esta parado y la SDRAM se quedaba SIN
+    //-- UN SOLO refresco durante toda la carga (>>64ms de spec del W9825).
+    //-- En frio la retencion real lo tapaba; en caliente las primeras filas
+    //-- del pack (BIOS/logo) se pudrian antes de acabar la copia -> boots
+    //-- corruptos que solo curaba un power-cycle con el chip frio.
+    //-- rfsh_auto satura a 16 medias sin refresco y dispara por si solo, a la
+    //-- MISMA cadencia maxima que ya permite rfsh_gap (~4.7us, ~210K/s, la
+    //-- calibrada en _121): en marcha normal el RFSH del Z80 llega antes y
+    //-- nada cambia; con el Z80 parado la matriz entera se refresca en ~39ms.
+    reg [4:0] rfsh_auto = 5'd0;
     reg [4:0]  RstSeq = 0;
     // SDRAM control signals
     reg  [2:0] SdrSta = 3'b000;
@@ -299,7 +311,17 @@ module memory_ctrl #(
             //--  end case;
                 SdrSta <= { 1'b0, RstSeq[1:0] };
             end
-            else if( bus_rfsh_n == 0 && video_dlclk == 1 && rfsh_gap[4] == 1 && (vram_write == 0 || rfsh_skip_cnt[5] == 1) ) begin
+            //-- _175 GUARDA del disparo autonomo (leccion s010 = pantalla
+            //-- negra): el refresco por RFSH del Z80 era seguro por contrato
+            //-- de bus (el Z80 no pide memoria durante su RFSH), pero el
+            //-- autonomo dispara en momentos arbitrarios y el FSM-A sirve EN
+            //-- BUCLE ABIERTO: robarle la media a una aceptacion en vuelo
+            //-- pierde la escritura EN SILENCIO (el loader del pack ni se
+            //-- entera -> 181 errores en el banco, matriz .build_matriz).
+            //-- Igual que la wave: autonomo SOLO con el turno CPU
+            //-- verificablemente vacio. Con guarda: sdr16_tb+TS = 0 errores
+            //-- y cadencia ~2.6us en la carga (matriz entera en ~21ms).
+            else if( (bus_rfsh_n == 0 || (rfsh_auto[4] == 1 && ram_busy == 0 && enable_sdram == 0)) && video_dlclk == 1 && rfsh_gap[4] == 1 && (vram_write == 0 || rfsh_skip_cnt[5] == 1) ) begin
                 //-- refresh roba el slot VDP SOLO si el VDP va a LEER (display/
                 //-- sprite, recuperable al siguiente frame). Si va a ESCRIBIR
                 //-- (comando del blitter HMMV/HMMM o acceso CPU por puerto), NO:
@@ -328,6 +350,7 @@ module memory_ctrl #(
                 SdrSta <= 3'b010;                                                //-- refresh
                 rfsh_skip_cnt <= 6'd0;
                 rfsh_gap <= 5'd0;
+                rfsh_auto <= 5'd0;                           //-- _174: hambre saciada
             end
             else begin
                 //--  Normal memory access mode
@@ -336,6 +359,8 @@ module memory_ctrl #(
                     rfsh_skip_cnt <= rfsh_skip_cnt + 6'd1;   //-- oportunidad saltada
                 if ( video_dlclk == 1 && rfsh_gap[4] == 0 )
                     rfsh_gap <= rfsh_gap + 5'd1;             //-- _121: ventana entre refrescos
+                if ( video_dlclk == 1 && rfsh_auto[4] == 0 )
+                    rfsh_auto <= rfsh_auto + 5'd1;           //-- _174: medias sin refrescar
             end
         end
         else if( ff_sdr_seq == 3'b001 && SdrSta[2] == 1 && RstSeq[4:3] == 2'b11 )begin

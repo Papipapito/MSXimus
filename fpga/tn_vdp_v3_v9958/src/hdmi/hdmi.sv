@@ -61,7 +61,11 @@ module hdmi
     // external signal.
     parameter int START_X = 0,
     parameter int START_Y = 0,
-    parameter int NUM_CHANNELS = 3
+    parameter int NUM_CHANNELS = 3,
+    // _169 MSXimus: 1 = parte el cono del codificador 8b/10b (ver el bloque
+    // grande junto a tmds_gen). Por defecto 0 => netlist IDENTICO al original de
+    // hdl-util, para no tocar la linea del V9958 clasico que ya esta publicada.
+    parameter bit PIPELINE_QM = 1'b0
 )
 (
     input logic clk_pixel_x5,
@@ -401,12 +405,44 @@ end
 
 // _127I: declaracion duplicada de tmds_internal retirada (ya es puerto ANSI;
 // Gowin la toleraba, Verilator no).
+// ============================================================================
+// _169 PIPELINE_QM — el corte del cono del codificador 8b/10b.
+//
+// La _101 (arriba) ya partio el camino UNA vez metiendo estos registros _q. No
+// basto: el cono que queda DENTRO de tmds_channel sigue siendo el peor SETUP del
+// diseno (15 niveles de LUT, 13,38 ns contra 13,0 de presupuesto, de los cuales
+// 7,4 son CELDA — con rutado perfecto tampoco cerraria). Ver el bloque grande de
+// tmds_channel.sv.
+//
+// EL TRUCO, Y POR QUE NO CUESTA UN PIXEL: a la instancia con PIPELINE_QM=1 se le
+// da video_data CRUDO en vez de video_data_q. El registro no se AÑADE: se MUEVE
+// hacia adelante, atravesando el popcount y la cadena XOR. Resultado:
+//     antes : q_m[t]   = f(video_data_q[t]) = f(video_data[t-1])
+//     ahora : q_m_q[t] = f(video_data[t-1])        <-- el MISMO valor
+// control/islands/mode siguen por el camino _q, asi que el mux de salida y el
+// gate de acc quedan alineados igual que antes.
+//
+// ⚠️ OJO: el video CRUDO va SOLO a video_data. Cambiar tambien los otros tres
+// romperia la alineacion del mux de salida — es el error facil de cometer aqui.
+//
+// DEMOSTRADO, no razonado: tools/v9968_sim/tb_tmds_equiv.sv compara las dos
+// variantes ciclo a ciclo con modos realistas (control, guardas, islas) y un
+// tramo final de video puro. 320.010 ciclos, CERO discrepancias en `tmds` y
+// CERO en `acc`. Por eso la leccion _134/_135 (pantalla negra por
+// desplazamiento sin compensar) no aplica a este cambio.
+// ============================================================================
 genvar i;
 generate
     // TMDS code production.
     for (i = 0; i < NUM_CHANNELS; i++)
     begin: tmds_gen
-        tmds_channel #(.CN(i)) tmds_channel (.clk_pixel(clk_pixel), .video_data(video_data_q[i*8+7:i*8]), .data_island_data(data_island_data_q[i*4+3:i*4]), .control_data(control_data_q[i*2+1:i*2]), .mode(mode_q), .tmds(tmds_internal[i]));
+        tmds_channel #(.CN(i), .PIPELINE_QM(PIPELINE_QM)) tmds_channel (
+            .clk_pixel(clk_pixel),
+            .video_data(PIPELINE_QM ? video_data[i*8+7:i*8] : video_data_q[i*8+7:i*8]),
+            .data_island_data(data_island_data_q[i*4+3:i*4]),
+            .control_data(control_data_q[i*2+1:i*2]),
+            .mode(mode_q),
+            .tmds(tmds_internal[i]));
     end
 endgenerate
 

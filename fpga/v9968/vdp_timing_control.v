@@ -127,7 +127,8 @@ module vdp_timing_control (
 	input				reg_sprite_mode3,
 	input				reg_sprite16_mode,
 	input				reg_flat_interlace_mode,
-	input				reg_sprite_priority_shuffle
+	input				reg_sprite_priority_shuffle,
+	input				reg_ext_palette_mode		//	_167 (167b7cf): R#20 bit4 (EPAL), solo para el makeup de sprites
 );
 	wire		[13:0]	w_screen_pos_x;			//	signed   (Coordinates not affected by scroll register)
 	wire		[13:0]	w_screen_pos_x_clone;	//	MSXimus: sin scroll (clon fisico del SSG)
@@ -272,6 +273,7 @@ module vdp_timing_control (
 		.reg_sprite_nonR23_mode						( reg_sprite_nonR23_mode					),
 		.reg_sprite_mode3							( reg_sprite_mode3							),
 		.reg_sprite16_mode							( reg_sprite16_mode							),
-		.reg_sprite_priority_shuffle				( reg_sprite_priority_shuffle				)
+		.reg_sprite_priority_shuffle				( reg_sprite_priority_shuffle				),
+		.reg_ext_palette_mode						( reg_ext_palette_mode						)	//	_167
 	);
 endmodule
