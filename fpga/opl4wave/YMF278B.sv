@@ -1179,8 +1179,13 @@ module OPL4_REG_RAM
 	output [dw-1: 0] Q
 );
 
-	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM)
-	(* syn_ramstyle = "block_ram" *) reg [dw-1:0] mem [0:(2**aw)-1];
+	// ERA v3: lectura SINCRONA, pero en REGISTROS (no BSRAM): hay 17
+	// instancias de 32x8 con direcciones de lectura DISTINTAS y
+	// concurrentes (SA_RA/FNUM_RA/AM_RA/LFO_RA/readback) — infusionables
+	// en una sola BSRAM, y 17 BSRAMs por 4,3Kbit reventaban el chip
+	// (PA2017: 127/118 con el doblado SDP32/36 de la advisory 202409001).
+	// Como FF son ~4,3K registros: el plan-B asumido de la migracion.
+	(* syn_ramstyle = "registers" *) reg [dw-1:0] mem [0:(2**aw)-1];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
 	initial for (ii = 0; ii < (2**aw); ii = ii + 1) mem[ii] = 0;

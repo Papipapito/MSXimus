@@ -1522,7 +1522,7 @@ module OPL4_REG_RAM (
 	input WREN;
 	input [aw - 1:0] RDADDR;
 	output wire [dw - 1:0] Q;
-	(* syn_ramstyle = "block_ram" *) reg [dw - 1:0] mem [0:(2 ** aw) - 1];
+	(* syn_ramstyle = "registers" *) reg [dw - 1:0] mem [0:(2 ** aw) - 1];
 	integer ii;
 	initial for (ii = 0; ii < (2 ** aw); ii = ii + 1)
 		mem[ii] = 0;
