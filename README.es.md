@@ -21,7 +21,7 @@ No necesita un MSX. Es un MSX.
 
 ## Qué lleva dentro
 
-**Vídeo** · Salida HDMI 720p a pantalla completa · **V9968** o V9958 · **relación de aspecto configurable** (4:3 / panorámico) y scanlines, desde el menú
+**Vídeo** · Salida HDMI 720p a pantalla completa · **V9968** o V9958 · bordes estilo CRT · scanlines conmutables desde el menú
 
 **Audio** · PSG · doble SCC con estéreo · OPLL (MSX-Music) · **MSX-Audio Y8950** con FM y ADPCM-B · **MoonSound / OPL4** completo, FM (OPL3) y wavetable de 24 voces
 

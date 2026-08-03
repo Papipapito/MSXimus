@@ -21,7 +21,7 @@ It doesn't need an MSX. It **is** an MSX.
 
 ## What's inside
 
-**Video** · Full-screen 720p HDMI output · **V9968** or V9958 · **configurable aspect ratio** (4:3 / widescreen) and scanlines, right from the menu
+**Video** · Full-screen 720p HDMI output · **V9968** or V9958 · CRT-style borders · scanlines toggle, right from the menu
 
 **Audio** · PSG · dual SCC with stereo · OPLL (MSX-Music) · **MSX-Audio Y8950** with FM and ADPCM-B · full **MoonSound / OPL4**: FM (OPL3) plus 24-voice wavetable
 
