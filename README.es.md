@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>Un MSX2+ completo, en una Tang Console 60K — ahora con el VDP V9968</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v2.0-blue">
+  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v2.1-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-GPLv3-orange">
 </p>
@@ -76,14 +76,9 @@ Sin OPL4 el core funciona igual; simplemente no tendrás MoonSound.
 
 Después, mete una microSD con tus ROMs y discos y listo — el menú de arranque sale solo.
 
-## Estado y limitaciones conocidas
+## Estado
 
-Esta versión se ha validado en hardware con la batería de tests del V9968 de HRA!, la demo DEVCON, Metal Gear 2, Aleste 2 y el software MSX2+ habitual. No es perfecta, y prefiero contarlo:
-
-- **El logo de arranque del MSX2+** (el que sale al entrar en BASIC) muestra glitches durante medio segundo, probablemente ligados al entrelazado de su animación. Está diagnosticado; el arreglo conocido penaliza el rutado del chip y está aparcado — es puramente cosmético.
-- **Quedan líneas sueltas** en las escenas más exigentes de las demos del V9968 — del orden de 4 a 10 fallos de caché por frame. No afecta a los juegos.
-- El **scroll de dos páginas en SCREEN 7 y 8**, y el scroll hacia atrás, todavía no están finos.
-- El core está alineado con el V9968 tal como estaba en **enero de 2026**. HRA! ha seguido trabajando desde entonces y los arreglos posteriores se van portando uno a uno; el detalle está en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+Esta versión se ha validado en hardware con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Estructura del repositorio
 
@@ -97,11 +92,21 @@ fpga/            top.v, build.tcl
 tools/           Testbenches y utilidades de validación
 ```
 
-## Versiones
+## Lo nuevo de la v2.1
 
-### v2.0 — lo nuevo: el V9968
+La v2.1 pone el V9968 al día y remata el audio y la imagen:
 
-Hasta la v1.1 el MSXimus llevaba un **V9958**, el VDP del MSX2+. La v2.0 incorpora el **[V9968](https://github.com/hra1129/V9968_Cartridge) de Takayuki Hara (HRA!)**, un VDP imaginario que extiende el V9958 con lo que Yamaha nunca llegó a sacar:
+- **El V9968, a la última** — el core lleva ahora la revisión más reciente publicada por HRA!: el nuevo mapa de registros R#20/R#21 (compatible V9958 al arrancar), juegos de paleta por sprite en modo 2 (EPAL) y la interrupción de fin de comando.
+- **Audio remasterizado** — nueva estructura de ganancia calibrada contra hardware real y openMSX: bloqueo de continua en los PSG, balance entre chips revisado, limitador de rodilla suave, y **volumen maestro que se ajusta desde el propio MSX** (`OUT &H44,n`, 0–7) y se guarda en flash. El MoonSound/OPL4 suena a su nivel de referencia.
+- **MSX-Audio con 256 KB** — la RAM de samples del Y8950 pasa de 32 a 256 KB, el máximo que direcciona el chip real.
+- **Imagen más de CRT** — el borde se ve por los cuatro lados, cada píxel sale uniforme (escalado entero exacto) y el centrado está afinado.
+- **MegaROMs ASCII16 de 2 MB completas** — Aleste 2 y compañía, enteros.
+- **Memoria a prueba de bombas** — la SDRAM se refresca de forma autónoma y el puerto de CPU del V9968 respeta el /WAIT: comportamiento sólido bajo cualquier carga, del arranque en frío a la demo más exigente.
+- **Firmware del ESP32-C6 en el repo** — el firmware del módulo WiFi vive ahora en `esp32_c6/`, con el pinout del J10 documentado.
+
+## El V9968
+
+El corazón del MSXimus es el **[V9968](https://github.com/hra1129/V9968_Cartridge) de Takayuki Hara (HRA!)**, un VDP imaginario que extiende el V9958 con lo que Yamaha nunca llegó a sacar:
 
 - **Sprites multicolor**: 15 colores más transparencia **por sprite**, definidos píxel a píxel
 - **16 sprites por línea** en vez de 8 — se acabó el parpadeo
@@ -112,13 +117,9 @@ Hasta la v1.1 el MSXimus llevaba un **V9958**, el VDP del MSX2+. La v2.0 incorpo
 <p align="center"><img src="docs/img/v9968_sprites.jpg" alt="Sprites multicolor del V9968" width="760"/></p>
 <p align="center"><i>Sprites de 15 colores definidos píxel a píxel: imposible en un MSX2+ real.</i></p>
 
-La VRAM del V9968 vive en la **DDR3** de la placa, lo que deja la SDRAM entera para la RAM del MSX y para lo que venga después. La v2.0 también estrena el **WiFi por ESP32-C6**, corrige un fallo serio de refresco de la DDR3 heredado de la configuración de referencia, y porta los primeros arreglos del V9968 upstream.
+La VRAM del V9968 vive en la **DDR3** de la placa, lo que deja la SDRAM entera para la RAM del MSX y para lo que venga después.
 
 Y sigue siendo un MSX2+ normal: el software de siempre funciona igual.
-
-### v1.1 — V9958 estable
-
-La primera versión pública del MSXimus: el MSX2+ clásico con V9958, audio completo (PSG, SCC, OPLL, Y8950, OPL4) y el menú de arranque, sobre la build `_116`.
 
 ## Licencia
 
