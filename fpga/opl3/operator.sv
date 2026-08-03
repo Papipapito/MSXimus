@@ -180,8 +180,11 @@ module operator
         .DEPTH(NUM_OPERATORS_PER_BANK),
         .OUTPUT_DELAY(1),
         .DEFAULT_VALUE(0),
-        .NUM_BANKS(NUM_BANKS),
-        .USE_BRAM(1)            // era v3: 2o mayor consumidor FF del opl3
+        .NUM_BANKS(NUM_BANKS)
+        // era v3: feedback se queda en FF — con 26 bits el SDP se DOBLA
+        // (advisory 202409001: todo SDP >18b se parte en 2 primitivos) y
+        // los 4 BSRAM extra reventaban el limite (v3b004: PA2017 120/118).
+        // phase_acc solo ya cierra el hueco de 20-105 REG de la v3b003.
     ) feedback_mem (
         .clk,
         .wea(sample_clk_en_p[6]),
