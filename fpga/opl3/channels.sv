@@ -157,7 +157,8 @@ module channels
         .DEPTH(NUM_OPERATORS_PER_BANK),
         .OUTPUT_DELAY(1),
         .DEFAULT_VALUE(0),
-        .NUM_BANKS(NUM_BANKS)
+        .NUM_BANKS(NUM_BANKS),
+        .USE_BRAM(1)            // era v3: 13 bits <=18 = 1 primitivo/banco
     ) operator_out_mem (
         .clk,
         .wea(operator_out.valid),

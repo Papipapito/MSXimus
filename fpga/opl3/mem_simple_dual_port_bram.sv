@@ -33,18 +33,47 @@ module mem_simple_dual_port_bram #(
     input wire [DATA_WIDTH-1:0] dia,
     output logic [DATA_WIDTH-1:0] dob
 );
-    (* syn_ramstyle = "block_ram" *)
-    logic [DATA_WIDTH-1:0] ram [DEPTH-1:0] = '{default: DEFAULT_VALUE};
+    // Anchura >18: se parte en 18b de BSRAM + resto en FF (mismas
+    // direcciones, mismo enable). Un SDP de >18 bits consume DOS
+    // primitivos (SDP32/36, que ademas el PnR convierte por la advisory
+    // 202409001); partido, la parte BSRAM cabe en UN primitivo y el
+    // resto son unos pocos FF. Con <=18 bits el generate colapsa al
+    // caso simple de un solo array.
+    localparam BW = (DATA_WIDTH > 18) ? 18 : DATA_WIDTH;
 
-    logic [DATA_WIDTH-1:0] dob_p1 = DEFAULT_VALUE;
+    (* syn_ramstyle = "block_ram" *)
+    logic [BW-1:0] ram [DEPTH-1:0] = '{default: DEFAULT_VALUE[BW-1:0]};
+
+    logic [BW-1:0] q_lo = DEFAULT_VALUE[BW-1:0];
 
     always_ff @(posedge clka)
         if (wea)
-            ram[addra] <= dia;
+            ram[addra] <= dia[BW-1:0];
 
     always_ff @(posedge clkb)
         if (reb)
-            dob_p1 <= ram[addrb];
+            q_lo <= ram[addrb];
+
+    logic [DATA_WIDTH-1:0] dob_p1;
+
+    generate
+    if (DATA_WIDTH > 18) begin : hi_ff
+        logic [DATA_WIDTH-1:BW] ram_hi [DEPTH-1:0] = '{default: DEFAULT_VALUE[DATA_WIDTH-1:BW]};
+        logic [DATA_WIDTH-1:BW] q_hi = DEFAULT_VALUE[DATA_WIDTH-1:BW];
+
+        always_ff @(posedge clka)
+            if (wea)
+                ram_hi[addra] <= dia[DATA_WIDTH-1:BW];
+
+        always_ff @(posedge clkb)
+            if (reb)
+                q_hi <= ram_hi[addrb];
+
+        always_comb dob_p1 = {q_hi, q_lo};
+    end
+    else
+        always_comb dob_p1 = q_lo;
+    endgenerate
 
     generate
     if (OUTPUT_DELAY == 2) begin

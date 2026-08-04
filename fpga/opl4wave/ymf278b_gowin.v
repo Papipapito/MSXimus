@@ -1416,17 +1416,25 @@ module OPL4_LFO_RAM (
 	input WREN;
 	input [4:0] RDADDR;
 	output wire [21:0] Q;
-	(* syn_ramstyle = "block_ram" *) reg [21:0] mem [0:31];
+	(* syn_ramstyle = "block_ram" *) reg [17:0] mem [0:31];
+	reg [21:18] mem_hi [0:31];
 	integer ii;
 	initial for (ii = 0; ii < 32; ii = ii + 1)
-		mem[ii] = 0;
-	reg [21:0] rd_q = 0;
+		begin
+			mem[ii] = 0;
+			mem_hi[ii] = 0;
+		end
+	reg [17:0] rd_lo = 0;
+	reg [21:18] rd_hi = 0;
 	always @(posedge CLK) begin
-		if (WREN)
-			mem[WRADDR] <= DATA;
-		rd_q <= mem[RDADDR];
+		if (WREN) begin
+			mem[WRADDR] <= DATA[17:0];
+			mem_hi[WRADDR] <= DATA[21:18];
+		end
+		rd_lo <= mem[RDADDR];
+		rd_hi <= mem_hi[RDADDR];
 	end
-	assign Q = rd_q;
+	assign Q = {rd_hi, rd_lo};
 endmodule
 module OPL4_SO_RAM (
 	CLK,

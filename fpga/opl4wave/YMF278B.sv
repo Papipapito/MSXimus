@@ -1086,17 +1086,25 @@ module OPL4_LFO_RAM (
 	input  [ 4: 0] RDADDR,
 	output [21: 0] Q);
 
-	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM)
-	(* syn_ramstyle = "block_ram" *) reg [21:0] mem [0:31];
+	// ERA v3: lectura SINCRONA => BSRAM SDPB (ver nota en OPL4_PHASE_RAM).
+	// 22 bits > 18 => partido en 18b de BSRAM + 4b en FF (mismas
+	// direcciones): un SDP >18b consume DOS primitivos; asi, UNO + 128 FF.
+	(* syn_ramstyle = "block_ram" *) reg [17:0] mem [0:31];
+	reg [21:18] mem_hi [0:31];
 	// power-up a 0 (como la BSRAM real; en sim evita X)
 	integer ii;
-	initial for (ii = 0; ii < 32; ii = ii + 1) mem[ii] = 0;
-	reg [21:0] rd_q;
+	initial for (ii = 0; ii < 32; ii = ii + 1) begin mem[ii] = 0; mem_hi[ii] = 0; end
+	reg [17:0] rd_lo;
+	reg [21:18] rd_hi;
 	always @(posedge CLK) begin
-		if (WREN) mem[WRADDR] <= DATA;
-		rd_q <= mem[RDADDR];
+		if (WREN) begin
+			mem[WRADDR]    <= DATA[17:0];
+			mem_hi[WRADDR] <= DATA[21:18];
+		end
+		rd_lo <= mem[RDADDR];
+		rd_hi <= mem_hi[RDADDR];
 	end
-	assign Q = rd_q;
+	assign Q = {rd_hi, rd_lo};
 
 endmodule
 
