@@ -496,10 +496,16 @@ end
 // condicion del bloque strided del always principal — y lectura corriendo
 // siempre sobre e_slot (cuasi-estatico alrededor del lookup)
 wire lb_hit_now = lb_v[{e_slot,e_addr22[3:1]}] && (lb_q[33:16] == e_addr22[21:4]);
+// if/else EXCLUYENTE (leccion _139): escritura y lectura comparten la
+// direccion e_slot => Gowin infiere puerto UNICO, y leer durante we exige
+// el WRITE_MODE 2'b10 que Arora-V no soporta (PA2122, v3b014). Con el
+// else, el ciclo de escritura no refresca sl_q — irrelevante: su consumo
+// (strided, en rd_edge_d1) usa el valor registrado el ciclo ANTERIOR.
 always @(posedge clk_eng) begin
     if (rd_edge_d1 && !lb_hit_now)
         sl_mem[e_slot] <= e_addr22[18:1];
-    sl_q <= sl_mem[e_slot];
+    else
+        sl_q <= sl_mem[e_slot];
 end
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
