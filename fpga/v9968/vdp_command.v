@@ -933,6 +933,63 @@ module vdp_command (
 		end
 	end
 
+	//	FIX BYTE PERDIDO (caza Fleet/DQ2/Drasle): ff_transfer_ready era el
+	//	UNICO almacen del handshake CPU->R#44. Si la CPU escribia el byte k+1
+	//	mientras el motor aun procesaba el byte k (TR=0 todavia), el paso del
+	//	motor por c_state_*_next hacia TR<=1 INCONDICIONAL y borraba la
+	//	evidencia del byte ya entregado: motor 1 byte corto => CE=1 eterno =>
+	//	el siguiente wait-CE del software se congela (asi cuelgan el logo de
+	//	arranque MSX2+ y los tres juegos). Y un latch de 1 NO basta: una
+	//	espiga del camino VRAM (refresh/contencion DDR3) mas larga que DOS
+	//	OUT del Z80 mete dos bytes en el hueco y pisa el primero (medido en
+	//	tb_lmmcseam: blat=900 pierde 1 byte con latch sencillo). El V9958
+	//	real nunca tarda mas que un OUT del Z80 por byte; el V9968 si puede.
+	//	=> COLA de 8 bytes CPU->motor. En el arranque de comando (ff_start)
+	//	la cola se recarga con SOLO el valor actual de R#44: es exactamente
+	//	la semantica documentada del appmanual ("poner el primer byte en CLR
+	//	antes de lanzar"). ff_color queda intacto como registro CLR para
+	//	LMMV/HMMV/PSET/LINE.
+	reg			[7:0]	ff_cpu_fifo [0:7];
+	reg			[2:0]	ff_cf_wp;
+	reg			[2:0]	ff_cf_rp;
+	reg			[3:0]	ff_cf_cnt;
+	wire				w_cpu_fifo_empty	= (ff_cf_cnt == 4'd0);
+	wire				w_cpu_fifo_full		= (ff_cf_cnt == 4'd8);
+	wire		[7:0]	w_cpu_data			= ff_cpu_fifo[ff_cf_rp];
+	//	el pop ocurre EXACTAMENTE el ciclo en que la rama del case consume
+	//	(mismas guardas que el case: !ff_start && !ff_cache_vram_valid)
+	wire w_cpu_data_take = (ff_state == c_state_lmmc || ff_state == c_state_hmmc || ff_state == c_state_lfmc)
+	                       && !w_cpu_fifo_empty && !ff_cache_vram_valid && !ff_start;
+	wire w_cpu_data_push = register_write && (register_num == 6'd44) && !w_cpu_fifo_full;
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_cf_wp	<= 3'd0;
+			ff_cf_rp	<= 3'd0;
+			ff_cf_cnt	<= 4'd0;
+		end
+		else if( ff_start ) begin
+			//	precarga: la cola nace con el R#44 vigente como primer byte
+			ff_cpu_fifo[0]	<= ff_color;
+			ff_cf_wp		<= 3'd1;
+			ff_cf_rp		<= 3'd0;
+			ff_cf_cnt		<= 4'd1;
+		end
+		else begin
+			if( w_cpu_data_push ) begin
+				ff_cpu_fifo[ff_cf_wp]	<= register_data;
+				ff_cf_wp				<= ff_cf_wp + 3'd1;
+			end
+			if( w_cpu_data_take ) begin
+				ff_cf_rp	<= ff_cf_rp + 3'd1;
+			end
+			case( { w_cpu_data_push, w_cpu_data_take } )
+			2'b10:		ff_cf_cnt <= ff_cf_cnt + 4'd1;
+			2'b01:		ff_cf_cnt <= ff_cf_cnt - 4'd1;
+			default:	begin end
+			endcase
+		end
+	end
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_transfer_ready		<= 1'b0;
@@ -943,8 +1000,10 @@ module vdp_command (
 			ff_transfer_ready		<= 1'b0;
 		end
 		else if( ff_state == c_state_lmmc_next || ff_state == c_state_hmmc_next || (ff_state == c_state_lfmc_next && ff_bit_count == 3'd0) ) begin
-			//	lmmc, hmmc, lfmc が VRAM へ書き終えたので、転送許可 (CPU→R#44)
-			ff_transfer_ready		<= 1'b1;
+			//	lmmc, hmmc, lfmc が VRAM へ書き終えるまで、転送禁止 (CPU→R#44)
+			//	FIX BYTE PERDIDO: TR=1 solo con la cola vacia (handshake
+			//	clasico byte a byte para el software que SI hace poll de TR)
+			ff_transfer_ready		<= w_cpu_fifo_empty;
 		end
 		else if( ff_command == c_lmcm && ff_start ) begin
 			//	lmcm が開始されたので、転送禁止 (S#7→CPU)
@@ -965,6 +1024,20 @@ module vdp_command (
 		else if( read_color ) begin
 			//	lmcm で 読みだした VRAM の値を転送し終えたので、次のために転送禁止 (S#7→CPU)
 			ff_transfer_ready		<= 1'b0;
+		end
+		else if( ff_state == c_state_idle && !ff_start ) begin
+			//	_183 FIX TR-IDLE (caza Fleet 04/08): en el chip real S#2.TR lee
+			//	1 siempre que no hay transferencia CPU en curso (el reposo
+			//	clasico es S#2=0x8C, y la traza openMSX de Fleet muestra la
+			//	espera de la BIOS en pc=2bf8 saliendo con s2=8e: TR=1 y CE=0).
+			//	Aqui TR quedaba PEGADO a 0 tras cualquier escritura a R#44
+			//	(incluida la de CLR de HMMV/LINE/PSET o tras un STOP que
+			//	aborta) porque nada lo re-armaba fuera de LMMC/HMMC/LFMC/LMCM
+			//	=> el poll "TR=1 & CE=0" de la BIOS no salia JAMAS = Fleet
+			//	colgado con la pantalla apagada. Con el motor OCIOSO, TR=1.
+			//	(Prioridad minima: una escritura a R#44 lo baja ese ciclo y
+			//	esta clausula lo devuelve a 1 al siguiente — como el silicio.)
+			ff_transfer_ready		<= 1'b1;
 		end
 		else begin
 			//	hold
@@ -1494,12 +1567,13 @@ module vdp_command (
 
 			//	LMMC command --------------------------------------------------
 			c_state_lmmc: begin
-				if( ff_transfer_ready ) begin
-					//	書き込まれる（ff_transfer_ready = 0）まで待機
+				if( w_cpu_fifo_empty ) begin
+					//	FIX BYTE PERDIDO: la espera mira la cola de entrega,
+					//	no TR (que el paso por *_next podia pisar)
 				end
 				else begin
-					//	Copy source pixel value
-					ff_source				<= ff_color;
+					//	Copy source pixel value (byte POPeado de la cola)
+					ff_source				<= w_cpu_data;
 					//	Read the location of (DX, DY)
 					ff_cache_vram_address	<= w_address_d;
 					ff_cache_vram_valid		<= 1'b1;
@@ -1633,15 +1707,15 @@ module vdp_command (
 
 			//	HMMC command --------------------------------------------------
 			c_state_hmmc: begin
-				if( ff_transfer_ready ) begin
-					//	書き込まれる（ff_transfer_ready = 0）まで待機
+				if( w_cpu_fifo_empty ) begin
+					//	FIX BYTE PERDIDO: idem c_state_lmmc
 				end
 				else begin
 					//	Write the location of (DX, DY)
 					ff_cache_vram_address	<= w_address_d;
 					ff_cache_vram_valid		<= 1'b1;
 					ff_cache_vram_write		<= 1'b1;
-					ff_cache_vram_wdata		<= ff_color;
+					ff_cache_vram_wdata		<= w_cpu_data;
 					ff_count_valid			<= 1'b1;
 					if( (w_nx_end || w_dx_overflow) && (w_ny_end || w_dy_overflow) ) begin
 						ff_finish_flag			<= 1'b1;
@@ -1716,8 +1790,9 @@ module vdp_command (
 
 			//	LFMC command --------------------------------------------------
 			c_state_lfmc: begin
-				if( ff_transfer_ready ) begin
-					//	書き込まれる（ff_transfer_ready = 0）まで待機
+				if( w_cpu_fifo_empty ) begin
+					//	FIX BYTE PERDIDO: idem c_state_lmmc (el patron sigue
+					//	saliendo de ff_color; el pop mantiene la cuenta)
 				end
 				else begin
 					ff_state				<= c_state_lfmc_read;
