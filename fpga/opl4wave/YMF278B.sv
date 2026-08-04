@@ -941,25 +941,88 @@ module YMF278B
 	assign MCS_N[9] = ~(MEM_A[21:19] == 3'b111);
 
 	
-	wire       REG_SA0_LOAD   = (OP3.LOAD_POS == 4'h0);
-	wire       REG_SA1_LOAD   = (OP3.LOAD_POS == 4'h1);
-	wire       REG_SA2_LOAD   = (OP3.LOAD_POS == 4'h2);
+	// =====================================================================
+	// ERA v3 (sin SSRAM): el grupo SA/LA/EA — 7 campos de 32x8 con la MISMA
+	// direccion de lectura (SA_RA) y de escritura, y SIN acceso de CPU —
+	// deja de ser 7 arrays (1.8K FF + 7 muxes 32:1) y pasa a UNA BSRAM
+	// 256x8 con direccion {campo[2:0], slot[4:0]} y DOS barridos por slot.
+	//
+	// La clave que lo hace seguro es el pipeline: en el slot en que
+	// SLOT==s, las etapas llevan OP2=s-1, OP3=s-2, OP4=s-3. Las escrituras
+	// van SIEMPRE a OP3.SLOT (LOAD, un campo por SLOT0_CE via LOAD_POS
+	// 0..6) o a OP2.SLOT (limpieza en OP2.RST) — NUNCA a las direcciones
+	// que los barridos leen (SLOT y OP4.SLOT): imposible leer rancio.
+	//
+	// MEDIDO EN SIM (sonda probe_sa, 04/08): la direccion consumida es
+	// SLOT-1 durante TODO el slot y EN LAS DOS FASES (OP2.SLOT y OP4.SLOT
+	// valen lo mismo en cada CYCLE0_CE: el mux de fase es vestigial), y
+	// las escrituras LOAD van a OP3.SLOT = SLOT-2 en el SLOT0_CE. Por
+	// tanto: UN SOLO barrido por slot, disparado al final del CYCLE 3,
+	// leyendo {campo, SLOT} — la direccion que se consumira el slot
+	// siguiente. Sin colision por construccion (escrituras a SLOT-2) y
+	// con ~17 clk de margen hasta la frontera (el barrido tarda ~9).
+	// Durante el clear de reset (OP2.RST) los latches se fuerzan a 0: el
+	// original leia en vivo el slot recien borrado (ceros); el barrido
+	// adelantado le habria ensenado el dato pre-borrado una vuelta.
+	// =====================================================================
+	(* syn_ramstyle = "block_ram" *) bit [7:0] sa_mem [0:255];
+	initial for (int si = 0; si < 256; si++) sa_mem[si] = '0;
+	bit [7:0] sa_q  [0:6];     // banco ACTIVO (lo que consumen los Q)
+	bit [7:0] sa_st [0:6];     // staging del barrido; commit en SLOT1_CE
+	// init explicito: sv2v convierte bit->reg (4 estados) y el postproc no
+	// cubre arrays desempaquetados — sin esto arrancan en X y lo propagan
+	initial for (int qi = 0; qi < 7; qi++) begin sa_q[qi] = '0; sa_st[qi] = '0; end
+	bit [2:0] sa_swp, sa_cap, sa_rstf;
+	bit       sa_swp_on, sa_cap_on;
+	bit [7:0] sa_rq;
+
+	// escritura: limpieza de reset (7 campos de OP2.SLOT, uno por clk,
+	// ciclando — el slot dura ~35 clk asi que barre todos de sobra; el
+	// original escribia los 7 arrays a la vez, mismo estado final y los
+	// consumidores estan en reset) > LOAD (un campo por SLOT0_CE)
+	wire       sa_we_load = OP3.LOAD & SLOT0_CE & (OP3.LOAD_POS < 4'd7);
+	wire       sa_we      = OP2.RST | sa_we_load;
+	wire [7:0] sa_waddr   = OP2.RST ? {sa_rstf, OP2.SLOT}
+	                                : {OP3.LOAD_POS[2:0], OP3.SLOT};
+
+	always_ff @(posedge CLK) begin
+		if (sa_we) sa_mem[sa_waddr] <= OP2.RST ? 8'd0 : MEM_D;
+		sa_rstf <= (sa_rstf == 3'd6) ? 3'd0 : sa_rstf + 3'd1;
+
+		// puerto de lectura: el barrido unico ({campo, SLOT}) a STAGING;
+		// el commit staging->activo va en la frontera (SLOT1_CE) para que
+		// los 4 consumos del slot vean el MISMO juego (la primera version
+		// refrescaba en vivo a mitad de slot y c4/c6 veian el siguiente)
+		sa_rq     <= sa_mem[{sa_swp, SLOT}];
+		sa_cap    <= sa_swp;
+		sa_cap_on <= sa_swp_on;
+		if (sa_cap_on)
+			sa_st[sa_cap] <= sa_rq;
+		if (OP2.RST) begin
+			sa_q[0] <= '0; sa_q[1] <= '0; sa_q[2] <= '0; sa_q[3] <= '0;
+			sa_q[4] <= '0; sa_q[5] <= '0; sa_q[6] <= '0;
+		end
+		else if (SLOT1_CE) begin
+			sa_q[0] <= sa_st[0]; sa_q[1] <= sa_st[1]; sa_q[2] <= sa_st[2];
+			sa_q[3] <= sa_st[3]; sa_q[4] <= sa_st[4]; sa_q[5] <= sa_st[5];
+			sa_q[6] <= sa_st[6];
+		end
+
+		if (CYCLE1_CE && CYCLE_NUM == 3'd3) begin
+			sa_swp_on <= 1'b1;  sa_swp <= 3'd0;
+		end
+		else if (sa_swp_on) begin
+			if (sa_swp == 3'd6) sa_swp_on <= 1'b0;
+			else                sa_swp <= sa_swp + 3'd1;
+		end
+	end
+
 	bit [23:0] REG_SA_Q;
-	OPL4_REG_RAM #(5,8) REG_SA0  (CLK, OP2.RST ? OP2.SLOT : OP3.SLOT, OP2.RST ? '0 : MEM_D,   OP2.RST ? 1'b1 : OP3.LOAD ? (REG_SA0_LOAD & SLOT0_CE) : 1'b0  , SA_RA, REG_SA_Q[23:16]);
-	OPL4_REG_RAM #(5,8) REG_SA1  (CLK, OP2.RST ? OP2.SLOT : OP3.SLOT, OP2.RST ? '0 : MEM_D,   OP2.RST ? 1'b1 : OP3.LOAD ? (REG_SA1_LOAD & SLOT0_CE) : 1'b0  , SA_RA, REG_SA_Q[15:8]);
-	OPL4_REG_RAM #(5,8) REG_SA2  (CLK, OP2.RST ? OP2.SLOT : OP3.SLOT, OP2.RST ? '0 : MEM_D,   OP2.RST ? 1'b1 : OP3.LOAD ? (REG_SA2_LOAD & SLOT0_CE) : 1'b0  , SA_RA, REG_SA_Q[7:0]);
-	
-	wire       REG_LA0_LOAD  = (OP3.LOAD_POS == 4'h3);
-	wire       REG_LA1_LOAD  = (OP3.LOAD_POS == 4'h4);
 	bit [15:0] REG_LA_Q;
-	OPL4_REG_RAM #(5,8) REG_LA0  (CLK, OP2.RST ? OP2.SLOT : OP3.SLOT, OP2.RST ? '0 : MEM_D,  OP2.RST ? 1'b1 : OP3.LOAD ? (REG_LA0_LOAD & SLOT0_CE) : 1'b0 , SA_RA, REG_LA_Q[15:8]);
-	OPL4_REG_RAM #(5,8) REG_LA1  (CLK, OP2.RST ? OP2.SLOT : OP3.SLOT, OP2.RST ? '0 : MEM_D,  OP2.RST ? 1'b1 : OP3.LOAD ? (REG_LA1_LOAD & SLOT0_CE) : 1'b0 , SA_RA, REG_LA_Q[7:0]);
-	
-	wire       REG_EA0_LOAD  = (OP3.LOAD_POS == 4'h5);
-	wire       REG_EA1_LOAD  = (OP3.LOAD_POS == 4'h6);
 	bit [15:0] REG_EA_Q;
-	OPL4_REG_RAM #(5,8) REG_EA0  (CLK, OP2.RST ? OP2.SLOT : OP3.SLOT, OP2.RST ? '0 : MEM_D,  OP2.RST ? 1'b1 : OP3.LOAD ? (REG_EA0_LOAD & SLOT0_CE) : 1'b0 , SA_RA, REG_EA_Q[15:8]);
-	OPL4_REG_RAM #(5,8) REG_EA1  (CLK, OP2.RST ? OP2.SLOT : OP3.SLOT, OP2.RST ? '0 : MEM_D,  OP2.RST ? 1'b1 : OP3.LOAD ? (REG_EA1_LOAD & SLOT0_CE) : 1'b0 , SA_RA, REG_EA_Q[7:0]);
+	assign REG_SA_Q = {sa_q[0],sa_q[1],sa_q[2]};
+	assign REG_LA_Q = {sa_q[3],sa_q[4]};
+	assign REG_EA_Q = {sa_q[5],sa_q[6]};
 	
 	wire       REG_WTN_SEL = (REG_A >= 8'h08 && REG_A <= 8'h1F);
 	bit [ 7:0] REG_WTN_Q;

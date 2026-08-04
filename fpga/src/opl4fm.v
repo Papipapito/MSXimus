@@ -77,15 +77,17 @@ assign wave_dout = 8'h20;            // device ID del YMF278B (deteccion)
 // ---------------------------------------------------------------------------
 // shadow register file (read-back que el core no tiene)
 // ---------------------------------------------------------------------------
-// ERA v3 (sin SSRAM): las shadows van a BSRAM SDPB con lectura SINCRONA.
+// ERA v3 (sin SSRAM): las shadows van a BSRAM con lectura SINCRONA.
 // Como FF eran 4.096 registros + dos muxes 256:1 — el bocado que faltaba
 // para colocar la build completa (v3b002: 2.9-4.3K REG unPlaced). El ciclo
 // extra de la lectura registrada es invisible: sel_reg_* cambia con la
 // escritura de seleccion, MUCHOS ciclos de clk_host antes de que el Z80
 // muestree el dato del readback (una I/O read son ~15 ciclos de 54MHz).
-(* syn_ramstyle = "block_ram" *) reg [7:0] shadow_b0 [0:255];
-(* syn_ramstyle = "block_ram" *) reg [7:0] shadow_b1 [0:255];
-reg [7:0] shb0_q, shb1_q;
+// v3b010+: los DOS bancos comparten UNA BSRAM 512x8 (bit alto = banco):
+// el Z80 solo puede leer un banco a la vez (C5 o C7) y solo escribe uno
+// por ciclo de bus (strobes we0/we1 excluyentes por addr_r[1:0]).
+(* syn_ramstyle = "block_ram" *) reg [7:0] shadow [0:511];
+reg [7:0] sh_q;
 reg [7:0] sel_reg_b0;
 reg [7:0] sel_reg_b1;
 
@@ -125,11 +127,12 @@ always @(negedge clk_host) begin
     shw_idx1_n <= sel_reg_b1;
     shw_dat_n  <= din_r;
 end
+wire       sh_we    = shw_we0_n | shw_we1_n;
+wire [8:0] sh_waddr = shw_we1_n ? {1'b1, shw_idx1_n} : {1'b0, shw_idx0_n};
+wire [8:0] sh_raddr = addr_r[1] ? {1'b1, sel_reg_b1} : {1'b0, sel_reg_b0};
 always @(posedge clk_host) begin
-    if (shw_we0_n) shadow_b0[shw_idx0_n] <= shw_dat_n;
-    if (shw_we1_n) shadow_b1[shw_idx1_n] <= shw_dat_n;
-    shb0_q <= shadow_b0[sel_reg_b0];    // era v3: lectura registrada (BSRAM)
-    shb1_q <= shadow_b1[sel_reg_b1];
+    if (sh_we) shadow[sh_waddr] <= shw_dat_n;
+    sh_q <= shadow[sh_raddr];           // era v3: lectura registrada (BSRAM)
 end
 
 // mux de lectura: status del core en C4/C6, registro shadow en C5/C7.
@@ -137,8 +140,7 @@ end
 // con los del wave (bit1=LD, bit0=BUSY) — se ORean los del motor PCM.
 wire [7:0] opl3_dout;
 assign dout = (addr_r[0] == 1'b0) ? (opl3_dout | {6'b000000, wave_status}) : // C4/C6
-              (addr_r[1] == 1'b0) ? shb0_q :   // C5: bank 0 (BSRAM, era v3)
-                                    shb1_q;    // C7: bank 1
+                                    sh_q;      // C5/C7: shadow (BSRAM unica)
 
 // ---------------------------------------------------------------------------
 // core OPL3 (fork mangOPL4; FIFO async interna clk_host->clk_opl3)

@@ -1094,104 +1094,72 @@ module YMF278B (
 	assign MCS_N[7] = ~(MEM_A[21:19] == 3'b101);
 	assign MCS_N[8] = ~(MEM_A[21:19] == 3'b110);
 	assign MCS_N[9] = ~(MEM_A[21:19] == 3'b111);
-	wire REG_SA0_LOAD = OP3[56-:4] == 4'h0;
-	wire REG_SA1_LOAD = OP3[56-:4] == 4'h1;
-	wire REG_SA2_LOAD = OP3[56-:4] == 4'h2;
-	localparam sv2v_uu_REG_SA0_dw = 8;
-	localparam [7:0] sv2v_uu_REG_SA0_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_SA0(
-		.CLK(CLK),
-		.WRADDR((OP2[39] ? OP2[44-:5] : OP3[65-:5])),
-		.DATA((OP2[39] ? sv2v_uu_REG_SA0_ext_DATA_0 : MEM_D)),
-		.WREN((OP2[39] ? 1'b1 : (OP3[57] ? REG_SA0_LOAD & SLOT0_CE : 1'b0))),
-		.RDADDR(SA_RA),
-		.Q(REG_SA_Q[23:16])
-	);
-	localparam sv2v_uu_REG_SA1_dw = 8;
-	localparam [7:0] sv2v_uu_REG_SA1_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_SA1(
-		.CLK(CLK),
-		.WRADDR((OP2[39] ? OP2[44-:5] : OP3[65-:5])),
-		.DATA((OP2[39] ? sv2v_uu_REG_SA1_ext_DATA_0 : MEM_D)),
-		.WREN((OP2[39] ? 1'b1 : (OP3[57] ? REG_SA1_LOAD & SLOT0_CE : 1'b0))),
-		.RDADDR(SA_RA),
-		.Q(REG_SA_Q[15:8])
-	);
-	localparam sv2v_uu_REG_SA2_dw = 8;
-	localparam [7:0] sv2v_uu_REG_SA2_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_SA2(
-		.CLK(CLK),
-		.WRADDR((OP2[39] ? OP2[44-:5] : OP3[65-:5])),
-		.DATA((OP2[39] ? sv2v_uu_REG_SA2_ext_DATA_0 : MEM_D)),
-		.WREN((OP2[39] ? 1'b1 : (OP3[57] ? REG_SA2_LOAD & SLOT0_CE : 1'b0))),
-		.RDADDR(SA_RA),
-		.Q(REG_SA_Q[7:0])
-	);
-	wire REG_LA0_LOAD = OP3[56-:4] == 4'h3;
-	wire REG_LA1_LOAD = OP3[56-:4] == 4'h4;
-	localparam sv2v_uu_REG_LA0_dw = 8;
-	localparam [7:0] sv2v_uu_REG_LA0_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_LA0(
-		.CLK(CLK),
-		.WRADDR((OP2[39] ? OP2[44-:5] : OP3[65-:5])),
-		.DATA((OP2[39] ? sv2v_uu_REG_LA0_ext_DATA_0 : MEM_D)),
-		.WREN((OP2[39] ? 1'b1 : (OP3[57] ? REG_LA0_LOAD & SLOT0_CE : 1'b0))),
-		.RDADDR(SA_RA),
-		.Q(REG_LA_Q[15:8])
-	);
-	localparam sv2v_uu_REG_LA1_dw = 8;
-	localparam [7:0] sv2v_uu_REG_LA1_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_LA1(
-		.CLK(CLK),
-		.WRADDR((OP2[39] ? OP2[44-:5] : OP3[65-:5])),
-		.DATA((OP2[39] ? sv2v_uu_REG_LA1_ext_DATA_0 : MEM_D)),
-		.WREN((OP2[39] ? 1'b1 : (OP3[57] ? REG_LA1_LOAD & SLOT0_CE : 1'b0))),
-		.RDADDR(SA_RA),
-		.Q(REG_LA_Q[7:0])
-	);
-	wire REG_EA0_LOAD = OP3[56-:4] == 4'h5;
-	wire REG_EA1_LOAD = OP3[56-:4] == 4'h6;
-	localparam sv2v_uu_REG_EA0_dw = 8;
-	localparam [7:0] sv2v_uu_REG_EA0_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_EA0(
-		.CLK(CLK),
-		.WRADDR((OP2[39] ? OP2[44-:5] : OP3[65-:5])),
-		.DATA((OP2[39] ? sv2v_uu_REG_EA0_ext_DATA_0 : MEM_D)),
-		.WREN((OP2[39] ? 1'b1 : (OP3[57] ? REG_EA0_LOAD & SLOT0_CE : 1'b0))),
-		.RDADDR(SA_RA),
-		.Q(REG_EA_Q[15:8])
-	);
-	localparam sv2v_uu_REG_EA1_dw = 8;
-	localparam [7:0] sv2v_uu_REG_EA1_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_EA1(
-		.CLK(CLK),
-		.WRADDR((OP2[39] ? OP2[44-:5] : OP3[65-:5])),
-		.DATA((OP2[39] ? sv2v_uu_REG_EA1_ext_DATA_0 : MEM_D)),
-		.WREN((OP2[39] ? 1'b1 : (OP3[57] ? REG_EA1_LOAD & SLOT0_CE : 1'b0))),
-		.RDADDR(SA_RA),
-		.Q(REG_EA_Q[7:0])
-	);
+	(* syn_ramstyle = "block_ram" *) reg [7:0] sa_mem [0:255];
+	initial begin : sv2v_autoblock_10
+		reg signed [31:0] si = 0;
+		for (si = 0; si < 256; si = si + 1)
+			sa_mem[si] = 1'sb0;
+	end
+	reg [7:0] sa_q [0:6];
+	reg [7:0] sa_st [0:6];
+	initial begin : sv2v_autoblock_11
+		reg signed [31:0] qi = 0;
+		for (qi = 0; qi < 7; qi = qi + 1)
+			begin
+				sa_q[qi] = 1'sb0;
+				sa_st[qi] = 1'sb0;
+			end
+	end
+	reg [2:0] sa_swp = 0;
+	reg [2:0] sa_cap = 0;
+	reg [2:0] sa_rstf = 0;
+	reg sa_swp_on = 0;
+	reg sa_cap_on = 0;
+	reg [7:0] sa_rq = 0;
+	wire sa_we_load = (OP3[57] & SLOT0_CE) & (OP3[56-:4] < 4'd7);
+	wire sa_we = OP2[39] | sa_we_load;
+	wire [7:0] sa_waddr = (OP2[39] ? {sa_rstf, OP2[44-:5]} : {OP3[55:53], OP3[65-:5]});
+	always @(posedge CLK) begin
+		if (sa_we)
+			sa_mem[sa_waddr] <= (OP2[39] ? 8'd0 : MEM_D);
+		sa_rstf <= (sa_rstf == 3'd6 ? 3'd0 : sa_rstf + 3'd1);
+		sa_rq <= sa_mem[{sa_swp, SLOT}];
+		sa_cap <= sa_swp;
+		sa_cap_on <= sa_swp_on;
+		if (sa_cap_on)
+			sa_st[sa_cap] <= sa_rq;
+		if (OP2[39]) begin
+			sa_q[0] <= 1'sb0;
+			sa_q[1] <= 1'sb0;
+			sa_q[2] <= 1'sb0;
+			sa_q[3] <= 1'sb0;
+			sa_q[4] <= 1'sb0;
+			sa_q[5] <= 1'sb0;
+			sa_q[6] <= 1'sb0;
+		end
+		else if (SLOT1_CE) begin
+			sa_q[0] <= sa_st[0];
+			sa_q[1] <= sa_st[1];
+			sa_q[2] <= sa_st[2];
+			sa_q[3] <= sa_st[3];
+			sa_q[4] <= sa_st[4];
+			sa_q[5] <= sa_st[5];
+			sa_q[6] <= sa_st[6];
+		end
+		if (CYCLE1_CE && (CYCLE_NUM == 3'd3)) begin
+			sa_swp_on <= 1'b1;
+			sa_swp <= 3'd0;
+		end
+		else if (sa_swp_on) begin
+			if (sa_swp == 3'd6)
+				sa_swp_on <= 1'b0;
+			else
+				sa_swp <= sa_swp + 3'd1;
+		end
+	end
+	assign REG_SA_Q = {sa_q[0], sa_q[1], sa_q[2]};
+	assign REG_LA_Q = {sa_q[3], sa_q[4]};
+	assign REG_EA_Q = {sa_q[5], sa_q[6]};
 	localparam sv2v_uu_REG_WTN_dw = 8;
 	localparam [7:0] sv2v_uu_REG_WTN_ext_DATA_0 = 1'sb0;
 	OPL4_REG_RAM #(
