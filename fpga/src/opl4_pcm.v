@@ -429,7 +429,15 @@ reg [33:0] lb_q;
 reg         rd_edge_d1;            // lookup en vuelo (lb_q valido al salir)
 reg [255:0] lb_v;
 reg [255:0] lb_pfb;                // entrada traida por prefetch (OBL tag)
-reg [20:0]  sl_last [0:31];        // ultima palabra pedida por slot
+// era v3: sl_last (ultima palabra pedida por slot) parte en BSRAM (18b) +
+// 3b altos en FF — 576 FF y un mux 21b x 32:1 menos. La lectura sincrona
+// vale porque e_slot es estable desde antes de rd_edge (MEM_A y MEM_RD se
+// registran juntos) y el consumo va en rd_edge_d1; escritura y lectura en
+// el mismo flanco del mismo slot = read-old = exactamente lo que hacia el
+// original (dw se calculaba con el valor viejo ANTES de escribir el nuevo).
+(* syn_ramstyle = "block_ram" *) reg [17:0] sl_mem [0:31];
+reg [20:18] sl_hi [0:31];
+reg [17:0]  sl_q;
 reg [2:0]   sl_stride [0:31];      // stride en palabras (1..4; 0=sin entrenar)
 wire [2:0]  eff_stride = (sl_stride[e_slot] == 3'd0) ? 3'd2 : sl_stride[e_slot];
 wire [4:0]  e_slot;                // slot dueno del fetch (del motor)
@@ -482,6 +490,16 @@ always @(posedge clk_eng) begin
     if (fill_pend)
         lb_mem[{fill_slot,fill_tag[2:0]}] <= {fill_tag[20:3], mem_rword};
     lb_q <= lb_mem[{e_slot, e_addr22[3:1]}];
+end
+
+// puertos de la BSRAM de sl_last (era v3): escritura en el miss — la misma
+// condicion del bloque strided del always principal — y lectura corriendo
+// siempre sobre e_slot (cuasi-estatico alrededor del lookup)
+wire lb_hit_now = lb_v[{e_slot,e_addr22[3:1]}] && (lb_q[33:16] == e_addr22[21:4]);
+always @(posedge clk_eng) begin
+    if (rd_edge_d1 && !lb_hit_now)
+        sl_mem[e_slot] <= e_addr22[18:1];
+    sl_q <= sl_mem[e_slot];
 end
 always @(posedge clk_eng or negedge erst_n) begin
     if (!erst_n) begin
@@ -584,12 +602,16 @@ always @(posedge clk_eng or negedge erst_n) begin
                 //  -> vuelve a 2, el caso 12-bit paso 1)
                 begin : strided
                     reg [20:0] dw;
-                    dw = e_addr22[21:1] - sl_last[e_slot];
+                    // era v3: el valor viejo viene de {sl_hi (FF), sl_q
+                    // (BSRAM, registrada)} — identico al async de antes
+                    // porque e_slot lleva estable desde antes de rd_edge.
+                    // La escritura nueva vive en su propio always (BSRAM).
+                    dw = e_addr22[21:1] - {sl_hi[e_slot], sl_q};
                     if (dw != 21'd0 && dw <= 21'd4)
                         sl_stride[e_slot] <= dw[2:0];
                     else if (dw > 21'd8)
                         sl_stride[e_slot] <= 3'd2;
-                    sl_last[e_slot] <= e_addr22[21:1];
+                    sl_hi[e_slot] <= e_addr22[21:19];
                 end
                 if (!pfq_full) begin    // pf al stride del slot
                     pfq[pfq_wp] <= {e_slot, e_addr22[21:1]
