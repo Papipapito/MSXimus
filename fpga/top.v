@@ -2272,6 +2272,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .vram_write(~WeVdp_n),
     .vram_addr(VdpAdr),
     .bus_rfsh_n(bus_rfsh_n),
+    // _181: mismo termino que el RESET_n del T80 — el refresco autonomo solo
+    // puede disparar cuando el Z80 esta provadamente parado (ver memory.v)
+    .cpu_run(bus_reset_n & reset3_n & flash_idle & esp_boot_ok),
 
     .ram_dout(ram_dout),
     .vram_dout(VrmDbi2),
