@@ -54,6 +54,10 @@ module memory_ctrl #(
 	input wire vram_write,
 	input wire [16:0] vram_addr,
     input wire bus_rfsh_n,
+    //-- _181: 1 = el Z80 esta FUERA de reset (mismo termino que su RESET_n en
+    //-- top.v: bus_reset_n & reset3_n & flash_idle & esp_boot_ok). El refresco
+    //-- autonomo solo puede disparar con el Z80 parado (ver guarda del slot).
+    input wire cpu_run,
 
 	output reg [7:0] ram_dout,
 	output reg [15:0] vram_dout,
@@ -321,7 +325,22 @@ module memory_ctrl #(
             //-- Igual que la wave: autonomo SOLO con el turno CPU
             //-- verificablemente vacio. Con guarda: sdr16_tb+TS = 0 errores
             //-- y cadencia ~2.6us en la carga (matriz entera en ~21ms).
-            else if( (bus_rfsh_n == 0 || (rfsh_auto[4] == 1 && ram_busy == 0 && enable_sdram == 0)) && video_dlclk == 1 && rfsh_gap[4] == 1 && (vram_write == 0 || rfsh_skip_cnt[5] == 1) ) begin
+            //-- _181 (bug de la v2.1: descargas File-Hunter corruptas, bisecado
+            //-- en placa: v2.0/rc1 limpias, rc7/v2.1 corruptas): la guarda
+            //-- ram_busy/enable_sdram muestrea al PRINCIPIO de la media, pero
+            //-- la aceptacion FSM-A puede ARRANCAR despues del muestreo en esa
+            //-- misma media (y ademas el REF ocupa DOS medias por tRFC). El
+            //-- loader lo tolera (protocolo de nivel: reintenta con addr/din
+            //-- estables); el Z80 NO (su ciclo sigue y la escritura muere en
+            //-- bucle abierto) -> bytes/sectores podridos e incluso la FAT.
+            //-- CIERRE POR CONSTRUCCION: el autonomo solo existe para las
+            //-- ventanas SIN Z80 (copia del pack, resets, espera del ESP);
+            //-- cpu_run (el RESET_n del T80 en top.v) lo confina a ellas. En
+            //-- marcha normal el RFSH del Z80 vuelve a ser el unico camino,
+            //-- exactamente el mundo pre-_174 que fue estable durante anyos.
+            //-- Guardian: sdr16_tb test TZ (tormenta Z80: 222 disparos sin el
+            //-- gate, 0 con el).
+            else if( (bus_rfsh_n == 0 || (rfsh_auto[4] == 1 && ram_busy == 0 && enable_sdram == 0 && cpu_run == 0)) && video_dlclk == 1 && rfsh_gap[4] == 1 && (vram_write == 0 || rfsh_skip_cnt[5] == 1) ) begin
                 //-- refresh roba el slot VDP SOLO si el VDP va a LEER (display/
                 //-- sprite, recuperable al siguiente frame). Si va a ESCRIBIR
                 //-- (comando del blitter HMMV/HMMM o acceso CPU por puerto), NO:

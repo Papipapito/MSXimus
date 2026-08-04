@@ -49,6 +49,7 @@ module memory_tb;
     reg         vram_write = 0;
     reg  [16:0] vram_addr = 0;
     reg         bus_rfsh_n = 1;
+    reg         cpu_run = 0;      // _181: 1 = Z80 fuera de reset
     wire [7:0]  ram_dout;
     wire [15:0] vram_dout;
     wire        ram_busy;
@@ -93,6 +94,7 @@ module memory_tb;
         .vram_write  (vram_write),
         .vram_addr   (vram_addr),
         .bus_rfsh_n  (bus_rfsh_n),
+        .cpu_run     (cpu_run),
         .ram_dout    (ram_dout),
         .vram_dout   (vram_dout),
         .ram_busy    (ram_busy),
@@ -304,6 +306,7 @@ module memory_tb;
         bus_reset_n = 0;
         repeat (40) @(posedge clk108);
         bus_reset_n = 1;
+        cpu_run = 1;               // _181: T1..W5 = runtime, Z80 vivo
 
         // ---- T1: init acelerada (force sobre FreeCounter) ----
         while (dut.RstSeq !== 5'b11111) begin
@@ -709,6 +712,7 @@ module memory_tb;
             real tS0, tS1;
             $display("TS streaming: 400 bytes protocolo-loader, rfsh_n=1 (Z80 en reset)...");
             bus_rfsh_n = 1;
+            cpu_run = 0;               // _181: durante la copia el Z80 esta en RESET
             refS0 = sdram.refresh_count;
             tS0 = $realtime;
             for (si = 0; si < 400; si = si + 1) begin
@@ -754,6 +758,7 @@ module memory_tb;
             real tW0, tW1, wlat, wmax;
             reg rfsh_stop;
             rfsh_stop = 0;
+            cpu_run = 1;               // _181: Z80 corriendo (RFSH realista)
             fork
                 begin : rfsh_z80    // RFSH del Z80: ~560ns bajo cada ~1.5us
                     while (!rfsh_stop) begin
@@ -792,6 +797,7 @@ module memory_tb;
         begin : t_idle_rfsh
             integer refI0, refI1;
             bus_rfsh_n = 1;
+            cpu_run = 0;               // _181: ventana de reset puro
             refI0 = sdram.refresh_count;
             repeat (10800) @(posedge clk108);    // ~100 us sin nada
             refI1 = sdram.refresh_count;
@@ -800,6 +806,40 @@ module memory_tb;
                 $display("FAIL TS-c: refresco insuficiente con Z80 parado (+%0d en ~100us)", refI1 - refI0);
             end
             $display("TS-c refresco en reposo: +%0d en ~100us", refI1 - refI0);
+        end
+
+        // ---- _181 TZ: TORMENTA DE ESCRITURAS DEL Z80 BAJO AUTO-REFRESCO ----
+        // Bug de la v2.1 (descargas File-Hunter corruptas; bisecado en placa
+        // 04/08: v2.0/rc1 limpias, rc7/v2.1 corruptas): la guarda del refresco
+        // autonomo muestrea ram_busy/enable_sdram al PRINCIPIO de la media,
+        // pero la aceptacion FSM-A puede arrancar DESPUES del muestreo en esa
+        // misma media. El loader (protocolo de nivel, addr/din estables)
+        // reintenta y no pierde nada; el Z80 NO: su ciclo sigue y la escritura
+        // muere en bucle abierto (mismo esqueleto que s010, otro consumidor:
+        // la leccion de 'regresion de CADA consumidor', otra vez).
+        // Escenario: Z80 VIVO con RFSH hambriento (rafagas I/O largas tipo
+        // descarga ESP->RAM->SD) => rfsh_auto satura y dispara entre escrituras.
+        begin : t_z80_storm
+            integer zi, refZ0, refZ1;
+            cpu_run = 1;               // Z80 fuera de reset
+            bus_rfsh_n = 1;            // inanicion total de RFSH (peor caso)
+            refZ0 = sdram.refresh_count;
+            for (zi = 0; zi < 2000; zi = zi + 1)
+                cpu_write(23'h010000 + zi[22:0], zi[7:0] ^ 8'hC3);
+            refZ1 = sdram.refresh_count;
+            begin : tz_verify
+                integer zv;
+                reg [7:0] zr;
+                for (zv = 0; zv < 2000; zv = zv + 1) begin
+                    cpu_op(1'b0, 23'h010000 + zv[22:0], 8'h00, zr);
+                    check8(zr, zv[7:0] ^ 8'hC3, "TZ byte del Z80 perdido");
+                end
+            end
+            if (refZ1 - refZ0 != 0) begin
+                errors = errors + 1;
+                $display("FAIL TZ-b: el autonomo disparo %0d veces con el Z80 VIVO (debe ser 0)", refZ1 - refZ0);
+            end
+            $display("TZ tormenta Z80: 2000 escrituras | refrescos autonomos durante la tormenta: +%0d", refZ1 - refZ0);
         end
 
         if (errors == 0)
