@@ -295,7 +295,9 @@ if {$USE_V9968} {
 # MSPI+CPU=flash compartida; DONE/READY=los 2 LEDs onboard (como C64Nano).
 set_option -use_sspi_as_gpio 1 -use_mspi_as_gpio 1 -use_jtag_as_gpio 1 -use_cpu_as_gpio 1 -use_done_as_gpio 1 -use_ready_as_gpio 1 -top_module top -verilog_std sysv2017 -include_path src
 set_option -place_option 2
-set_option -route_option 1
+set_option -route_option 2
+# era v3: route_option 1->2 tras el PR0004 de v3b005 (12-15K nets sin
+# rutar con la full ya colocada): maximo esfuerzo del router 1.9.12.
 
 run syn
 run pnr
