@@ -16,6 +16,13 @@
 // Lectura de S#0 con R#15=0 tras >=2 frames de escaneo.
 //
 // Uso: vvp sim [+VMODE=2|5] [+VCD=1]
+// RESULTADO (06/08) con +LAT=120 (DDR3 real con refresco y contienda,
+// frente a los 26-44 del modelo de siempre): **VERDE — 3072 px, 100%**.
+// La maquinaria del shim absorbe la latencia como fue diseñada, asi que
+// el 'dato tardio' NO se reproduce en simulacion ni forzando el backend.
+// El latch sin emparejar de vdp_vram_interface:320 sigue siendo un
+// defecto de diseño REAL, pero NO esta demostrado que sea el que quita
+// los sprites en placa: lo decide la medida de la s035.
 // ============================================================================
 `timescale 1ns/1ps
 
