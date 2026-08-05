@@ -225,9 +225,17 @@ endtask
 
 // ---------------------------------------------------------------------------
 integer VMODE = 2;
-integer i, ncol, n5s;
+integer i, ncol, n5s, nfail;
 logic [7:0] v;
 logic [7:0] muestras [0:19];
+
+// FASE C/D (_187b): un plano del SAT directo (modo 1 en 1B00, modo 2 en 7600)
+task sat_plane(input [17:0] base, input [7:0] y, input [7:0] x, input [7:0] pat);
+begin
+    z80_out(2'd0, y); z80_out(2'd0, x); z80_out(2'd0, pat);
+    z80_out(2'd0, (VMODE == 2) ? 8'd15 : 8'd0);
+end
+endtask
 
 initial begin
     if( !$value$plusargs("VMODE=%d", VMODE) ) VMODE = 2;
@@ -326,6 +334,85 @@ initial begin
         $display("FASE B (5 sprites/linea): lecturas con 5S=1: %0d/10", n5s);
         if (n5s == 0) $display("*** 5S MUERTO tambien ***");
     end
+
+    // =======================================================================
+    // FASE C — "EL c4 DE LA PLACA" (_187b puerta 3): EXACTAMENTE el cupo de
+    // sprites visibles (4 en modo 1, 8 en modo 2), NADA mas y SIN terminador
+    // (escuela TMS: el resto del SAT invisible Y=220). Chip real: 5S=0 — no
+    // existe 5o/9o. El _187 de la s025 paraba el fetch al llenar el cupo y
+    // decidia el 5S sobre el atributo RANCIO del ultimo elegido => 5S=1 con
+    // numero=cupo (el S#0=c4 constante de la radiografia de Fleet).
+    // =======================================================================
+    nfail = 0;
+    begin
+        integer cupo;
+        cupo = (VMODE == 2) ? 4 : 8;
+        if (VMODE != 2) begin
+            // SCT completa: colores 0x0F (CC=0) para los 32 planos
+            vram_set_wr(18'h07400);
+            for (i = 0; i < 512; i = i + 1) z80_out(2'd0, 8'h0F);
+        end
+        vram_set_wr((VMODE == 2) ? 18'h01B00 : 18'h07600);
+        for (i = 0; i < 32; i = i + 1) begin
+            if (i < cupo) sat_plane(18'd0, 8'd59, 8'd10 + i[7:0]*8'd24, 8'd0);
+            else          sat_plane(18'd0, 8'd220, 8'd0, 8'd0);
+        end
+        lee_s0(v); lee_s0(v);
+        espera_frames(2);
+        n5s = 0;
+        for (i = 0; i < 10; i = i + 1) begin
+            lee_s0(v);
+            if (v[6]) begin
+                n5s = n5s + 1;
+                if (i < 3) $display("  FANTASMA c4: S#0=%02x (5S=1 con solo %0d sprites)", v, cupo);
+            end
+            espera_frames(1);
+        end
+        $display("FASE C (cupo justo %0d sprites, sin terminador): 5S=1 en %0d/10 (esperado 0)", cupo, n5s);
+        if (n5s != 0) begin
+            nfail = nfail + 1;
+            $display("*** FASE C ROJA: el fantasma del atributo rancio (c4) sigue vivo ***");
+        end
+    end
+
+    // =======================================================================
+    // FASE D — "EL c0 DE LA PLACA" (_187b puerta 2): dos sprites SOLAPADOS en
+    // los planos 30 y 31, todo lo demas invisible, SIN terminador. El barrido
+    // agota los 32 planos con el ultimo atributo VISIBLE: el _187 de la s025
+    // seguia chequeando slots RANCIOS con el contador dando la vuelta =>
+    // 5S=1 con numero=0 (el S#0=c0 de la radiografia). Chip real: 5S=0 y
+    // ademas C=1 (la colision en planos altos debe seguir viva).
+    // =======================================================================
+    begin
+        vram_set_wr((VMODE == 2) ? 18'h01B00 : 18'h07600);
+        for (i = 0; i < 30; i = i + 1) sat_plane(18'd0, 8'd220, 8'd0, 8'd0);
+        sat_plane(18'd0, 8'd99, 8'd100, 8'd0);
+        sat_plane(18'd0, 8'd99, 8'd104, 8'd0);
+        lee_s0(v); lee_s0(v);
+        espera_frames(2);
+        n5s = 0; ncol = 0;
+        for (i = 0; i < 10; i = i + 1) begin
+            lee_s0(v);
+            if (v[6]) begin
+                n5s = n5s + 1;
+                if (i < 3) $display("  FANTASMA c0: S#0=%02x (5S=1 con 2 sprites, num=%0d)", v, v[4:0]);
+            end
+            if (v[5]) ncol = ncol + 1;
+            espera_frames(1);
+        end
+        $display("FASE D (2 sprites en planos 30-31, sin terminador): 5S=1 en %0d/10 (esperado 0), C=1 en %0d/10 (esperado 10)", n5s, ncol);
+        if (n5s != 0) begin
+            nfail = nfail + 1;
+            $display("*** FASE D ROJA: el fantasma del barrido agotado (c0) sigue vivo ***");
+        end
+        if (ncol == 0) begin
+            nfail = nfail + 1;
+            $display("*** FASE D ROJA: la colision en planos altos ha muerto ***");
+        end
+    end
+
+    if (nfail == 0) $display("##### VMODE=%0d: FASES C y D VERDES (_187b) #####", VMODE);
+    else            $display("##### VMODE=%0d: %0d FASES ROJAS #####", VMODE, nfail);
 
     $finish;
 end
