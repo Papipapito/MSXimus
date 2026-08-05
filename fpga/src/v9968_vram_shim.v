@@ -399,11 +399,18 @@ wire       pfq_full  = (pfq_wp + 3'd1 == pfq_rp);
 
 // cola de escrituras (8 plazas: {mask,wdata,addr}; _148 FIX B: cada entrada
 // es UNA op de backend, no hasta 4)
-reg [51:0] wq [0:7];                     // {mask[3:0], wdata[31:0], addr[17:2]} (_120e: 8 plazas, umbral igual)
-reg [2:0]  wq_wp, wq_rp;
-reg [7:0]  wq_vld;                       // _126: bitmap de ocupacion (snoop)
+reg [51:0] wq [0:15];                    // {mask[3:0], wdata[31:0], addr[17:2]} — _186b (caza del veneno MSX1,
+                                         // 05/08): 8->16 plazas. En G1/G2 el fetch de display mata de hambre el
+                                         // drenaje (~39us medidos en tb_vramsoak_glue) y una rafaga OTIR (5,9us/
+                                         // byte) desbordaba las 8 => escrituras CPU PERDIDAS en silencio. 16 =
+                                         // 94us de colchon a ritmo Z80 real (62us en turbo 5.37): imposible
+                                         // desbordar. El umbral del stall del MOTOR no cambia (>=2). NOTA: NO
+                                         // gatear cpu_vram_ready con el stall (probado en placa: rompe el HDMI
+                                         // en el arranque — la advertencia v3d era cierta).
+reg [3:0]  wq_wp, wq_rp;                 // _186b: punteros a 4 bits
+reg [15:0] wq_vld;                       // _126: bitmap de ocupacion (snoop)
 wire       wq_empty = (wq_wp == wq_rp);
-wire       wq_full  = (wq_wp + 3'd1 == wq_rp);
+wire       wq_full  = (wq_wp + 4'd1 == wq_rp);
 
 // cola de lecturas al backend (v3c: 8 plazas con RESERVA anti-drop — las
 // lecturas de CPU/COMANDO no pueden perderse JAMAS: un drop deja al motor
@@ -497,8 +504,8 @@ assign dbg_bkb  = c_bkb;
 
 // control de flujo: con wq medio-lleno o rq caliente, el interface retiene
 // los slots de CPU/COMANDO (ready=0) hasta que el backend drene
-wire [2:0] wq_used = wq_wp - wq_rp;
-assign vram_stall = (wq_used >= 3'd2) || (rq_used >= 4'd6);
+wire [3:0] wq_used = wq_wp - wq_rp;
+assign vram_stall = (wq_used >= 4'd2) || (rq_used >= 4'd6);
 
 // ============================================================================
 // backend: una op en vuelo; prioridad _126: PREFETCH > escrituras >
@@ -557,7 +564,7 @@ reg [31:0] late_data;
 // cur_addrw) DESAPARECE — con una op por palabra no existe escritura a medias
 // que un prefetch pueda atravesar (bsy serializa: mientras la escritura vuela,
 // nada mas se lanza). Quedan SOLO las 8 comparaciones contra la cola wq.
-wire [7:0] pf_dm;                         // que entradas de wq casan el word
+wire [15:0] pf_dm;                        // que entradas de wq casan el word (_186b: 16)
 assign pf_dm[0] = wq_vld[0] && (wq[0][15:0] == cur_addrw);
 assign pf_dm[1] = wq_vld[1] && (wq[1][15:0] == cur_addrw);
 assign pf_dm[2] = wq_vld[2] && (wq[2][15:0] == cur_addrw);
@@ -566,6 +573,14 @@ assign pf_dm[4] = wq_vld[4] && (wq[4][15:0] == cur_addrw);
 assign pf_dm[5] = wq_vld[5] && (wq[5][15:0] == cur_addrw);
 assign pf_dm[6] = wq_vld[6] && (wq[6][15:0] == cur_addrw);
 assign pf_dm[7] = wq_vld[7] && (wq[7][15:0] == cur_addrw);
+assign pf_dm[8] = wq_vld[8] && (wq[8][15:0] == cur_addrw);
+assign pf_dm[9] = wq_vld[9] && (wq[9][15:0] == cur_addrw);
+assign pf_dm[10] = wq_vld[10] && (wq[10][15:0] == cur_addrw);
+assign pf_dm[11] = wq_vld[11] && (wq[11][15:0] == cur_addrw);
+assign pf_dm[12] = wq_vld[12] && (wq[12][15:0] == cur_addrw);
+assign pf_dm[13] = wq_vld[13] && (wq[13][15:0] == cur_addrw);
+assign pf_dm[14] = wq_vld[14] && (wq[14][15:0] == cur_addrw);
+assign pf_dm[15] = wq_vld[15] && (wq[15][15:0] == cur_addrw);
 wire pf_dirty = |pf_dm;
 
 // [niquelado B, bug #15 del informe] AQUI VIVIO el "_148 FIX B" (fusionar el
@@ -1017,7 +1032,7 @@ wire [31:0] wu_merged = {
 always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
         pw_v <= 256'd0; scv_swp <= 14'd0; pfq_wp <= 0; pfq_rp <= 0;
-        wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 8'd0;
+        wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 16'd0;
         refill_p <= 0;                       // _176
         wretry_p <= 0;                       // _179
 
@@ -1595,7 +1610,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // byte 0. En la cola se guarda INVERTIDA (1 = escribir).
                     wq[wq_wp] <= {~vram_wdata_mask, vram_wdata, vram_address};
                     wq_vld[wq_wp] <= 1'b1;
-                    wq_wp <= wq_wp + 3'd1;
+                    wq_wp <= wq_wp + 4'd1;
                 end
                 else c_wqdrop <= c_wqdrop + 16'd1;    // _154: escritura PERDIDA (nunca llega a DDR3)
 `ifdef SHIM_DBG_DROPS
@@ -1816,7 +1831,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 // encolar). El backend traduce a la DM de la DDR3.
                 cur_kind  <= 2'd2;
                 wq_vld[wq_rp] <= 1'b0;
-                wq_rp     <= wq_rp + 3'd1;
+                wq_rp     <= wq_rp + 4'd1;
                 bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b1;
                 bk_addr  <= VRAM_BASE + {4'd0, wq[wq_rp][15:0], 2'b00};
                 bk_wdata <= wq[wq_rp][47:16];
