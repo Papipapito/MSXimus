@@ -16,6 +16,9 @@
 // Lectura de S#0 con R#15=0 tras >=2 frames de escaneo.
 //
 // Uso: vvp sim [+VMODE=2|5] [+VCD=1]
+// RESULTADO (06/08): **VERDE — 3072 px, 100%**. La presion de cache NO
+// tira los sprites: las escrituras van write-through con comprobacion de
+// tag y no desalojan lineas. La hipotesis por esta via queda CERRADA.
 // ============================================================================
 `timescale 1ns/1ps
 
