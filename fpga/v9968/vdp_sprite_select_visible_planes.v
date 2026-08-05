@@ -363,10 +363,23 @@ module vdp_sprite_select_visible_planes (
 		end
 		else if( w_phase == 3'd3 || w_phase == 3'd5 ) begin
 			if( w_sub_phase == 4'd7 ) begin
-				if( !w_invisible && w_selected_full ) begin
+				//	_187 (la espinita de Fleet/DQ2, 05/08): el 5S/9S solo puede
+				//	armarse con el lleno REAL (4/8 sprites seleccionados en la
+				//	linea), JAMAS con el "lleno" que fuerza el terminador
+				//	(w_selected_full incluye ff_select_finish para PARAR la
+				//	seleccion) — si no, cada sprite visible DESPUES del
+				//	terminador (Y=208/216) dispara un 5S FANTASMA: el software
+				//	de la era TMS reutiliza la cola del SAT como memoria de
+				//	datos y sus variables se leian como sprites (tb_spcol:
+				//	5S=1 con solo 2 sprites; en placa el "numero 9" constante
+				//	de las radiografias). Y el numero se latchea SOLO en el
+				//	evento (el primero del frame gana y aguanta hasta leer
+				//	S#0), como el silicio — antes se pisoteaba con cada plano
+				//	escaneado.
+				if( !w_invisible && !ff_select_finish && w_selected_full ) begin
 					ff_sprite_overmap		<= 1'b1;
+					ff_sprite_overmap_id	<= ff_current_plane_num[4:0];
 				end
-				ff_sprite_overmap_id	<= ff_current_plane_num[4:0];
 			end
 		end
 	end
