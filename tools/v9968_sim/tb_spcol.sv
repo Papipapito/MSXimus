@@ -251,11 +251,13 @@ initial begin
         vdp_reg(6'd1, 8'h40);          // pantalla ON, sprites 8x8 sin mag
     end
     else begin
-        // SCREEN 5 (G4): NT=0000; sprites modo 2: SAT=7800 (R#5=F7,R#11=0)
-        // SCT=SAT-512=7600; SPT=3800 (R#6=07)
+        // SCREEN 5 (G4): NT=0000; sprites modo 2: SAT=7600 (R#5=EF,R#11=0
+        // — la config canonica de BASIC; la 1a version del banco usaba
+        // R#5=F7/SAT@7800 y el escaner leia otra zona = todo fantasmas);
+        // SCT=SAT-512=7400; SPT=3800 (R#6=07)
         vdp_reg(6'd0, 8'h06);
         vdp_reg(6'd2, 8'h1F);
-        vdp_reg(6'd5, 8'hF7);
+        vdp_reg(6'd5, 8'hEF);
         vdp_reg(6'd11, 8'h00);
         vdp_reg(6'd6, 8'h07);
         vdp_reg(6'd1, 8'h40);
@@ -275,9 +277,9 @@ initial begin
     else begin
         // modo 2: SAT en 7800 {Y,X,pat,reserv}; colores por linea en SCT
         // 7600 (16 bytes/sprite, 0x0F = color 15, CC=0 => colisiona)
-        vram_set_wr(18'h07600);
+        vram_set_wr(18'h07400);
         for (i = 0; i < 32; i = i + 1) z80_out(2'd0, 8'h0F);
-        vram_set_wr(18'h07800);
+        vram_set_wr(18'h07600);
         z80_out(2'd0, 8'd99);  z80_out(2'd0, 8'd100); z80_out(2'd0, 8'd0); z80_out(2'd0, 8'd0);
         z80_out(2'd0, 8'd99);  z80_out(2'd0, 8'd104); z80_out(2'd0, 8'd0); z80_out(2'd0, 8'd0);
         z80_out(2'd0, 8'd216); // terminador modo 2
