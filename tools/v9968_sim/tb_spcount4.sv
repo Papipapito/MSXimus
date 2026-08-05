@@ -19,7 +19,7 @@
 // ============================================================================
 `timescale 1ns/1ps
 
-module tb_spcount3;
+module tb_spcount4;
 
 localparam real CLK_HALF = 5.8207;
 localparam real TSTATE   = 279.33;
@@ -110,6 +110,7 @@ v9968_vram_shim #(.VRAM_BASE(22'h280000)) u_shim (
     .diag(shim_diag)
 );
 
+integer LAT_BASE = 26;
 logic [7:0] sdram [0:4194303];
 logic        m_pend = 0, m_we;
 logic [21:0] m_addr;
@@ -120,7 +121,7 @@ always @(posedge clk) begin
     if (bk_req && !m_pend) begin
         m_pend <= 1; m_we <= bk_we; m_addr <= bk_addr; m_dat <= bk_wdata;
         m_msk <= bk_wmask;
-        m_cnt <= 0; m_lat <= 26 + ({$random} % 18);
+        m_cnt <= 0; m_lat <= LAT_BASE + ({$random} % 18);
     end
     else if (m_pend) begin
         m_cnt <= m_cnt + 1;
@@ -146,7 +147,7 @@ integer      m2_cnt, m2_lat;
 always @(posedge clk) begin
     if (bk2_req && !m2_pend) begin
         m2_pend <= 1; m2_addr <= bk2_addr;
-        m2_cnt <= 0; m2_lat <= 26 + ({$random} % 18);
+        m2_cnt <= 0; m2_lat <= LAT_BASE + ({$random} % 18);
     end
     else if (m2_pend) begin
         m2_cnt <= m2_cnt + 1;
@@ -225,96 +226,74 @@ endtask
 
 
 // ---------------------------------------------------------------------------
-// tb_spcount3 — LA HIPOTESIS DE LA PRESION DE CACHE (05/08 noche, tras el
-// dato de Albert: "solo se ve el primer sprite, y en un momento puntual los
-// otros aparecen y desaparecen"; identico en la version MSX2 de DQ2).
-//
-// En los modos 1 y 2 el patron del sprite se toma DIRECTO del bus de VRAM
-// (vdp_sprite_info_collect: `pattern = {24'd0, vram_rdata8}`) — contrato de
-// tiempo FIJO, sin latch ni espera. Si el dato llega tarde (fallo de la
-// sc-cache + latencia del backend) el sprite sale VACIO. Los bancos previos
-// no lo cazaban porque NADIE competia por la cache: aqui la CPU escribe
-// VRAM sin parar, como hace el juego de verdad.
-//
-// FASE A: 3 sprites 16x16, pantalla quieta          -> pixeles de referencia
-// FASE B: los MISMOS sprites + la CPU machacando VRAM -> ¿se caen?
-integer i, j, blancos, base_px;
+// tb_spcount2 — LA CONFIGURACION EXACTA DE DRAGON QUEST 2 (visor de openMSX):
+// sprite mode 1, **16x16**, patron 0x3800, SAT 0x1B00, 192 lineas, color 0
+// transparente. Sintoma de placa: SOLO SE VE EL PRIMER SPRITE.
+// FASE 1 (control): 3 sprites, TODOS con patron 0  -> ¿salen los 3?
+// FASE 2 (DQ2):     3 sprites con patrones 0, 4, 8 -> ¿solo el primero?
+// Cada sprite 16x16 solido = 256 px; 3 sprites = 768.
+integer i, j, blancos;
 logic [7:0] v;
 
-task cuenta_frame(output integer px);
+task pinta_sat(input [7:0] p1, input [7:0] p2);
 begin
-    px = 0;
-    @(posedge d_vs);
-    fork
-        begin : cnt
-            forever @(posedge clk)
-                if (d_en && d_r == 8'hFF && d_g == 8'hFF && d_b == 8'hFF)
-                    px = px + 1;
-        end
-        begin @(posedge d_vs); disable cnt; end
-    join
+    vram_set_wr(18'h01B00);
+    z80_out(2'd0, 8'd50);  z80_out(2'd0, 8'd20);  z80_out(2'd0, 8'd0); z80_out(2'd0, 8'd15);
+    z80_out(2'd0, 8'd50);  z80_out(2'd0, 8'd60);  z80_out(2'd0, p1);   z80_out(2'd0, 8'd15);
+    z80_out(2'd0, 8'd90);  z80_out(2'd0, 8'd100); z80_out(2'd0, p2);   z80_out(2'd0, 8'd15);
+    z80_out(2'd0, 8'd208);
 end
 endtask
 
-// presion de VRAM por la CPU en un HILO APARTE gobernado por bandera (el
-// `fork`+`disable` colgaba iverilog). Solo escribe cuando presion_on=1, y el
-// hilo principal NO toca el bus en esa fase: cero conflicto de drivers.
-logic presion_on = 1'b0;
-integer pk;
-initial begin
-    forever begin
-        if (presion_on) begin
-            vram_set_wr(18'h01800);
-            for (pk = 0; pk < 64 && presion_on; pk = pk + 1) z80_out(2'd0, pk[7:0]);
-        end
-        else #5000;
+task cuenta(input integer fase);
+integer k;
+begin
+    for (k = 0; k < 2; k = k + 1) begin
+        blancos = 0;
+        @(posedge d_vs);
+        fork
+            begin : cnt
+                forever @(posedge clk)
+                    if (d_en && d_r == 8'hFF && d_g == 8'hFF && d_b == 8'hFF)
+                        blancos = blancos + 1;
+            end
+            begin @(posedge d_vs); disable cnt; end
+        join
+        $display("  FASE %0d frame %0d: pixeles = %0d  (3 sprites = 3072; SOLO EL PRIMERO = 1024)%s",
+                 fase, k, blancos, (blancos > 0 && blancos <= 1200) ? "   *** SOLO EL PRIMERO — SINTOMA DE PLACA REPRODUCIDO ***" : "");
     end
 end
+endtask
 
 initial begin
     repeat (48) @(posedge clk);
     reset_n = 1;
     repeat (48) @(posedge clk);
-    $display("=== tb_spcount3: sprites de DQ2 (modo 1, 16x16) BAJO PRESION DE CACHE ===");
+    if( !$value$plusargs("LAT=%d", LAT_BASE) ) LAT_BASE = 26;
+    $display("=== tb_spcount4: DQ2 (modo 1, 16x16) con LATENCIA DE BACKEND = %0d ciclos ===", LAT_BASE);
+    $display("    (26 = el modelo de siempre; 120 = DDR3 real con refresco y contienda)");
 
     vdp_reg(6'd0, 8'h02);
     vdp_reg(6'd2, 8'h06);
     vdp_reg(6'd3, 8'hFF);
     vdp_reg(6'd4, 8'h03);
-    vdp_reg(6'd5, 8'h36);
-    vdp_reg(6'd6, 8'h07);
+    vdp_reg(6'd5, 8'h36);          // SAT 0x1B00
+    vdp_reg(6'd6, 8'h07);          // patrones 0x3800
     vdp_reg(6'd7, 8'h00);
-    vdp_reg(6'd1, 8'h42);          // pantalla ON + sprites 16x16
+    vdp_reg(6'd1, 8'h42);          // pantalla ON + **SPRITES 16x16**
 
+    // 3 grupos de patrones 16x16 solidos (32 bytes cada uno): patrones 0, 4, 8
     vram_set_wr(18'h03800);
     for (i = 0; i < 96; i = i + 1) z80_out(2'd0, 8'hFF);
 
-    vram_set_wr(18'h01B00);
-    z80_out(2'd0, 8'd40);  z80_out(2'd0, 8'd30);  z80_out(2'd0, 8'd0); z80_out(2'd0, 8'd15);
-    z80_out(2'd0, 8'd80);  z80_out(2'd0, 8'd90);  z80_out(2'd0, 8'd4); z80_out(2'd0, 8'd15);
-    z80_out(2'd0, 8'd120); z80_out(2'd0, 8'd150); z80_out(2'd0, 8'd8); z80_out(2'd0, 8'd15);
-    z80_out(2'd0, 8'd208);
-
+    pinta_sat(8'd0, 8'd0);         // FASE 1: todos patron 0
     espera_frames(2);
-    $display("--- FASE A: pantalla quieta");
-    base_px = 0;
-    for (j = 0; j < 2; j = j + 1) begin
-        cuenta_frame(blancos);
-        $display("   frame %0d: %0d px", j, blancos);
-        if (blancos > base_px) base_px = blancos;
-    end
+    cuenta(1);
 
-    $display("--- FASE B: los mismos sprites CON la CPU machacando VRAM");
-    presion_on = 1'b1;
-    for (j = 0; j < 3; j = j + 1) begin
-        cuenta_frame(blancos);
-        $display("   frame %0d: %0d px  (referencia %0d, %0d%%)",
-                 j, blancos, base_px, base_px ? (blancos*100)/base_px : 0);
-        if (base_px > 0 && blancos < (base_px*80)/100)
-            $display("   *** SPRITES PERDIDOS BAJO PRESION DE CACHE — REPRODUCIDO ***");
-    end
-    presion_on = 1'b0;
-    $display("### fin: si la FASE B cae muy por debajo de la A, el bug esta reproducido ###");
+    pinta_sat(8'd4, 8'd8);         // FASE 2: patrones 0, 4, 8 (como DQ2)
+    espera_frames(2);
+    cuenta(2);
+
     $finish;
 end
 
