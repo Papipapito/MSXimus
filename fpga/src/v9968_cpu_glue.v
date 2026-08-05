@@ -69,9 +69,13 @@ module v9968_cpu_glue (
     reg served = 1'b0;
     // _177: lectura en vuelo — el dato de ESTA lectura aun no esta en cdi_r
     reg rd_pend = 1'b0;
-    // _177: timeout fail-open del wait (2^10 ciclos de 85.9 ~ 11.9us)
-    reg [10:0] wtmo = 11'd0;
-    wire wtmo_hit = wtmo[10];
+    // _177: timeout fail-open del wait. _184 (caza Fleet/DQ2 05/08): de
+    // 2^10 (~11.9us) a 2^12 ciclos de 85.9 (~47.7us) — en los modos MSX1
+    // el turno CPU puede tardar decenas de us (inanicion del drenaje, ver
+    // _186b en el shim); la correa corta convertia esas esperas en datos
+    // rancios servidos al Z80. Se mantiene el seguro anti-cuelgue.
+    reg [12:0] wtmo = 13'd0;
+    wire wtmo_hit = wtmo[12];
 
     always @( posedge clk_86 ) begin
         if( !rst_n ) begin
@@ -108,9 +112,9 @@ module v9968_cpu_glue (
     // _177: contador del timeout — corre mientras haya motivo de wait
     wire wait_cause = (io_wr || io_rd) && ( !served || bus_valid || rd_pend );
     always @( posedge clk_86 ) begin
-        if( !rst_n )           wtmo <= 11'd0;
-        else if( !wait_cause ) wtmo <= 11'd0;
-        else if( !wtmo_hit )   wtmo <= wtmo + 11'd1;
+        if( !rst_n )           wtmo <= 13'd0;
+        else if( !wait_cause ) wtmo <= 13'd0;
+        else if( !wtmo_hit )   wtmo <= wtmo + 13'd1;
     end
 
     // _177: wait activo (bajo) SOLO durante un ciclo I/O del VDP con trabajo

@@ -376,6 +376,20 @@ module vdp_cpu_interface (
 			ff_port3_write			<= 1'b0;
 			ff_register_num			<= 6'd0;
 		end
+		else if( w_read && ff_port1 ) begin
+			//	_185 (caza Fleet/DQ2 05/08, intuicion de Albert "funciones del
+			//	TMS9918 no heredadas"): en el TMS9918 y en el V9938 (appmanual)
+			//	LEER el registro de status RESETEA el latch del par de bytes
+			//	del puerto 1. El software MSX1/old-school depende de ello (leer
+			//	status antes de poner direccion, por si una ISR dejo un par a
+			//	medias). Sin esto, un par desincronizado NO se re-sincroniza
+			//	JAMAS: los selects de R#15 no aterrizan (Fleet: la BIOS poleando
+			//	el registro EQUIVOCADO = un S#2 "fosil" eterno; reproducido
+			//	determinista en tb_s2fossil FASE4: 8/8 mal sin esto, 1/8 con
+			//	esto) y las puestas de direccion de VRAM se corren. Identico
+			//	agujero en el upstream.
+			ff_2nd_access	<= 1'b0;
+		end
 		else if( ff_busy ) begin
 			//	hold
 		end
