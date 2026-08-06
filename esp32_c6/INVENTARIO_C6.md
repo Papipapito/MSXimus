@@ -219,13 +219,18 @@ set CFG="%USERPROFILE%\.arduinoIDE\arduino-cli.yaml"
 
 | Pin J10 | Señal | Bola FPGA | Net del esquemático | Lado C6 |
 |---|---|---|---|---|
-| **12** | GND | — | — | GND |
-| **14** | TX (FPGA→C6) | **W21** | SDRAM1_D12 | **IO17** (RX) |
-| **16** | RX (FPGA←C6) | **N17** | SDRAM1_D10 | **IO16** (TX) |
-| **18** | TURBO (FPGA→C6) | **N13** | SDRAM1_D8 | **GPIO3** |
+| **11** | +5 V | — | — | **5V** (tira derecha, el último) |
+| **12** | GND | — | — | **GND** (tira derecha) |
+| **14** | TX (FPGA→C6) | **W21** | SDRAM1_D12 | **IO17** (RX) — tira izquierda |
+| **16** | RX (FPGA←C6) | **N17** | SDRAM1_D10 | **IO16** (TX) — tira izquierda |
+| **18** | TURBO (FPGA→C6) | **N13** | SDRAM1_D8 | **GPIO3** — tira derecha, el primero |
 
-- El C6 se alimenta por **su propio USB-C**. El +5 V del J10 (pin 11) está en la
-  columna impar — **no usar**.
+- **Alimentación por el pin 11 (+5 V) del propio J10**, a la entrada `5V` del módulo
+  (04/08: montaje real de Albert; la nota anterior decía «no usar, alimentar por
+  USB-C» — el USB-C solo hace falta para grabar el firmware).
+- **Pinout físico de las tiras del módulo** (cara trasera, la del USB-C y la microSD),
+  leído de la serigrafía: tira **izquierda** `23 · 20 · 17 · 16 · 13 · 12`; tira
+  **derecha** `3 · 2 · 1 · 3V3 · GND · 5V`. Foto anotada en `docs/img/esp32_c6_pinout.jpg`.
 - **Identificación sin serigrafía** (placa apagada, polímetro en continuidad): el pin
   12 es el **único de todo el conector con continuidad a masa**; sus dos vecinos de
   columna hacia el **lado largo** (el que deja 14 filas, no 5) son el 14 y el 16.

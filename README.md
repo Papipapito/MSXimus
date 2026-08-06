@@ -84,14 +84,19 @@ Optional — the core works fine without it; you simply won't have WiFi. Three o
 
 | J10 pin | Signal | FPGA ball | ESP32-C6 |
 |---|---|---|---|
-| **12** | GND | — | GND |
-| **14** | TX (FPGA → C6) | W21 | **IO17** (the C6's RX) |
-| **16** | RX (FPGA ← C6) | N17 | **IO16** (the C6's TX) |
-| **18** | TURBO (FPGA → C6) | N13 | **GPIO3** — optional, only feeds the display's turbo indicator |
+| **11** | +5 V (power) | — | **5V** (right strip, last one) |
+| **12** | GND | — | **GND** (right strip) |
+| **14** | TX (FPGA → C6) | W21 | **IO17** (left strip, the C6's RX) |
+| **16** | RX (FPGA ← C6) | N17 | **IO16** (left strip, the C6's TX) |
+| **18** | TURBO (FPGA → C6) | N13 | **GPIO3** (right strip, first one) — optional, only feeds the display's turbo indicator |
+
+And this is the module side:
+
+<p align="center"><img src="docs/img/esp32_c6_pinout.jpg" alt="ESP32-C6 pins used by the MSXimus" width="820"/></p>
 
 - **J10 is the free 2×20 header**, labelled *SDRAM1 CONN.* in Sipeed's schematic — **not** the one holding the SDRAM module the core needs.
-- **Identifying the pins without silkscreen**: with the board powered off and a multimeter in continuity mode, **pin 12 is the only pin on the whole header with a path to ground**. From there, its neighbours in the *same* column towards the long side (the one leaving 14 rows, not 5) are 14, 16 and 18.
-- **Do not use the +5 V on pin 11** (odd column): the C6 is powered from **its own USB-C**.
+- **Identifying the pins without silkscreen**: with the board powered off and a multimeter in continuity mode, **pin 12 is the only pin on the whole header with a path to ground**. Its row partner is pin 11 (+5 V), and from pin 12 towards the long side (the one leaving 14 rows, not 5) come 14, 16 and 18.
+- **Power comes from J10 itself** (pin 11 → the module's `5V`): the C6's USB-C is only needed to flash its firmware.
 - TX and RX are **crossed**, as usual. The UART runs at 859 372 baud.
 - ⚠️ If a second SDRAM module is ever fitted on J10, the ESP has to move elsewhere.
 

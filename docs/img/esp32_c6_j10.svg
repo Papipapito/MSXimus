@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 600" width="940" height="600" font-family="DejaVu Sans, Verdana, sans-serif">
-  <rect width="940" height="600" fill="#f6f8fa"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 690" width="940" height="690" font-family="DejaVu Sans, Verdana, sans-serif">
+  <rect width="940" height="690" fill="#f6f8fa"/>
 
   <text x="30" y="38" font-size="21" font-weight="bold" fill="#1a1f26">Conexión del ESP32-C6 al conector J10 de la Tang Console 60K</text>
   <text x="30" y="60" font-size="13" fill="#57606a">J10 = el conector 2×20 LIBRE, marcado «SDRAM1 CONN.» en el esquemático oficial (el módulo SDRAM del core va en el OTRO).</text>
@@ -10,7 +10,6 @@
   <text x="188" y="131" font-size="11" text-anchor="middle" fill="#57606a">impar</text>
   <text x="262" y="131" font-size="11" text-anchor="middle" fill="#57606a">par</text>
 
-  <!-- filas 1..5 (pines 1..10) -->
   <g fill="#b6bec8">
     <circle cx="188" cy="150" r="5"/><circle cx="262" cy="150" r="5"/>
     <circle cx="188" cy="168" r="5"/><circle cx="262" cy="168" r="5"/>
@@ -18,15 +17,13 @@
     <circle cx="188" cy="204" r="5"/><circle cx="262" cy="204" r="5"/>
     <circle cx="188" cy="222" r="5"/><circle cx="262" cy="222" r="5"/>
   </g>
-  <!-- fila 6: 11 (+5V, NO USAR) / 12 (GND) -->
-  <circle cx="188" cy="240" r="6.5" fill="#fff" stroke="#d1242f" stroke-width="2.5"/>
-  <text x="174" y="244" font-size="10.5" text-anchor="end" fill="#d1242f" font-weight="bold">11 · +5 V ✗</text>
+  <!-- fila 6: pin 11 (+5V) y pin 12 (GND) -->
+  <circle cx="188" cy="240" r="7.5" fill="#d1242f" stroke="#8c1620" stroke-width="2"/>
   <circle cx="262" cy="240" r="7.5" fill="#1f883d" stroke="#0f5427" stroke-width="2"/>
   <!-- filas 7,8,9: pines 14, 16, 18 -->
   <circle cx="188" cy="258" r="5" fill="#b6bec8"/><circle cx="262" cy="258" r="7.5" fill="#0969da" stroke="#053a7a" stroke-width="2"/>
   <circle cx="188" cy="276" r="5" fill="#b6bec8"/><circle cx="262" cy="276" r="7.5" fill="#bc4c00" stroke="#7a3100" stroke-width="2"/>
   <circle cx="188" cy="294" r="5" fill="#b6bec8"/><circle cx="262" cy="294" r="7.5" fill="#8250df" stroke="#4c2889" stroke-width="2"/>
-  <!-- filas 10..20 (pines 19..40) -->
   <g fill="#b6bec8">
     <circle cx="188" cy="312" r="5"/><circle cx="262" cy="312" r="5"/>
     <circle cx="188" cy="330" r="5"/><circle cx="262" cy="330" r="5"/>
@@ -41,47 +38,55 @@
     <circle cx="188" cy="492" r="5"/><circle cx="262" cy="492" r="5"/>
   </g>
 
-  <!-- orientación: filas a cada lado del pin 12 -->
-  <line x1="122" y1="150" x2="122" y2="230" stroke="#57606a" stroke-width="1.5"/>
-  <text x="114" y="194" font-size="11" text-anchor="end" fill="#57606a">5 filas</text>
-  <line x1="122" y1="250" x2="122" y2="496" stroke="#57606a" stroke-width="1.5"/>
-  <text x="114" y="376" font-size="11" text-anchor="end" fill="#57606a">14 filas</text>
+  <!-- orientación: filas a cada lado de la fila 11/12 -->
+  <line x1="108" y1="150" x2="108" y2="230" stroke="#57606a" stroke-width="1.5"/>
+  <text x="100" y="194" font-size="11" text-anchor="end" fill="#57606a">5 filas</text>
+  <line x1="108" y1="250" x2="108" y2="496" stroke="#57606a" stroke-width="1.5"/>
+  <text x="100" y="376" font-size="11" text-anchor="end" fill="#57606a">14 filas</text>
 
-  <!-- ================= CABLES EN ABANICO ================= -->
-  <path d="M 270 240 C 350 240, 380 175, 470 175 H 596" stroke="#1f883d" stroke-width="3.5" fill="none"/>
-  <path d="M 270 258 C 350 258, 380 245, 470 245 H 596" stroke="#0969da" stroke-width="3.5" fill="none"/>
-  <path d="M 270 276 C 350 276, 380 315, 470 315 H 596" stroke="#bc4c00" stroke-width="3.5" fill="none"/>
-  <path d="M 270 294 C 350 294, 380 385, 470 385 H 596" stroke="#8250df" stroke-width="3.5" fill="none" stroke-dasharray="8 5"/>
+  <!-- ================= CABLES ================= -->
+  <!-- +5V: sale por la columna impar, rodea el conector por abajo -->
+  <path d="M 180 240 H 132 V 556 H 560 V 405 H 596" stroke="#d1242f" stroke-width="3.5" fill="none"/>
+  <path d="M 270 240 C 350 240, 380 165, 470 165 H 596" stroke="#1f883d" stroke-width="3.5" fill="none"/>
+  <path d="M 270 258 C 350 258, 380 225, 470 225 H 596" stroke="#0969da" stroke-width="3.5" fill="none"/>
+  <path d="M 270 276 C 350 276, 380 285, 470 285 H 596" stroke="#bc4c00" stroke-width="3.5" fill="none"/>
+  <path d="M 270 294 C 350 294, 380 345, 470 345 H 596" stroke="#8250df" stroke-width="3.5" fill="none" stroke-dasharray="8 5"/>
 
-  <text x="474" y="167" font-size="12.5" font-weight="bold" fill="#1f883d">pin 12 · GND</text>
-  <text x="474" y="237" font-size="12.5" font-weight="bold" fill="#0969da">pin 14 · TX  (FPGA W21 →)</text>
-  <text x="474" y="307" font-size="12.5" font-weight="bold" fill="#bc4c00">pin 16 · RX  (FPGA N17 ←)</text>
-  <text x="474" y="377" font-size="12.5" font-weight="bold" fill="#8250df">pin 18 · TURBO (N13 →) opcional</text>
+  <text x="478" y="157" font-size="11.5" font-weight="bold" fill="#1f883d">12 · GND</text>
+  <text x="478" y="217" font-size="11.5" font-weight="bold" fill="#0969da">14 · TX  W21 →</text>
+  <text x="478" y="277" font-size="11.5" font-weight="bold" fill="#bc4c00">16 · RX  N17 ←</text>
+  <text x="478" y="337" font-size="11.5" font-weight="bold" fill="#8250df">18 · TURBO N13</text>
+  <text x="330" y="548" font-size="12.5" font-weight="bold" fill="#d1242f">pin 11 · +5 V  (columna impar, compañero de fila del 12)</text>
 
   <!-- ================= MODULO C6 ================= -->
-  <rect x="596" y="118" width="300" height="310" rx="10" fill="#e7ebf0" stroke="#8a94a0" stroke-width="2"/>
-  <text x="746" y="145" font-size="15" font-weight="bold" text-anchor="middle" fill="#1a1f26">ESP32-C6</text>
-  <text x="746" y="163" font-size="11.5" text-anchor="middle" fill="#57606a">Waveshare C6-LCD-1.3</text>
+  <rect x="596" y="118" width="300" height="312" rx="10" fill="#e7ebf0" stroke="#8a94a0" stroke-width="2"/>
+  <text x="746" y="143" font-size="15" font-weight="bold" text-anchor="middle" fill="#1a1f26">ESP32-C6</text>
+  <text x="746" y="161" font-size="11.5" text-anchor="middle" fill="#57606a">Waveshare C6-LCD-1.3</text>
 
-  <circle cx="596" cy="175" r="7.5" fill="#1f883d" stroke="#0f5427" stroke-width="2"/>
-  <text x="614" y="180" font-size="13" font-weight="bold" fill="#1a1f26">GND</text>
-  <circle cx="596" cy="245" r="7.5" fill="#0969da" stroke="#053a7a" stroke-width="2"/>
-  <text x="614" y="243" font-size="13" font-weight="bold" fill="#1a1f26">IO17</text>
-  <text x="614" y="259" font-size="11" fill="#57606a">(el RX del C6)</text>
-  <circle cx="596" cy="315" r="7.5" fill="#bc4c00" stroke="#7a3100" stroke-width="2"/>
-  <text x="614" y="313" font-size="13" font-weight="bold" fill="#1a1f26">IO16</text>
-  <text x="614" y="329" font-size="11" fill="#57606a">(el TX del C6)</text>
-  <circle cx="596" cy="385" r="7.5" fill="#8250df" stroke="#4c2889" stroke-width="2"/>
-  <text x="614" y="390" font-size="13" font-weight="bold" fill="#1a1f26">GPIO3</text>
+  <circle cx="596" cy="165" r="7.5" fill="#1f883d" stroke="#0f5427" stroke-width="2"/>
+  <text x="614" y="163" font-size="13" font-weight="bold" fill="#1a1f26">GND</text>
+  <text x="614" y="178" font-size="10.5" fill="#57606a">tira derecha</text>
 
-  <rect x="700" y="188" width="180" height="34" rx="6" fill="#fff3cd" stroke="#d4a72c" stroke-width="1.5"/>
-  <text x="790" y="209" font-size="11.5" text-anchor="middle" fill="#7a5c00">Alimentación: su propio USB-C</text>
+  <circle cx="596" cy="225" r="7.5" fill="#0969da" stroke="#053a7a" stroke-width="2"/>
+  <text x="614" y="223" font-size="13" font-weight="bold" fill="#1a1f26">IO17</text>
+  <text x="614" y="238" font-size="10.5" fill="#57606a">tira izquierda · es el RX del C6</text>
+
+  <circle cx="596" cy="285" r="7.5" fill="#bc4c00" stroke="#7a3100" stroke-width="2"/>
+  <text x="614" y="283" font-size="13" font-weight="bold" fill="#1a1f26">IO16</text>
+  <text x="614" y="298" font-size="10.5" fill="#57606a">tira izquierda · es el TX del C6</text>
+
+  <circle cx="596" cy="345" r="7.5" fill="#8250df" stroke="#4c2889" stroke-width="2"/>
+  <text x="614" y="343" font-size="13" font-weight="bold" fill="#1a1f26">GPIO3</text>
+  <text x="614" y="358" font-size="10.5" fill="#57606a">tira derecha, el de arriba del todo</text>
+
+  <circle cx="596" cy="405" r="7.5" fill="#d1242f" stroke="#8c1620" stroke-width="2"/>
+  <text x="614" y="403" font-size="13" font-weight="bold" fill="#1a1f26">5V</text>
+  <text x="614" y="418" font-size="10.5" fill="#57606a">tira derecha, el de abajo del todo</text>
 
   <!-- ================= NOTAS ================= -->
-  <rect x="330" y="428" width="566" height="126" rx="8" fill="#fff" stroke="#d0d7de" stroke-width="1.5"/>
-  <text x="348" y="452" font-size="13" font-weight="bold" fill="#1a1f26">Cómo identificar los pines sin serigrafía</text>
-  <text x="348" y="474" font-size="12" fill="#39414a">Con la placa APAGADA y el polímetro en continuidad: el pin 12 es el ÚNICO de todo J10 con paso a masa.</text>
-  <text x="348" y="494" font-size="12" fill="#39414a">Desde él, sus vecinos de la MISMA columna hacia el lado largo (el que deja 14 filas, no 5) son el 14, el 16 y el 18.</text>
-  <text x="348" y="516" font-size="12" font-weight="bold" fill="#d1242f">El +5 V del pin 11 (columna impar) NO se usa: el C6 se alimenta por su USB-C.</text>
-  <text x="348" y="538" font-size="12" fill="#39414a">TX y RX van CRUZADOS · UART a 859 372 baudios · cable plano de 3-4 hilos.</text>
+  <rect x="330" y="576" width="566" height="98" rx="8" fill="#fff" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="348" y="598" font-size="13" font-weight="bold" fill="#1a1f26">Cómo identificar los pines de J10 (no lleva serigrafía)</text>
+  <text x="348" y="620" font-size="12" fill="#39414a">Con la placa APAGADA y el polímetro en continuidad: el pin 12 es el ÚNICO de todo J10 con paso a masa. Su</text>
+  <text x="348" y="640" font-size="12" fill="#39414a">compañero de fila es el 11 (+5 V); desde el 12, hacia el lado largo (14 filas), van el 14, el 16 y el 18.</text>
+  <text x="348" y="662" font-size="12" fill="#39414a">TX y RX van CRUZADOS · UART a 859 372 baudios · el USB-C del C6 solo hace falta para grabar su firmware.</text>
 </svg>

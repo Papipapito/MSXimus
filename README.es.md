@@ -84,14 +84,19 @@ Opcional — el core funciona igual sin él; simplemente no tendrás WiFi. Son t
 
 | Pin J10 | Señal | Bola FPGA | ESP32-C6 |
 |---|---|---|---|
-| **12** | GND | — | GND |
-| **14** | TX (FPGA → C6) | W21 | **IO17** (el RX del C6) |
-| **16** | RX (FPGA ← C6) | N17 | **IO16** (el TX del C6) |
-| **18** | TURBO (FPGA → C6) | N13 | **GPIO3** — opcional, solo alimenta el indicador de turbo de la pantalla |
+| **11** | +5 V (alimentación) | — | **5V** (tira derecha, el último) |
+| **12** | GND | — | **GND** (tira derecha) |
+| **14** | TX (FPGA → C6) | W21 | **IO17** (tira izquierda, el RX del C6) |
+| **16** | RX (FPGA ← C6) | N17 | **IO16** (tira izquierda, el TX del C6) |
+| **18** | TURBO (FPGA → C6) | N13 | **GPIO3** (tira derecha, el primero) — opcional, solo alimenta el indicador de turbo de la pantalla |
+
+Y así queda del lado del módulo:
+
+<p align="center"><img src="docs/img/esp32_c6_pinout.jpg" alt="Pines del ESP32-C6 usados por el MSXimus" width="820"/></p>
 
 - **J10 es el conector 2×20 libre**, el que el esquemático de Sipeed llama *SDRAM1 CONN.* — **no** el que lleva el módulo de SDRAM que el core necesita.
-- **Identificar los pines sin serigrafía**: con la placa apagada y el polímetro en continuidad, **el pin 12 es el único de todo el conector con paso a masa**. Desde él, sus vecinos de la *misma* columna hacia el lado largo (el que deja 14 filas, no 5) son el 14, el 16 y el 18.
-- **No uses el +5 V del pin 11** (columna impar): el C6 se alimenta por **su propio USB-C**.
+- **Identificar los pines sin serigrafía**: con la placa apagada y el polímetro en continuidad, **el pin 12 es el único de todo el conector con paso a masa**. Su compañero de fila es el 11 (+5 V), y desde el 12, hacia el lado largo (el que deja 14 filas, no 5), van el 14, el 16 y el 18.
+- **La alimentación sale del propio J10** (pin 11 → `5V` del módulo): el USB-C del C6 solo hace falta para grabarle el firmware.
 - TX y RX van **cruzados**, como siempre. La UART va a 859 372 baudios.
 - ⚠️ Si algún día pinchas un segundo módulo de SDRAM en J10, hay que mudar el ESP a otro sitio.
 
