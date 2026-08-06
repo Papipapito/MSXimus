@@ -227,7 +227,10 @@ set CFG="%USERPROFILE%\.arduinoIDE\arduino-cli.yaml"
 
 - **Alimentación por el pin 11 (+5 V) del propio J10**, a la entrada `5V` del módulo
   (04/08: montaje real de Albert; la nota anterior decía «no usar, alimentar por
-  USB-C» — el USB-C solo hace falta para grabar el firmware).
+  USB-C» — el USB-C solo hace falta para grabar el firmware). ⚠️ El módulo LLEVA
+  protección para las dos fuentes a la vez (confirmado por Albert), pero la
+  recomendación es no tenerlas conectadas simultáneamente: al grabar por USB-C,
+  soltar el cable de 5 V o apagar la placa.
 - **Pinout físico de las tiras del módulo** (cara trasera, la del USB-C y la microSD),
   leído de la serigrafía: tira **izquierda** `23 · 20 · 17 · 16 · 13 · 12`; tira
   **derecha** `3 · 2 · 1 · 3V3 · GND · 5V`. Foto anotada en `docs/img/esp32_c6_pinout.jpg`.

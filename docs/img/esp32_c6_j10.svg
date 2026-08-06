@@ -88,5 +88,5 @@
   <text x="348" y="598" font-size="13" font-weight="bold" fill="#1a1f26">Cómo identificar los pines de J10 (no lleva serigrafía)</text>
   <text x="348" y="620" font-size="12" fill="#39414a">Con la placa APAGADA y el polímetro en continuidad: el pin 12 es el ÚNICO de todo J10 con paso a masa. Su</text>
   <text x="348" y="640" font-size="12" fill="#39414a">compañero de fila es el 11 (+5 V); desde el 12, hacia el lado largo (14 filas), van el 14, el 16 y el 18.</text>
-  <text x="348" y="662" font-size="12" fill="#39414a">TX y RX van CRUZADOS · UART a 859 372 baudios · el USB-C del C6 solo hace falta para grabar su firmware.</text>
+  <text x="348" y="662" font-size="12" fill="#39414a">TX y RX van CRUZADOS · UART a 859 372 baudios · mejor no tener el USB-C y el cable de 5 V conectados a la vez.</text>
 </svg>

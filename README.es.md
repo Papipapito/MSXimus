@@ -97,6 +97,7 @@ Y así queda del lado del módulo:
 - **J10 es el conector 2×20 libre**, el que el esquemático de Sipeed llama *SDRAM1 CONN.* — **no** el que lleva el módulo de SDRAM que el core necesita.
 - **Identificar los pines sin serigrafía**: con la placa apagada y el polímetro en continuidad, **el pin 12 es el único de todo el conector con paso a masa**. Su compañero de fila es el 11 (+5 V), y desde el 12, hacia el lado largo (el que deja 14 filas, no 5), van el 14, el 16 y el 18.
 - **La alimentación sale del propio J10** (pin 11 → `5V` del módulo): el USB-C del C6 solo hace falta para grabarle el firmware.
+- ⚠️ **Mejor no tener las dos alimentaciones a la vez**. El módulo lleva protección y aguanta, pero al grabar el firmware por USB-C lo recomendable es desconectar el cable de 5 V (o apagar la placa).
 - TX y RX van **cruzados**, como siempre. La UART va a 859 372 baudios.
 - ⚠️ Si algún día pinchas un segundo módulo de SDRAM en J10, hay que mudar el ESP a otro sitio.
 
