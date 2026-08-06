@@ -19,7 +19,7 @@ logic bus_m1_n = 1, bus_iorq_n = 1, bus_mreq_n = 1, bus_rd_n = 1, bus_wr_n = 1;
 logic disk_window = 0, trig_manual = 0;
 wire  tx, frozen;
 
-dbg_trace #(.QUIET_MS(1), .AW(6)) dut (     // anillo de 64 para que el banco sea corto
+dbg_trace #(.QUIET_MS(1), .AW(6), .WARM_IO(8)) dut (     // anillo de 64 para que el banco sea corto
     .clk(clk), .rst_n(rst_n),
     .bus_addr(bus_addr), .cpu_dout(cpu_dout), .cpu_din(cpu_din),
     .bus_m1_n(bus_m1_n), .bus_iorq_n(bus_iorq_n), .bus_mreq_n(bus_mreq_n),
@@ -66,6 +66,14 @@ integer i, nloop, nio, tipo;
 integer dir;
 initial begin
     repeat(4) @(posedge clk); rst_n = 1; repeat(4) @(posedge clk);
+    // s032c: PRIMERO comprobar que el silencio del ARRANQUE no dispara
+    for (i = 0; i < 30; i = i + 1) m1(16'h0000 + i[15:0]);   // solo fetches
+    #3_000_000;                                              // 3 ms de silencio
+    if (frozen === 1'b1) begin
+        $display("##### ROJO: disparo en el ARRANQUE (sin I/O previa) — el bug de la s032b #####");
+        $finish;
+    end
+    $display("OK: el silencio del arranque NO dispara (calentamiento activo)");
     // 100 eventos "sanos" (el anillo de 64 rota varias veces)
     for (i = 0; i < 100; i = i + 1) begin
         m1(16'h4000 + i[15:0]);
