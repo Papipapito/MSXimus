@@ -76,6 +76,31 @@ Without the OPL4 ROM the core works just the same; you simply won't have MoonSou
 
 After that, insert a microSD with your ROMs and disk images and you're done — the boot menu comes up on its own.
 
+## Wiring the ESP32-C6 (WiFi)
+
+Optional — the core works fine without it; you simply won't have WiFi. Three or four wires between the board's **J10** header and the module:
+
+<p align="center"><img src="docs/img/esp32_c6_j10.svg" alt="ESP32-C6 to J10 wiring diagram" width="820"/></p>
+
+| J10 pin | Signal | FPGA ball | ESP32-C6 |
+|---|---|---|---|
+| **12** | GND | — | GND |
+| **14** | TX (FPGA → C6) | W21 | **IO17** (the C6's RX) |
+| **16** | RX (FPGA ← C6) | N17 | **IO16** (the C6's TX) |
+| **18** | TURBO (FPGA → C6) | N13 | **GPIO3** — optional, only feeds the display's turbo indicator |
+
+- **J10 is the free 2×20 header**, labelled *SDRAM1 CONN.* in Sipeed's schematic — **not** the one holding the SDRAM module the core needs.
+- **Identifying the pins without silkscreen**: with the board powered off and a multimeter in continuity mode, **pin 12 is the only pin on the whole header with a path to ground**. From there, its neighbours in the *same* column towards the long side (the one leaving 14 rows, not 5) are 14, 16 and 18.
+- **Do not use the +5 V on pin 11** (odd column): the C6 is powered from **its own USB-C**.
+- TX and RX are **crossed**, as usual. The UART runs at 859 372 baud.
+- ⚠️ If a second SDRAM module is ever fitted on J10, the ESP has to move elsewhere.
+
+The module's firmware and its full technical inventory live in [`esp32_c6/`](esp32_c6/); flash `firmware_esp32c6_unapi_merged.bin` from the release to the C6 through its own USB-C:
+
+```
+esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_unapi_merged.bin
+```
+
 ## Status
 
 This version has been validated on hardware with HRA!'s V9968 test suite, the DEVCON demos, Metal Gear 2, Aleste 2 and the usual MSX2+ catalogue. The V9968 tracks HRA!'s **latest published revision**; its provenance and every local patch are documented in [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).

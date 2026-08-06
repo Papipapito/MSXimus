@@ -76,6 +76,31 @@ Sin OPL4 el core funciona igual; simplemente no tendrás MoonSound.
 
 Después, mete una microSD con tus ROMs y discos y listo — el menú de arranque sale solo.
 
+## Conexión del ESP32-C6 (WiFi)
+
+Opcional — el core funciona igual sin él; simplemente no tendrás WiFi. Son tres o cuatro cables entre el conector **J10** de la placa y el módulo:
+
+<p align="center"><img src="docs/img/esp32_c6_j10.svg" alt="Diagrama de conexión del ESP32-C6 al J10" width="820"/></p>
+
+| Pin J10 | Señal | Bola FPGA | ESP32-C6 |
+|---|---|---|---|
+| **12** | GND | — | GND |
+| **14** | TX (FPGA → C6) | W21 | **IO17** (el RX del C6) |
+| **16** | RX (FPGA ← C6) | N17 | **IO16** (el TX del C6) |
+| **18** | TURBO (FPGA → C6) | N13 | **GPIO3** — opcional, solo alimenta el indicador de turbo de la pantalla |
+
+- **J10 es el conector 2×20 libre**, el que el esquemático de Sipeed llama *SDRAM1 CONN.* — **no** el que lleva el módulo de SDRAM que el core necesita.
+- **Identificar los pines sin serigrafía**: con la placa apagada y el polímetro en continuidad, **el pin 12 es el único de todo el conector con paso a masa**. Desde él, sus vecinos de la *misma* columna hacia el lado largo (el que deja 14 filas, no 5) son el 14, el 16 y el 18.
+- **No uses el +5 V del pin 11** (columna impar): el C6 se alimenta por **su propio USB-C**.
+- TX y RX van **cruzados**, como siempre. La UART va a 859 372 baudios.
+- ⚠️ Si algún día pinchas un segundo módulo de SDRAM en J10, hay que mudar el ESP a otro sitio.
+
+El firmware del módulo y su inventario técnico completo están en [`esp32_c6/`](esp32_c6/); graba el `firmware_esp32c6_unapi_merged.bin` de la release en el C6 por su propio USB-C:
+
+```
+esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_unapi_merged.bin
+```
+
 ## Estado
 
 Esta versión se ha validado en hardware con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
