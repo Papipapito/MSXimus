@@ -227,13 +227,7 @@ reg        wrk_p1;
 reg [15:0] wrk_addr1;
 reg [31:0] wrk_data1;
 reg [3:0]  wrk_mask1;                    // DQM (0 = escribir byte)
-reg [2:0]  wrk_cls1;                     // _176: clase del escritor (tag[4:2])
 // _176: refill de escrituras no-residentes (write-allocate diferido)
-reg        refill_p;
-reg [15:0] refill_addr;
-// _179: reintento ansioso del fill de VENTANA descartado por pf_dirty
-reg        wretry_p;
-reg [15:0] wretry_addr;
 
 // OBL en dos fases (v4): obl_pend lanza la lectura BSRAM de la ventana
 // (ciclo 2 del fetch), obl_chk consume pwq y encola (ciclo 3)
@@ -1033,8 +1027,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
         pw_v <= 256'd0; scv_swp <= 14'd0; pfq_wp <= 0; pfq_rp <= 0;
         wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 16'd0;
-        refill_p <= 0;                       // _176
-        wretry_p <= 0;                       // _179
 
         bsy <= 0; done_d <= 0; done2_d <= 0; got_lo <= 0; got_hi <= 0;
         pwv_set_p <= 0; pwv_set_i <= 0;
@@ -1156,13 +1148,18 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // nueva del cono DO->wrk_hit (leccion _121b). El tope rq_used<=4 va
         // POR DEBAJO del umbral de vram_stall (rq_used>=6): un refill jamas
         // provoca un stall del motor/CPU.
-        refill_p <= wrk_p1 && !wrk_hit &&
-                    (wrk_cls1 == C_COMMAND || wrk_cls1 == C_CPU);
-        if (wrk_p1) refill_addr <= wrk_addr1;
-        if (refill_p && (rq_used <= 4'd4)) begin
-            rq[rq_wp] <= {5'd0, refill_addr};
-            rq_wp <= rq_wp + 4'd1;
-        end
+        // ⛔ EXPULSADO en la era V3 (cura #1 del expediente de la caza,
+        // 4-6/08): el refill encolaba con tag mudo 5'd0, cuya clase [4:2]=0
+        // NO es C_COMMAND, asi que SE SALTABA el filtro de SC_FILL_POLICY=1
+        // — el que existe para que el trafico de destino del motor no inunde
+        // la sc-cache. Cada escritura-miss del motor recreaba la inundacion
+        // de la _164 (spMISS/s 25.000-55.000) => SAT/SPT desalojadas en pleno
+        // scanline => el colector latchea basura a fase fija = la BANDA DE
+        // RUIDO de la V9968DM2 donde debe ir el logo translucido.
+        // Sentenciado por biseccion en placa (s011 BIEN / s012 MAL, una sola
+        // variable) y confirmado en la s015. El suelo de ~10 miss/frame que
+        // pretendia curar vuelve, y se acepta: es un coste de rendimiento,
+        // no un artefacto visible.
 
         // ---------- _179 REINTENTO ANSIOSO del fill de ventana descartado ----
         // El suelo del bg en bitmap ("~10 miss/frame inducidos por las
@@ -1174,15 +1171,13 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // re-encola la palabra como lectura-demanda con tag 5'b00001 (clase
         // muda: el interface la ignora) POR DEBAJO de wq => llega POST-
         // escritura y rellena la ventana ANTES de que el display la pida.
-        // Solo los fills del pfq (cur_kind==0) generan reintento — un
-        // reintento descartado NO se re-reintenta (sin lazos). Descartable
-        // (rq_used<=4) y con la misma semantica de colision que el _176:
-        // este push va antes en el texto, los de vb/aparcamiento GANAN.
-        if (wretry_p && (rq_used <= 4'd4)) begin
-            rq[rq_wp] <= {5'b00001, wretry_addr};
-            rq_wp <= rq_wp + 4'd1;
-        end
-        if (wretry_p) wretry_p <= 1'b0;
+        // ⛔ EXPULSADO en la era V3 junto con el _176 (composicion de la
+        // v2.1.2 del expediente: "la v2.1 completa MENOS _176 y _179").
+        // Nunca se probo aislado en placa — la s015 que exonero al _177 ya
+        // corria SIN el (no existia en la linea ligera). Se retira por la
+        // misma familia de riesgo: inyecta lecturas con tag mudo en rq
+        // durante el display. La rayita del bg animado que curaba vuelve a
+        // quedar abierta y se anota como frente, no como regresion.
 
         // ---------- _150 VICTIM BUFFER: captura, insercion e invalidacion ----
         // (1) CAPTURA del veredicto del CAM en la etapa 1 del lookup. Solo hace
@@ -1622,7 +1617,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 wrk_addr1 <= vram_address;
                 wrk_data1 <= vram_wdata;
                 wrk_mask1 <= vram_wdata_mask;
-                wrk_cls1  <= vram_tag[4:2];   // _176: quien escribe
             end
             else begin
                 // sprite / CPU / comando: lookup en la CACHE (v3c: la CPU
@@ -1675,13 +1669,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
                         pwv_set_p <= 1'b1;
                         pwv_set_i <= w_idx(cur_addrw);
                     end
-                    // _179: descarte por escritura pendiente -> reintento
-                    // ansioso (re-lectura por rq, ver el push arriba). Con
-                    // wu_hit NO: el update ya dejo la entrada fresca.
-                    else if (pf_dirty) begin
-                        wretry_p    <= 1'b1;
-                        wretry_addr <= cur_addrw;
-                    end
+                    // (era V3: aqui vivia el productor del _179, expulsado —
+                    // ver la nota del push retirado mas arriba. El descarte
+                    // por pf_dirty vuelve a rescatarse tarde, al llegar el
+                    // display, como en el mundo pre-_179.)
                 end
                 else begin
                     late_v    <= 1'b1;
@@ -1692,10 +1683,10 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     late_data <= {w_hi, w_lo};
                     // y de paso a la ventana si es bg
                     // (_140: cede pww al write-through-update, !wu_hit)
-                    // _179: el reintento (tag 5'b00001) tambien rellena la
-                    // ventana — es su unico proposito; el refill _176
-                    // (tag 5'b00000) NO la toca (palabras de tablas).
-                    if ((cur_tag[4:2] == C_BG || cur_tag == 5'b00001)
+                    // (era V3: el `|| cur_tag == 5'b00001` era la puerta del
+                    // reintento _179 — retirada con el; ya nadie emite ese
+                    // tag mudo, asi que la condicion vuelve a ser solo bg.)
+                    if (cur_tag[4:2] == C_BG
                         && !pf_dirty && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
