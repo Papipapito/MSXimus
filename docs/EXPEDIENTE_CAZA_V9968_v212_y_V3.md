@@ -123,13 +123,18 @@ disco (código escrito y con banco verde; ver §4).
    Costó cuatro builds esta noche. Con una etapa de registro, toda la
    instrumentación futura deja de ser una tirada de dados.
 
-2. **Hornear la sonda de selección de sprites** (§3.1) una vez hecho el
-   punto 1, y cerrar el bug de los sprites de DQ2.
+2. ~~Sonda de selección de sprites~~ — **DESCARTADA (decisión de Albert,
+   06/08)**: no se llegó a probar y no se integra. Lo que SÍ vale de §3.1
+   es el **terreno acotado**: el bug vive en `vdp_sprite_info_collect`
+   (el índice con el que se escribe y se lee la RAM de seleccionados) y
+   todo el camino de memoria está descartado con medidas en placa. Quien
+   lo retome empieza ahí, no desde cero.
 
-3. **Analizador lógico** (`fpga/src/dbg_trace.v`, ya en la PR): anillo de
-   4096 eventos en BRAM que graba fetches M1, I/O y accesos a la ventana
-   del disco, se congela con el síntoma del cuelgue y vuelca por el UART.
-   Banco `tb_dbgtrace` verde. **Dos avisos aprendidos a golpes**:
+3. ~~Analizador lógico~~ — **RETIRADO de la rama (decisión de Albert,
+   06/08)**: no llegó a dar resultado y la línea de trabajo sigue por el
+   arreglo del V9968, no por más instrumentación. El código queda en el
+   **historial** (commit `92ee5d8`) por si se retoma. Dos avisos que
+   costaron tres flasheos y conviene no perder:
    - el COM11 del PC cuelga del pin **E22 (`dbg_pmod1[4]`)**, no de
      `usb_uart_tx`;
    - el disparo por silencio **debe** exigir calentamiento (contar I/O
@@ -172,8 +177,8 @@ disco (código escrito y con banco verde; ver §4).
 
 ## 6. ARCHIVO
 
-- **PR #1** — https://github.com/Papipapito/MSXimus/pull/1 : las ocho
-  curas, `dbg_trace.v`, y **doce bancos** (`tb_lmmcseam`, `tb_bootreplay`,
+- **Rama `claude/loving-meninsky-c4f404`** (PR #1 cerrada): las ocho
+  curas y **trece bancos** (`tb_lmmcseam`, `tb_bootreplay`,
   `tb_s2fossil`, `tb_s2fossil2`, `tb_vramsoak_glue`, `tb_spcol`,
   `tb_spcold`, `tb_spcount`, `tb_spcount2/3/4`, `tb_intswallow`,
   `tb_probe98`, `tb_dbgtrace`).
