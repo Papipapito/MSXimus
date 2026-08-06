@@ -227,13 +227,6 @@ reg        wrk_p1;
 reg [15:0] wrk_addr1;
 reg [31:0] wrk_data1;
 reg [3:0]  wrk_mask1;                    // DQM (0 = escribir byte)
-reg [2:0]  wrk_cls1;                     // _176: clase del escritor (tag[4:2])
-// _176: refill de escrituras no-residentes (write-allocate diferido)
-reg        refill_p;
-reg [15:0] refill_addr;
-// _179: reintento ansioso del fill de VENTANA descartado por pf_dirty
-reg        wretry_p;
-reg [15:0] wretry_addr;
 
 // OBL en dos fases (v4): obl_pend lanza la lectura BSRAM de la ventana
 // (ciclo 2 del fetch), obl_chk consume pwq y encola (ciclo 3)
@@ -399,11 +392,19 @@ wire       pfq_full  = (pfq_wp + 3'd1 == pfq_rp);
 
 // cola de escrituras (8 plazas: {mask,wdata,addr}; _148 FIX B: cada entrada
 // es UNA op de backend, no hasta 4)
-reg [51:0] wq [0:7];                     // {mask[3:0], wdata[31:0], addr[17:2]} (_120e: 8 plazas, umbral igual)
-reg [2:0]  wq_wp, wq_rp;
-reg [7:0]  wq_vld;                       // _126: bitmap de ocupacion (snoop)
+reg [51:0] wq [0:15];                    // {mask[3:0], wdata[31:0], addr[17:2]} — _186b (caza del veneno MSX1,
+                                         // 05/08): 8->16 plazas. En G1/G2 el fetch de display mata de hambre el
+                                         // drenaje (~39us medidos en tb_vramsoak_glue) y una rafaga OTIR (5,9us/
+                                         // byte) desbordaba las 8 => escrituras CPU PERDIDAS en silencio (ondas:
+                                         // bytes 2-3 de la palabra 0x0DA jamas llegaron a la SDRAM). 16 plazas =
+                                         // 94us de colchon a ritmo Z80 real, cubre el scanline entero de
+                                         // inanicion. El umbral del stall del MOTOR no cambia (>=2). La variante
+                                         // s023 (gatear el ready de la CPU) ROMPIO el HDMI en placa: esta es la
+                                         // cura por el lado del shim, sin tocar la semantica del bus.
+reg [3:0]  wq_wp, wq_rp;                 // _186b: punteros a 4 bits
+reg [15:0] wq_vld;                       // _126: bitmap de ocupacion (snoop)
 wire       wq_empty = (wq_wp == wq_rp);
-wire       wq_full  = (wq_wp + 3'd1 == wq_rp);
+wire       wq_full  = (wq_wp + 4'd1 == wq_rp);
 
 // cola de lecturas al backend (v3c: 8 plazas con RESERVA anti-drop — las
 // lecturas de CPU/COMANDO no pueden perderse JAMAS: un drop deja al motor
@@ -497,8 +498,8 @@ assign dbg_bkb  = c_bkb;
 
 // control de flujo: con wq medio-lleno o rq caliente, el interface retiene
 // los slots de CPU/COMANDO (ready=0) hasta que el backend drene
-wire [2:0] wq_used = wq_wp - wq_rp;
-assign vram_stall = (wq_used >= 3'd2) || (rq_used >= 4'd6);
+wire [3:0] wq_used = wq_wp - wq_rp;
+assign vram_stall = (wq_used >= 4'd2) || (rq_used >= 4'd6);
 
 // ============================================================================
 // backend: una op en vuelo; prioridad _126: PREFETCH > escrituras >
@@ -557,7 +558,7 @@ reg [31:0] late_data;
 // cur_addrw) DESAPARECE — con una op por palabra no existe escritura a medias
 // que un prefetch pueda atravesar (bsy serializa: mientras la escritura vuela,
 // nada mas se lanza). Quedan SOLO las 8 comparaciones contra la cola wq.
-wire [7:0] pf_dm;                         // que entradas de wq casan el word
+wire [15:0] pf_dm;                        // que entradas de wq casan el word (_186b: 16)
 assign pf_dm[0] = wq_vld[0] && (wq[0][15:0] == cur_addrw);
 assign pf_dm[1] = wq_vld[1] && (wq[1][15:0] == cur_addrw);
 assign pf_dm[2] = wq_vld[2] && (wq[2][15:0] == cur_addrw);
@@ -566,6 +567,14 @@ assign pf_dm[4] = wq_vld[4] && (wq[4][15:0] == cur_addrw);
 assign pf_dm[5] = wq_vld[5] && (wq[5][15:0] == cur_addrw);
 assign pf_dm[6] = wq_vld[6] && (wq[6][15:0] == cur_addrw);
 assign pf_dm[7] = wq_vld[7] && (wq[7][15:0] == cur_addrw);
+assign pf_dm[8] = wq_vld[8] && (wq[8][15:0] == cur_addrw);
+assign pf_dm[9] = wq_vld[9] && (wq[9][15:0] == cur_addrw);
+assign pf_dm[10] = wq_vld[10] && (wq[10][15:0] == cur_addrw);
+assign pf_dm[11] = wq_vld[11] && (wq[11][15:0] == cur_addrw);
+assign pf_dm[12] = wq_vld[12] && (wq[12][15:0] == cur_addrw);
+assign pf_dm[13] = wq_vld[13] && (wq[13][15:0] == cur_addrw);
+assign pf_dm[14] = wq_vld[14] && (wq[14][15:0] == cur_addrw);
+assign pf_dm[15] = wq_vld[15] && (wq[15][15:0] == cur_addrw);
 wire pf_dirty = |pf_dm;
 
 // [niquelado B, bug #15 del informe] AQUI VIVIO el "_148 FIX B" (fusionar el
@@ -1017,10 +1026,7 @@ wire [31:0] wu_merged = {
 always @(posedge clk_vdp or negedge rst_n) begin
     if (!rst_n) begin
         pw_v <= 256'd0; scv_swp <= 14'd0; pfq_wp <= 0; pfq_rp <= 0;
-        wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 8'd0;
-        refill_p <= 0;                       // _176
-        wretry_p <= 0;                       // _179
-
+        wq_wp <= 0; wq_rp <= 0; rq_wp <= 0; rq_rp <= 0; wq_vld <= 16'd0;
         bsy <= 0; done_d <= 0; done2_d <= 0; got_lo <= 0; got_hi <= 0;
         pwv_set_p <= 0; pwv_set_i <= 0;
         cur_kind <= 0; cur_half <= 0; cur_addrw <= 0; cur_tag <= 0;
@@ -1117,57 +1123,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
         // fill_addr) que solo llega al D de fill_pend — NO toca el cono del WE
         // de las BSRAM ni el de wrk_hit (riesgo 1 del gate).
         if (wrk_p1 && fill_pend && (wrk_addr1 == fill_addr)) fill_pend <= 1'b0;
-
-        // ---------- _176 REFILL de escrituras no-residentes (write-allocate
-        // diferido y DESCARTABLE). El suelo de ~10 miss/frame "inducido por
-        // las escrituras" (nota del obl_la): una palabra escrita SIN tag-match
-        // queda no-residente, y si es la SPT/SAT que el LRMM o la CPU
-        // reescriben cada frame, el sprite la falla justo despues — y un miss
-        // de sprite ES una raya: el colector latchea a fase fija (sub_phase
-        // 14, vdp_sprite_info_collect.v:207) y el backend no llega. DEVCON.COM
-        // en placa: rayas ligeras aleatorias (03/08).
-        // CURA: tras un write-check de COMANDO o CPU sin tag-match se encola
-        // una RELECTURA-prefetch con clase MUDA (tag 5'd0: el router del
-        // interface no la entrega a nadie, no toca ventana ni VB, y pasa la
-        // SC_FILL_POLICY). rq va por DEBAJO de wq => la relectura devuelve el
-        // dato POST-escritura: fill coherente por construccion. DESCARTABLE
-        // dos veces: (a) solo encola con rq_used<=10 (no toca ninguna
-        // reserva); (b) este push va ANTES en el texto que el del vb y el del
-        // aparcamiento — si coinciden en el ciclo, la asignacion posterior
-        // GANA y el refill se pierde en silencio (= quedarse como hoy, el
-        // miss se autocura). CONVERGE: al siguiente barrido la palabra es
-        // residente y la escritura pasa a ser update puro — coste cero en
-        // regimen. La decision va REGISTRADA (refill_p) para no colgar logica
-        // nueva del cono DO->wrk_hit (leccion _121b). El tope rq_used<=4 va
-        // POR DEBAJO del umbral de vram_stall (rq_used>=6): un refill jamas
-        // provoca un stall del motor/CPU.
-        refill_p <= wrk_p1 && !wrk_hit &&
-                    (wrk_cls1 == C_COMMAND || wrk_cls1 == C_CPU);
-        if (wrk_p1) refill_addr <= wrk_addr1;
-        if (refill_p && (rq_used <= 4'd4)) begin
-            rq[rq_wp] <= {5'd0, refill_addr};
-            rq_wp <= rq_wp + 4'd1;
-        end
-
-        // ---------- _179 REINTENTO ANSIOSO del fill de ventana descartado ----
-        // El suelo del bg en bitmap ("~10 miss/frame inducidos por las
-        // ESCRITURAS", nota del obl_la): cuando el LMMM redibuja una zona, la
-        // colision fill<->escritura pendiente (pf_dirty) DESCARTA el fill de
-        // la ventana y el hueco se rescata TARDE al llegar el display = la
-        // rayita en el bg animado (DEVCON v2 en placa, 04/08 — el _176 no la
-        // toco porque el bg bitmap no usa la sc-cache). CURA: el descarte
-        // re-encola la palabra como lectura-demanda con tag 5'b00001 (clase
-        // muda: el interface la ignora) POR DEBAJO de wq => llega POST-
-        // escritura y rellena la ventana ANTES de que el display la pida.
-        // Solo los fills del pfq (cur_kind==0) generan reintento — un
-        // reintento descartado NO se re-reintenta (sin lazos). Descartable
-        // (rq_used<=4) y con la misma semantica de colision que el _176:
-        // este push va antes en el texto, los de vb/aparcamiento GANAN.
-        if (wretry_p && (rq_used <= 4'd4)) begin
-            rq[rq_wp] <= {5'b00001, wretry_addr};
-            rq_wp <= rq_wp + 4'd1;
-        end
-        if (wretry_p) wretry_p <= 1'b0;
 
         // ---------- _150 VICTIM BUFFER: captura, insercion e invalidacion ----
         // (1) CAPTURA del veredicto del CAM en la etapa 1 del lookup. Solo hace
@@ -1595,7 +1550,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // byte 0. En la cola se guarda INVERTIDA (1 = escribir).
                     wq[wq_wp] <= {~vram_wdata_mask, vram_wdata, vram_address};
                     wq_vld[wq_wp] <= 1'b1;
-                    wq_wp <= wq_wp + 3'd1;
+                    wq_wp <= wq_wp + 4'd1;
                 end
                 else c_wqdrop <= c_wqdrop + 16'd1;    // _154: escritura PERDIDA (nunca llega a DDR3)
 `ifdef SHIM_DBG_DROPS
@@ -1607,7 +1562,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 wrk_addr1 <= vram_address;
                 wrk_data1 <= vram_wdata;
                 wrk_mask1 <= vram_wdata_mask;
-                wrk_cls1  <= vram_tag[4:2];   // _176: quien escribe
             end
             else begin
                 // sprite / CPU / comando: lookup en la CACHE (v3c: la CPU
@@ -1660,13 +1614,6 @@ always @(posedge clk_vdp or negedge rst_n) begin
                         pwv_set_p <= 1'b1;
                         pwv_set_i <= w_idx(cur_addrw);
                     end
-                    // _179: descarte por escritura pendiente -> reintento
-                    // ansioso (re-lectura por rq, ver el push arriba). Con
-                    // wu_hit NO: el update ya dejo la entrada fresca.
-                    else if (pf_dirty) begin
-                        wretry_p    <= 1'b1;
-                        wretry_addr <= cur_addrw;
-                    end
                 end
                 else begin
                     late_v    <= 1'b1;
@@ -1677,11 +1624,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     late_data <= {w_hi, w_lo};
                     // y de paso a la ventana si es bg
                     // (_140: cede pww al write-through-update, !wu_hit)
-                    // _179: el reintento (tag 5'b00001) tambien rellena la
-                    // ventana — es su unico proposito; el refill _176
-                    // (tag 5'b00000) NO la toca (palabras de tablas).
-                    if ((cur_tag[4:2] == C_BG || cur_tag == 5'b00001)
-                        && !pf_dirty && !wu_hit) begin
+                    if (cur_tag[4:2] == C_BG && !pf_dirty && !wu_hit) begin
                         pww_en   <= 1'b1;
                         pww_idx  <= w_idx(cur_addrw);
                         pww_tag  <= cur_addrw[15:6];
@@ -1816,7 +1759,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 // encolar). El backend traduce a la DM de la DDR3.
                 cur_kind  <= 2'd2;
                 wq_vld[wq_rp] <= 1'b0;
-                wq_rp     <= wq_rp + 3'd1;
+                wq_rp     <= wq_rp + 4'd1;
                 bsy <= 1'b1; bk_req <= 1'b1; bk_we <= 1'b1;
                 bk_addr  <= VRAM_BASE + {4'd0, wq[wq_rp][15:0], 2'b00};
                 bk_wdata <= wq[wq_rp][47:16];

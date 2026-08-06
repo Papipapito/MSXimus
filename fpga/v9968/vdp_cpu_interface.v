@@ -376,6 +376,20 @@ module vdp_cpu_interface (
 			ff_port3_write			<= 1'b0;
 			ff_register_num			<= 6'd0;
 		end
+		else if( w_read && ff_port1 ) begin
+			//	_185 (caza Fleet/DQ2 05/08, intuicion de Albert "funciones del
+			//	TMS9918 no heredadas"): en el TMS9918 y en el V9938 (appmanual)
+			//	LEER el registro de status RESETEA el latch del par de bytes
+			//	del puerto 1. El software MSX1/old-school depende de ello (leer
+			//	status antes de poner direccion, por si una ISR dejo un par a
+			//	medias). Sin esto, un par desincronizado NO se re-sincroniza
+			//	JAMAS: los selects de R#15 no aterrizan (Fleet: la BIOS poleando
+			//	el registro EQUIVOCADO = un S#2 "fosil" eterno; reproducido
+			//	determinista en tb_s2fossil FASE4: 8/8 mal sin esto, 1/8 con
+			//	esto) y las puestas de direccion de VRAM se corren. Identico
+			//	agujero en el upstream.
+			ff_2nd_access	<= 1'b0;
+		end
 		else if( ff_busy ) begin
 			//	hold
 		end
@@ -951,59 +965,63 @@ module vdp_cpu_interface (
 	// --------------------------------------------------------------------
 	//	Interrupt
 	// --------------------------------------------------------------------
+	//	_188 (la novena caza, Fleet, 05/08): LA INT TRAGADA POR EL POLL.
+	//	La cadena if/else original tenia dos agujeros contra el silicio:
+	//	 (1) si el pulso de evento (intr_frame/line) coincidia con el ciclo
+	//	     del clear-por-lectura, el clear GANABA y el evento se PERDIA;
+	//	 (2) peor: durante el ciclo de CUALQUIER lectura de status (aunque
+	//	     fuera S#2) o escritura al puerto 4, la rama de los sets no se
+	//	     ejecutaba => apagon de los TRES sets. Un juego poleando S#2 a
+	//	     ~20k lecturas/s (la espera de fin de comando de la escuela TMS
+	//	     — Fleet en su carga) se traga una INT de frame una vez cada
+	//	     ~70-80 s: la ventana exacta de sus muertes. En el chip real el
+	//	     evento JAMAS se pierde. Ahora sets y clears van en PARALELO por
+	//	     flag y el SET DOMINA sobre los clears de software (el software
+	//	     leyo el valor VIEJO; el evento nuevo arma el flag y el
+	//	     siguiente poll/ISR lo ve — semantica del silicio). El orden
+	//	     entre señales de HARDWARE (clear_line_interrupt/intr_frame
+	//	     sobre intr_line) se conserva tal cual del upstream.
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_frame_interrupt			<= 1'b0;
 			ff_line_interrupt			<= 1'b0;
 			ff_command_end_interrupt	<= 1'b0;
 		end
-		else if( w_read && ff_port1 ) begin
-			if( ff_status_register_pointer == 4'd0 ) begin
-				//	Clear frame interrupt flag
-				ff_frame_interrupt <= 1'b0;
-			end
-			else if( ff_status_register_pointer == 4'd1 ) begin
-				//	Clear line interrupt flag
-				ff_line_interrupt <= 1'b0;
-			end
-			//	upstream 7298638: quedaba una rama legada que borraba el
-			//	interrupt de FIN DE COMANDO al leer S#10. El unico clear
-			//	legitimo es la escritura en el puerto 4 con bit2=1.
-		end
-		else if( w_write && ff_port4 ) begin
-			if( ff_bus_wdata[0] == 1'b1 ) begin
-				//	Clear frame interrupt flag
-				ff_frame_interrupt <= 1'b0;
-			end
-			if( ff_bus_wdata[1] == 1'b1 ) begin
-				//	Clear line interrupt flag
-				ff_line_interrupt <= 1'b0;
-			end
-			if( ff_bus_wdata[2] == 1'b1 ) begin
-				//	Clear command end interrupt flag
-				ff_command_end_interrupt <= 1'b0;
-			end
-		end
 		else begin
+			//	---- frame (F) ----
 			if( intr_frame ) begin
-				//	Happend line interrupt
 				ff_frame_interrupt <= 1'b1;
 			end
+			else if( (w_read  && ff_port1 && ff_status_register_pointer == 4'd0)
+			      || (w_write && ff_port4 && ff_bus_wdata[0] == 1'b1) ) begin
+				//	Clear frame interrupt flag (lectura de S#0 o puerto 4 bit0)
+				ff_frame_interrupt <= 1'b0;
+			end
 
+			//	---- line (FH) ----
 			if( clear_line_interrupt || intr_frame ) begin
 				ff_line_interrupt <= 1'b0;
 			end
-			else if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
-				ff_line_interrupt <= 1'b0;
-			end
 			else if( intr_line ) begin
-				//	Happend line interrupt
 				ff_line_interrupt <= 1'b1;
 			end
+			else if( (w_read  && ff_port1 && ff_status_register_pointer == 4'd1)
+			      || (w_write && ff_port4 && ff_bus_wdata[1] == 1'b1)
+			      || (ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19)) ) begin
+				//	Clear line interrupt flag (lectura de S#1, puerto 4 bit1,
+				//	o escritura de R#0/R#19)
+				ff_line_interrupt <= 1'b0;
+			end
 
+			//	---- fin de comando (CE-int) ----
+			//	upstream 7298638: quedaba una rama legada que borraba el
+			//	interrupt de FIN DE COMANDO al leer S#10. El unico clear
+			//	legitimo es la escritura en el puerto 4 con bit2=1.
 			if( intr_command_end ) begin
-				//	Happend line interrupt
 				ff_command_end_interrupt <= 1'b1;
+			end
+			else if( w_write && ff_port4 && ff_bus_wdata[2] == 1'b1 ) begin
+				ff_command_end_interrupt <= 1'b0;
 			end
 		end
 	end

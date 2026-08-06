@@ -119,6 +119,11 @@ module vdp_sprite_select_visible_planes (
 	wire				w_invisible3;
 	wire				w_invisible;
 	wire				w_selected_full;
+	wire				w_count_full;				//	_187b: lleno REAL solo-por-cuenta
+	wire				w_scan_exhaust;				//	_187b/c: no emitir mas fetches de plano
+	wire				w_line_in_window;			//	_187c: linea DENTRO de la ventana de display
+	reg					ff_att1_fresh;				//	_187b: attribute1 = fetch REAL de este plano
+	reg					ff_att2_fresh;				//	_187b: attribute2 = fetch REAL de este plano
 	wire		[9:0]	w_finish_line;
 	wire		[17:0]	w_sprite_mode1_attribute;
 	wire		[17:0]	w_sprite_mode2_attribute;
@@ -144,8 +149,40 @@ module vdp_sprite_select_visible_planes (
 										(    sprite_mode2               ? w_sprite_mode2_attribute  : w_sprite_mode1_attribute)) :18'd0;
 	assign w_selected_full			= ff_select_finish | (
 										(reg_sprite_mode3 || reg_sprite16_mode) ? ff_selected_count[4]:
-										     sprite_mode2                       ? (ff_selected_count[4] | ff_selected_count[3] | ff_plane_count[5]): 
+										     sprite_mode2                       ? (ff_selected_count[4] | ff_selected_count[3] | ff_plane_count[5]):
 										                                          (ff_selected_count[4] | ff_selected_count[3] | ff_selected_count[2] | ff_plane_count[5]) );
+	//	_187b: el "lleno" SOLO por cuenta de seleccionados (sin terminador y sin
+	//	agotamiento del barrido) — es la unica condicion que en el chip real
+	//	precede a un 5S/9S: 4/8 sprites YA elegidos en la linea.
+	assign w_count_full				= (reg_sprite_mode3 || reg_sprite16_mode) ? ff_selected_count[4]:
+										     sprite_mode2                       ? (ff_selected_count[4] | ff_selected_count[3]):
+										                                          (ff_selected_count[4] | ff_selected_count[3] | ff_selected_count[2]);
+	//	_187b/_187c: fin del barrido por agotamiento de planos (32 en modos
+	//	1/2; los modos 3/16 agotan la linea entera por horario). _187c: se
+	//	evalua en el INSTANTE DE EMISION con la cuenta pre-incremento — si el
+	//	siguiente fetch seria el "plano 32", se bloquea YA. Antes el corte
+	//	llegaba un slot tarde y ese slot 33 releia el plano 0 con la
+	//	direccion dando la vuelta (fetch FRESCO y visible => fantasma con
+	//	num=0: el S#0=c0 de las radiografias, sentenciado por el chivato de
+	//	tb_spcold: plane=32, attr=el del plano 0). Con shuffle el numero
+	//	salta +19/+37 y no sirve de indice: alli corta la cuenta de slots.
+	assign w_scan_exhaust			= (reg_sprite_mode3 || reg_sprite16_mode) ? 1'b0 :
+									  reg_sprite_priority_shuffle             ? ff_plane_count[5] :
+									  ( ff_current_plane_num[5] | ( ff_current_plane_num[4:0] == 5'd31 ) | ff_plane_count[5] );
+	//	_187c LA PUERTA GRANDE (sentenciada por el chivato: disparo en
+	//	posy=220 con 30 sprites aparcados en Y=220 "visibles"): este escaner
+	//	corre TAMBIEN en las lineas del borde (fuera de las 192/212 de
+	//	display), donde los sprites APARCADOS fuera de pantalla (Y>=192 —
+	//	LA convencion de toda la era TMS para ocultar sprites) dan offset 0-7
+	//	y se vuelven "visibles" => cupo lleno + 5S/9S FANTASMA cada frame.
+	//	En el chip real el escaneo solo existe en las lineas visibles. El
+	//	evento 5S queda confinado a la ventana vertical real del display
+	//	(192 en modo 1; 212 en modos 2/3), medida en coordenadas de PANTALLA
+	//	(screen_pos_y, sin R#23: el borde es borde aunque el scroll gire la
+	//	Y ajustada; en signed las lineas negativas quedan fuera solas por la
+	//	comparacion sin signo). La SELECCION no se toca: en las lineas de
+	//	borde no se renderiza nada y asi no hay riesgo de regresion.
+	assign w_line_in_window			= ( screen_pos_y < ((reg_sprite_mode3 || sprite_mode2) ? 9'd212 : 9'd192) );
 	assign w_finish_line			= (reg_sprite_mode3 || sprite_mode2) ? 10'd216: 10'd208;
 
 	// --------------------------------------------------------------------
@@ -201,7 +238,15 @@ module vdp_sprite_select_visible_planes (
 				else begin
 					ff_current_plane_num	<= ff_current_plane_num + (reg_sprite_priority_shuffle ? 6'd19: 6'd1 );
 				end
-				ff_vram_valid			<= ~w_selected_full;
+				//	_187b: el barrido de atributos SIGUE tras llenarse el cupo de
+				//	seleccionados — como el silicio, que continua leyendo las Y
+				//	para encontrar (o no) al 5º/9º REAL. Parar el fetch al llenar
+				//	dejaba el atributo RANCIO del ultimo elegido y el 5S se
+				//	decidia sobre el: 4 sprites visibles y NADA mas ya disparaba
+				//	un 5S fantasma (el S#0=c4 de las radiografias de Fleet). El
+				//	coste VRAM esta acotado: las lineas RALAS ya barren los 32
+				//	planos siempre — este es el mismo peor caso.
+				ff_vram_valid			<= ~( ff_select_finish | w_scan_exhaust );
 			end
 		end
 		else if( w_phase == 3'd4 && w_sub_phase == 4'd0 ) begin
@@ -212,7 +257,7 @@ module vdp_sprite_select_visible_planes (
 			else begin
 				ff_current_plane_num	<= ff_current_plane_num + (reg_sprite_priority_shuffle ? 6'd19: 6'd1 );
 			end
-			ff_vram_valid			<= ~w_selected_full;
+			ff_vram_valid			<= ~( ff_select_finish | w_scan_exhaust );
 		end
 		else begin
 			ff_vram_valid		<= 1'b0;
@@ -344,6 +389,24 @@ module vdp_sprite_select_visible_planes (
 		end
 	end
 
+	//	_187b: frescura de los atributos — captura si el fetch de ESTE plano se
+	//	emitio de verdad (ff_vram_valid es un pulso en sub1 de las fases 2/4).
+	//	Sin esto, el chequeo del 5S corria tambien sobre atributos RANCIOS
+	//	(slots posteriores al agotamiento del barrido) y disparaba fantasmas
+	//	con el numero dando la vuelta (el S#0=c0 de las radiografias de Fleet).
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_att1_fresh	<= 1'b0;
+			ff_att2_fresh	<= 1'b0;
+		end
+		else if( w_phase == 3'd2 && w_sub_phase == 4'd1 ) begin
+			ff_att1_fresh	<= ff_vram_valid;
+		end
+		else if( w_phase == 3'd4 && w_sub_phase == 4'd1 ) begin
+			ff_att2_fresh	<= ff_vram_valid;
+		end
+	end
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_sprite_overmap		<= 1'b0;
@@ -363,9 +426,41 @@ module vdp_sprite_select_visible_planes (
 		end
 		else if( w_phase == 3'd3 || w_phase == 3'd5 ) begin
 			if( w_sub_phase == 4'd7 ) begin
-				if( !w_invisible && w_selected_full ) begin
+				//	_187/_187b (la espinita de Fleet/DQ2, 05/08): el 5S/9S solo
+				//	se arma cuando el 5º/9º sprite VISIBLE REAL aparece con el
+				//	cupo de seleccionados YA lleno — exactamente como el
+				//	silicio. Tres puertas de fantasmas cerradas:
+				//	 (1) el "lleno" forzado por el TERMINADOR (Y=208/216): el
+				//	     software de la era TMS guarda DATOS tras el terminador
+				//	     y sus variables se leian como sprites (tb_spcol FASE A;
+				//	     el "numero 9" de las radiografias) -> !ff_select_finish;
+				//	 (2) el "lleno" por AGOTAMIENTO del barrido (32 planos) y
+				//	     los slots posteriores con atributo RANCIO -> w_count_full
+				//	     + frescura (el S#0=c0 en placa, numero dando la vuelta);
+				//	 (3) el atributo RANCIO del ultimo elegido tras parar el
+				//	     fetch al llenar el cupo: 4 sprites y NADA mas disparaba
+				//	     fantasma (el S#0=c4 en placa) -> el barrido ahora SIGUE
+				//	     (fetch real del candidato) y aqui se exige frescura.
+				//	Y el numero se latchea SOLO en el evento (el primero del
+				//	frame gana y aguanta hasta leer S#0) — antes se pisoteaba
+				//	con cada plano escaneado.
+				if( !w_invisible && !ff_select_finish && w_count_full
+						&& w_line_in_window
+						&& ( w_phase[1] ? ff_att1_fresh : ff_att2_fresh ) ) begin
 					ff_sprite_overmap		<= 1'b1;
 				end
+				//	_187d (05/08, sintoma de placa: DQ2 ya no cuelga pero NO
+				//	SALEN sus sprites de NPC): el numero VUELVE a seguir al
+				//	ultimo plano procesado, como el upstream y como el
+				//	silicio — con 5S=0, S#0[4:0] = numero del ULTIMO sprite
+				//	examinado (documentado en TMS9918/V9938), y el software
+				//	de la escuela TMS LO LEE para gestionar sus planos. El
+				//	_187 lo metio DENTRO del if del evento y quedaba clavado
+				//	a 0: DQ2 leia 0 siempre y su gestor de sprites se rompia.
+				//	El congelado en el evento NO se pierde: lo da la rama
+				//	`else if( ff_sprite_overmap )` de arriba, que se salta
+				//	este bloque entero mientras el flag esta pendiente (el
+				//	numero del 5o sprite aguanta hasta que se lee S#0).
 				ff_sprite_overmap_id	<= ff_current_plane_num[4:0];
 			end
 		end
