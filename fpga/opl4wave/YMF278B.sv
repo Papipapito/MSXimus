@@ -866,10 +866,12 @@ module YMF278B
 					else if (REG_LEVEL_SEL) REG_Q <= REG_LEVEL_Q;
 					else if (REG_PAN_SEL) REG_Q <= REG_PAN_Q;
 					else if (REG_LFO_SEL) REG_Q <= REG_LFO_Q;
-					else if (REG_RATE0_SEL) REG_Q <= REG_RATE0_Q;
-					else if (REG_RATE1_SEL) REG_Q <= REG_RATE1_Q;
-					else if (REG_RATE2_SEL) REG_Q <= REG_RATE2_Q;
-					else if (REG_AM_SEL) REG_Q <= REG_AM_Q;
+					// era v3: los cuatro salen de la BSRAM unica; el dato
+					// bueno se remuestrea un CE mas tarde (ver abajo)
+					else if (REG_RATE0_SEL) REG_Q <= rt_cpu_q;
+					else if (REG_RATE1_SEL) REG_Q <= rt_cpu_q;
+					else if (REG_RATE2_SEL) REG_Q <= rt_cpu_q;
+					else if (REG_AM_SEL) REG_Q <= rt_cpu_q;
 					else begin
 						case (REG_A)
 							8'h00: REG_Q <= TEST0;
@@ -891,6 +893,14 @@ module YMF278B
 						if (REG_A == 8'h06) begin MEM_RREQ <= 1; BUSY2 <= 1; MEMADDR <= MEMADDR + 22'd1; end
 					end
 				end
+				// ERA v3: el grupo RATE/AM ya no es un array de lectura
+				// asincrona, sino BSRAM: su dato tarda DOS clk (peticion +
+				// captura) desde REG_RD, y la ventana DELAY==01 solo da uno
+				// garantizado. Se remuestrea en DELAY==10, un CE despues —
+				// sobra margen (el consumidor es el Z80 leyendo el puerto).
+				// Sin esto, el readback devuelve el valor de la lectura
+				// ANTERIOR (cazado por tb_regrd: 144/144 mal).
+				if (REG_RD_DELAY == 2'b10 && rt_sel) REG_Q <= rt_cpu_q;
 
 				//Memory access
 				if (CYCLE1_CE) begin
@@ -1048,24 +1058,92 @@ module YMF278B
 	OPL4_REG_RAM #(5,8) REG_LFO  (CLK,     RST ?     SLOT : OP3.LOAD ? OP3.SLOT : REG_A[4:0]-5'h00,     RST ? '0 : OP3.LOAD ? MEM_D : REG_D,     RST ? 1'b1 : OP3.LOAD ? (REG_LFO_LOAD & SLOT0_CE) : (REG_WR & REG_LFO_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h00 : LFO_RA ), REG_LFO_Q);
 	
 	wire       REG_RATE0_SEL = (REG_A >= 8'h98 && REG_A <= 8'hAF);
-	wire       REG_RATE0_LOAD  = (OP3.LOAD_POS == 4'h8);
-	bit [ 7:0] REG_RATE0_Q;
-	OPL4_REG_RAM #(5,8) REG_RATE0(CLK,     RST ?     SLOT : OP3.LOAD ? OP3.SLOT : REG_A[4:0]-5'h18,     RST ? '0 : OP3.LOAD ? MEM_D : REG_D,     RST ? 1'b1 : OP3.LOAD ? (REG_RATE0_LOAD & SLOT0_CE) : (REG_WR & REG_RATE0_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h18 : OP4.SLOT ), REG_RATE0_Q);
-	
 	wire       REG_RATE1_SEL = (REG_A >= 8'hB0 && REG_A <= 8'hC7);
-	wire       REG_RATE1_LOAD  = (OP3.LOAD_POS == 4'h9);
-	bit [ 7:0] REG_RATE1_Q;
-	OPL4_REG_RAM #(5,8) REG_RATE1(CLK,     RST ?     SLOT : OP3.LOAD ? OP3.SLOT : REG_A[4:0]-5'h10,     RST ? '0 : OP3.LOAD ? MEM_D : REG_D,     RST ? 1'b1 : OP3.LOAD ? (REG_RATE1_LOAD & SLOT0_CE) : (REG_WR & REG_RATE1_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h10 : OP4.SLOT ), REG_RATE1_Q);
-	
 	wire       REG_RATE2_SEL = (REG_A >= 8'hC8 && REG_A <= 8'hDF);
-	wire       REG_RATE2_LOAD  = (OP3.LOAD_POS == 4'hA);
-	bit [ 7:0] REG_RATE2_Q;
-	OPL4_REG_RAM #(5,8) REG_RATE2(CLK,     RST ?     SLOT : OP3.LOAD ? OP3.SLOT : REG_A[4:0]-5'h08,     RST ? '0 : OP3.LOAD ? MEM_D : REG_D,     RST ? 1'b1 : OP3.LOAD ? (REG_RATE2_LOAD & SLOT0_CE) : (REG_WR & REG_RATE2_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h08 : OP4.SLOT ), REG_RATE2_Q);
-	
-	wire       REG_AM_SEL = (REG_A >= 8'hE0 && REG_A <= 8'hF7);
-	wire       REG_AM_LOAD  = (OP3.LOAD_POS == 4'hB);
-	bit [ 7:0] REG_AM_Q;
-	OPL4_REG_RAM #(5,8) REG_AM   (CLK,     RST ?     SLOT : OP3.LOAD ? OP3.SLOT : REG_A[4:0]-5'h00,     RST ? '0 : OP3.LOAD ? MEM_D : REG_D,     RST ? 1'b1 : OP3.LOAD ? (REG_AM_LOAD & SLOT0_CE) : (REG_WR & REG_AM_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h00 : OP4.SLOT ), REG_AM_Q);
+	wire       REG_AM_SEL    = (REG_A >= 8'hE0 && REG_A <= 8'hF7);
+
+	// =====================================================================
+	// ERA v3: grupo RATE0/1/2 + AM (4 arrays de 32x8 = 1.024 FF + 4 muxes
+	// 32:1) fusionado en UNA BSRAM 128x8 con direccion {campo[1:0],slot} y
+	// UN barrido por slot con doble bufer — el patron del grupo SA/LA/EA.
+	//
+	// MEDIDO con probe_rate.v (0 de 3.744 tramos de slot): OP4.SLOT NO
+	// cambia nunca dentro de un slot y vale SLOT-3, luego el OP4.SLOT del
+	// slot SIGUIENTE es el OP3.SLOT de ahora => el barrido lee
+	// {campo, OP3.SLOT} y el commit va en la frontera (SLOT1_CE). Los 4
+	// consumos por slot (uno por CYCLE0_CE) leian el MISMO valor: el
+	// barrido unico no pierde nada.
+	//
+	// A DIFERENCIA del grupo SA, este tiene escrituras de CPU y readback:
+	//  - escrituras: RST (limpieza, un campo por clk ciclando) > LOAD de
+	//    cabecera (un campo por SLOT0_CE, LOAD_POS 8..11) > CPU. Nunca dos
+	//    a la vez (los SEL son rangos disjuntos).
+	//  - readback: REG_RD roba UN ciclo del puerto de lectura (el barrido
+	//    se para ese ciclo; tiene ~17 clk de margen para 4 campos) y el
+	//    dato aterriza en rt_cpu_q, que alimenta el mux de REG_Q. El
+	//    muestreo del readback va con REG_RD_DELAY, varios CE despues.
+	// =====================================================================
+	wire [1:0] rt_fld = REG_RATE0_SEL ? 2'd0 : REG_RATE1_SEL ? 2'd1
+	                  : REG_RATE2_SEL ? 2'd2 : 2'd3;
+	wire [4:0] rt_idx = REG_RATE0_SEL ? REG_A[4:0]-5'h18
+	                  : REG_RATE1_SEL ? REG_A[4:0]-5'h10
+	                  : REG_RATE2_SEL ? REG_A[4:0]-5'h08 : REG_A[4:0]-5'h00;
+	wire       rt_sel = REG_RATE0_SEL | REG_RATE1_SEL | REG_RATE2_SEL | REG_AM_SEL;
+
+	wire       rt_we_load = OP3.LOAD & SLOT0_CE & (OP3.LOAD_POS >= 4'd8)
+	                                            & (OP3.LOAD_POS <= 4'd11);
+	wire       rt_we_cpu  = REG_WR & CYCLE1_CE & rt_sel;
+	wire       rt_we      = RST | rt_we_load | rt_we_cpu;
+	wire [6:0] rt_waddr   = RST        ? {rt_rstf, SLOT}
+	                      : rt_we_load ? {OP3.LOAD_POS[1:0], OP3.SLOT}
+	                                   : {rt_fld, rt_idx};
+	wire [7:0] rt_wdata   = RST ? 8'd0 : rt_we_load ? MEM_D : REG_D;
+	wire       rt_cpurd   = REG_RD & rt_sel;
+
+	(* syn_ramstyle = "block_ram" *) bit [7:0] rt_mem [0:127];
+	initial for (int ri = 0; ri < 128; ri++) rt_mem[ri] = '0;
+	bit [7:0] rt_q  [0:3];      // banco ACTIVO (lo que consume el motor)
+	bit [7:0] rt_st [0:3];      // staging del barrido
+	bit [7:0] rt_cpu_q;         // dato del readback de CPU
+	initial for (int ri = 0; ri < 4; ri++) begin rt_q[ri] = '0; rt_st[ri] = '0; end
+	initial rt_cpu_q = '0;
+	bit [1:0] rt_swp, rt_cap, rt_rstf;
+	bit       rt_swp_on, rt_cap_on, rt_cpu_on;
+	bit [7:0] rt_rq;
+
+	always_ff @(posedge CLK) begin
+		if (rt_we) rt_mem[rt_waddr] <= rt_wdata;
+		rt_rstf <= rt_rstf + 2'd1;
+
+		// puerto de lectura: la CPU tiene prioridad y roba el ciclo
+		rt_rq     <= rt_mem[rt_cpurd ? {rt_fld, rt_idx} : {rt_swp, OP3.SLOT}];
+		rt_cap    <= rt_swp;
+		rt_cap_on <= rt_swp_on & ~rt_cpurd;
+		rt_cpu_on <= rt_cpurd;
+		if (rt_cpu_on)      rt_cpu_q       <= rt_rq;
+		else if (rt_cap_on) rt_st[rt_cap]  <= rt_rq;
+
+		if (RST) begin
+			rt_q[0] <= '0; rt_q[1] <= '0; rt_q[2] <= '0; rt_q[3] <= '0;
+		end
+		else if (SLOT1_CE) begin
+			rt_q[0] <= rt_st[0]; rt_q[1] <= rt_st[1];
+			rt_q[2] <= rt_st[2]; rt_q[3] <= rt_st[3];
+		end
+
+		if (CYCLE1_CE && CYCLE_NUM == 3'd3) begin
+			rt_swp_on <= 1'b1;  rt_swp <= 2'd0;
+		end
+		else if (rt_swp_on && !rt_cpurd) begin
+			if (rt_swp == 2'd3) rt_swp_on <= 1'b0;
+			else                rt_swp <= rt_swp + 2'd1;
+		end
+	end
+
+	wire [7:0] REG_RATE0_Q = rt_q[0];
+	wire [7:0] REG_RATE1_Q = rt_q[1];
+	wire [7:0] REG_RATE2_Q = rt_q[2];
+	wire [7:0] REG_AM_Q    = rt_q[3];
 	
 	
 	//OPL3

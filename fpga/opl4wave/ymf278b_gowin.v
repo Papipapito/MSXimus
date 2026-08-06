@@ -614,10 +614,11 @@ module YMF278B (
 	reg [7:0] OP4_LFO_DATA = 0;
 	reg [2:0] OP4_AM = 0;
 	reg [11:0] EVOL_RAM_D = 0;
-	wire [7:0] REG_AM_Q;
-	wire [7:0] REG_RATE0_Q;
-	wire [7:0] REG_RATE1_Q;
-	wire [7:0] REG_RATE2_Q;
+	reg [7:0] rt_q [0:3];
+	wire [7:0] REG_AM_Q = rt_q[3];
+	wire [7:0] REG_RATE0_Q = rt_q[0];
+	wire [7:0] REG_RATE1_Q = rt_q[1];
+	wire [7:0] REG_RATE2_Q = rt_q[2];
 	function [7:0] YMF278B_PKG_AMCalc;
 		input reg [7:0] DATA;
 		input reg [2:0] AM;
@@ -904,6 +905,8 @@ module YMF278B (
 	wire REG_RATE0_SEL = (REG_A >= 8'h98) && (REG_A <= 8'haf);
 	wire REG_RATE1_SEL = (REG_A >= 8'hb0) && (REG_A <= 8'hc7);
 	wire REG_RATE2_SEL = (REG_A >= 8'hc8) && (REG_A <= 8'hdf);
+	reg [7:0] rt_cpu_q = 0;
+	wire rt_sel = ((REG_RATE0_SEL | REG_RATE1_SEL) | REG_RATE2_SEL) | REG_AM_SEL;
 	reg WR_N_OLD = 0;
 	reg RD_N_OLD = 0;
 	reg CS_N_OLD = 0;
@@ -1026,13 +1029,13 @@ module YMF278B (
 				else if (REG_LFO_SEL)
 					REG_Q <= REG_LFO_Q;
 				else if (REG_RATE0_SEL)
-					REG_Q <= REG_RATE0_Q;
+					REG_Q <= rt_cpu_q;
 				else if (REG_RATE1_SEL)
-					REG_Q <= REG_RATE1_Q;
+					REG_Q <= rt_cpu_q;
 				else if (REG_RATE2_SEL)
-					REG_Q <= REG_RATE2_Q;
+					REG_Q <= rt_cpu_q;
 				else if (REG_AM_SEL)
-					REG_Q <= REG_AM_Q;
+					REG_Q <= rt_cpu_q;
 				else begin
 					case (REG_A)
 						8'h00: REG_Q <= TEST0;
@@ -1053,6 +1056,8 @@ module YMF278B (
 					end
 				end
 			end
+			if ((REG_RD_DELAY == 2'b10) && rt_sel)
+				REG_Q <= rt_cpu_q;
 			if (CYCLE1_CE) begin
 				if (MEM_RD && !MEMMODE[0])
 					MEM_D <= MDI;
@@ -1239,62 +1244,72 @@ module YMF278B (
 		.RDADDR((REG_RD ? REG_A[4:0] - 5'h00 : LFO_RA)),
 		.Q(REG_LFO_Q)
 	);
-	wire REG_RATE0_LOAD = OP3[56-:4] == 4'h8;
-	localparam sv2v_uu_REG_RATE0_dw = 8;
-	localparam [7:0] sv2v_uu_REG_RATE0_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_RATE0(
-		.CLK(CLK),
-		.WRADDR((RST ? SLOT : (OP3[57] ? OP3[65-:5] : REG_A[4:0] - 5'h18))),
-		.DATA((RST ? sv2v_uu_REG_RATE0_ext_DATA_0 : (OP3[57] ? MEM_D : REG_D))),
-		.WREN((RST ? 1'b1 : (OP3[57] ? REG_RATE0_LOAD & SLOT0_CE : (REG_WR & REG_RATE0_SEL) & CYCLE1_CE))),
-		.RDADDR((REG_RD ? REG_A[4:0] - 5'h18 : OP4[13-:5])),
-		.Q(REG_RATE0_Q)
-	);
-	wire REG_RATE1_LOAD = OP3[56-:4] == 4'h9;
-	localparam sv2v_uu_REG_RATE1_dw = 8;
-	localparam [7:0] sv2v_uu_REG_RATE1_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_RATE1(
-		.CLK(CLK),
-		.WRADDR((RST ? SLOT : (OP3[57] ? OP3[65-:5] : REG_A[4:0] - 5'h10))),
-		.DATA((RST ? sv2v_uu_REG_RATE1_ext_DATA_0 : (OP3[57] ? MEM_D : REG_D))),
-		.WREN((RST ? 1'b1 : (OP3[57] ? REG_RATE1_LOAD & SLOT0_CE : (REG_WR & REG_RATE1_SEL) & CYCLE1_CE))),
-		.RDADDR((REG_RD ? REG_A[4:0] - 5'h10 : OP4[13-:5])),
-		.Q(REG_RATE1_Q)
-	);
-	wire REG_RATE2_LOAD = OP3[56-:4] == 4'ha;
-	localparam sv2v_uu_REG_RATE2_dw = 8;
-	localparam [7:0] sv2v_uu_REG_RATE2_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_RATE2(
-		.CLK(CLK),
-		.WRADDR((RST ? SLOT : (OP3[57] ? OP3[65-:5] : REG_A[4:0] - 5'h08))),
-		.DATA((RST ? sv2v_uu_REG_RATE2_ext_DATA_0 : (OP3[57] ? MEM_D : REG_D))),
-		.WREN((RST ? 1'b1 : (OP3[57] ? REG_RATE2_LOAD & SLOT0_CE : (REG_WR & REG_RATE2_SEL) & CYCLE1_CE))),
-		.RDADDR((REG_RD ? REG_A[4:0] - 5'h08 : OP4[13-:5])),
-		.Q(REG_RATE2_Q)
-	);
-	wire REG_AM_LOAD = OP3[56-:4] == 4'hb;
-	localparam sv2v_uu_REG_AM_dw = 8;
-	localparam [7:0] sv2v_uu_REG_AM_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_AM(
-		.CLK(CLK),
-		.WRADDR((RST ? SLOT : (OP3[57] ? OP3[65-:5] : REG_A[4:0] - 5'h00))),
-		.DATA((RST ? sv2v_uu_REG_AM_ext_DATA_0 : (OP3[57] ? MEM_D : REG_D))),
-		.WREN((RST ? 1'b1 : (OP3[57] ? REG_AM_LOAD & SLOT0_CE : (REG_WR & REG_AM_SEL) & CYCLE1_CE))),
-		.RDADDR((REG_RD ? REG_A[4:0] - 5'h00 : OP4[13-:5])),
-		.Q(REG_AM_Q)
-	);
+	wire [1:0] rt_fld = (REG_RATE0_SEL ? 2'd0 : (REG_RATE1_SEL ? 2'd1 : (REG_RATE2_SEL ? 2'd2 : 2'd3)));
+	wire [4:0] rt_idx = (REG_RATE0_SEL ? REG_A[4:0] - 5'h18 : (REG_RATE1_SEL ? REG_A[4:0] - 5'h10 : (REG_RATE2_SEL ? REG_A[4:0] - 5'h08 : REG_A[4:0] - 5'h00)));
+	wire rt_we_load = ((OP3[57] & SLOT0_CE) & (OP3[56-:4] >= 4'd8)) & (OP3[56-:4] <= 4'd11);
+	wire rt_we_cpu = (REG_WR & CYCLE1_CE) & rt_sel;
+	wire rt_we = (RST | rt_we_load) | rt_we_cpu;
+	reg [1:0] rt_rstf = 0;
+	wire [6:0] rt_waddr = (RST ? {rt_rstf, SLOT} : (rt_we_load ? {OP3[54:53], OP3[65-:5]} : {rt_fld, rt_idx}));
+	wire [7:0] rt_wdata = (RST ? 8'd0 : (rt_we_load ? MEM_D : REG_D));
+	wire rt_cpurd = REG_RD & rt_sel;
+	(* syn_ramstyle = "block_ram" *) reg [7:0] rt_mem [0:127];
+	initial begin : sv2v_autoblock_12
+		reg signed [31:0] ri = 0;
+		for (ri = 0; ri < 128; ri = ri + 1)
+			rt_mem[ri] = 1'sb0;
+	end
+	reg [7:0] rt_st [0:3];
+	initial begin : sv2v_autoblock_13
+		reg signed [31:0] ri = 0;
+		for (ri = 0; ri < 4; ri = ri + 1)
+			begin
+				rt_q[ri] = 1'sb0;
+				rt_st[ri] = 1'sb0;
+			end
+	end
+	initial rt_cpu_q = 1'sb0;
+	reg [1:0] rt_swp = 0;
+	reg [1:0] rt_cap = 0;
+	reg rt_swp_on = 0;
+	reg rt_cap_on = 0;
+	reg rt_cpu_on = 0;
+	reg [7:0] rt_rq = 0;
+	always @(posedge CLK) begin
+		if (rt_we)
+			rt_mem[rt_waddr] <= rt_wdata;
+		rt_rstf <= rt_rstf + 2'd1;
+		rt_rq <= rt_mem[(rt_cpurd ? {rt_fld, rt_idx} : {rt_swp, OP3[65-:5]})];
+		rt_cap <= rt_swp;
+		rt_cap_on <= rt_swp_on & ~rt_cpurd;
+		rt_cpu_on <= rt_cpurd;
+		if (rt_cpu_on)
+			rt_cpu_q <= rt_rq;
+		else if (rt_cap_on)
+			rt_st[rt_cap] <= rt_rq;
+		if (RST) begin
+			rt_q[0] <= 1'sb0;
+			rt_q[1] <= 1'sb0;
+			rt_q[2] <= 1'sb0;
+			rt_q[3] <= 1'sb0;
+		end
+		else if (SLOT1_CE) begin
+			rt_q[0] <= rt_st[0];
+			rt_q[1] <= rt_st[1];
+			rt_q[2] <= rt_st[2];
+			rt_q[3] <= rt_st[3];
+		end
+		if (CYCLE1_CE && (CYCLE_NUM == 3'd3)) begin
+			rt_swp_on <= 1'b1;
+			rt_swp <= 2'd0;
+		end
+		else if (rt_swp_on && !rt_cpurd) begin
+			if (rt_swp == 2'd3)
+				rt_swp_on <= 1'b0;
+			else
+				rt_swp <= rt_swp + 2'd1;
+		end
+	end
 	wire [7:0] OPL3_DO;
 	wire [15:0] OPL3_OUT_A;
 	wire [15:0] OPL3_OUT_B;
