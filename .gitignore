@@ -51,3 +51,6 @@ fpga/opl4_20k_est/
 
 # --- Carpeta personal de Albert (release lista para flashear, NO subir) ---
 mi_release/
+tools/v9968_sim/*.vvp
+tools/v9968_sim/reg_*.log
+tools/v9968_sim/sp_*.vvp
