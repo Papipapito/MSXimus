@@ -88,16 +88,20 @@ module tb_regrd;
         res_n = 1; repeat (2000) @(posedge clk);  // deja pasar el RST interno (24 slots)
         enable_new2();
 
-        // un valor distinto por slot en cada rango del grupo fusionado
+        // OJO (lo enseno este mismo banco): escribir un registro WTN
+        // dispara la CARGA DE CABECERA del chip, que reescribe RATE0..AM
+        // con datos de la memoria wave. Por eso van en DOS FASES: primero
+        // el grupo RATE/AM con su relectura cruzada, y despues WTN/LEVEL/
+        // PAN (a los que la carga NO toca: LOAD_POS solo cubre SA/LA/EA/
+        // LFO/RATE/AM).
+
+        // ---- FASE 1: RATE0/1/2 + AM ----
         for (int s = 0; s < 24; s++) begin
             prueba(8'h98 + s[7:0], 8'h10 + s[7:0], "RATE0");
             prueba(8'hB0 + s[7:0], 8'h30 + s[7:0], "RATE1");
             prueba(8'hC8 + s[7:0], 8'h50 + s[7:0], "RATE2");
             prueba(8'hE0 + s[7:0], 8'h70 + s[7:0], "AM   ");
         end
-
-        // relectura CRUZADA: tras escribir los cuatro rangos enteros, cada
-        // uno debe conservar SU valor (un {campo,slot} mal formado los pisa)
         for (int s = 0; s < 24; s++) begin
             rd_reg(8'h98 + s[7:0], leido); comprobados++;
             if (leido !== 8'h10 + s[7:0]) begin errores++;
@@ -105,6 +109,24 @@ module tb_regrd;
             rd_reg(8'hE0 + s[7:0], leido); comprobados++;
             if (leido !== 8'h70 + s[7:0]) begin errores++;
                 $display("  FALLO cruzado AM    slot %0d: %02h != %02h", s, leido, 8'h70+s[7:0]); end
+        end
+
+        // ---- FASE 2: WTN + LEVEL + PAN ----
+        for (int s = 0; s < 24; s++) begin
+            prueba(8'h08 + s[7:0], 8'h90 + s[7:0], "WTN  ");
+            prueba(8'h50 + s[7:0], 8'hB0 + s[7:0], "LEVEL");
+            prueba(8'h68 + s[7:0], 8'hD0 + s[7:0], "PAN  ");
+        end
+        for (int s = 0; s < 24; s++) begin
+            rd_reg(8'h08 + s[7:0], leido); comprobados++;
+            if (leido !== 8'h90 + s[7:0]) begin errores++;
+                $display("  FALLO cruzado WTN   slot %0d: %02h != %02h", s, leido, 8'h90+s[7:0]); end
+            rd_reg(8'h50 + s[7:0], leido); comprobados++;
+            if (leido !== 8'hB0 + s[7:0]) begin errores++;
+                $display("  FALLO cruzado LEVEL slot %0d: %02h != %02h", s, leido, 8'hB0+s[7:0]); end
+            rd_reg(8'h68 + s[7:0], leido); comprobados++;
+            if (leido !== 8'hD0 + s[7:0]) begin errores++;
+                $display("  FALLO cruzado PAN   slot %0d: %02h != %02h", s, leido, 8'hD0+s[7:0]); end
         end
 
         $display("RESULTADO: comprobados=%0d errores=%0d", comprobados, errores);

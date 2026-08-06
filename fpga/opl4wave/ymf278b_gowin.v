@@ -160,9 +160,12 @@ module YMF278B (
 	wire [21:0] LFO_RAM_Q;
 	wire [15:0] REG_FNUM_Q;
 	wire [7:0] REG_LFO_Q;
-	wire [7:0] REG_PAN_Q;
+	localparam RT_PN = 3'd6;
+	reg [7:0] rt_q [0:6];
+	wire [7:0] REG_PAN_Q = rt_q[RT_PN];
 	wire REG_PAN_SEL = (REG_A >= 8'h68) && (REG_A <= 8'h7f);
-	wire [7:0] REG_WTN_Q;
+	localparam RT_WT = 3'd4;
+	wire [7:0] REG_WTN_Q = rt_q[RT_WT];
 	wire REG_WTN_SEL = (REG_A >= 8'h08) && (REG_A <= 8'h1f);
 	function [9:0] YMF278B_PKG_LFOFreqDiv;
 		input reg [2:0] LFO;
@@ -614,11 +617,14 @@ module YMF278B (
 	reg [7:0] OP4_LFO_DATA = 0;
 	reg [2:0] OP4_AM = 0;
 	reg [11:0] EVOL_RAM_D = 0;
-	reg [7:0] rt_q [0:3];
-	wire [7:0] REG_AM_Q = rt_q[3];
-	wire [7:0] REG_RATE0_Q = rt_q[0];
-	wire [7:0] REG_RATE1_Q = rt_q[1];
-	wire [7:0] REG_RATE2_Q = rt_q[2];
+	localparam RT_AM = 3'd3;
+	wire [7:0] REG_AM_Q = rt_q[RT_AM];
+	localparam RT_R0 = 3'd0;
+	wire [7:0] REG_RATE0_Q = rt_q[RT_R0];
+	localparam RT_R1 = 3'd1;
+	wire [7:0] REG_RATE1_Q = rt_q[RT_R1];
+	localparam RT_R2 = 3'd2;
+	wire [7:0] REG_RATE2_Q = rt_q[RT_R2];
 	function [7:0] YMF278B_PKG_AMCalc;
 		input reg [7:0] DATA;
 		input reg [2:0] AM;
@@ -739,7 +745,8 @@ module YMF278B (
 	);
 	reg [6:0] OP5_TL = 0;
 	reg OP5_LDIR = 0;
-	wire [7:0] REG_LEVEL_Q;
+	localparam RT_LV = 3'd5;
+	wire [7:0] REG_LEVEL_Q = rt_q[RT_LV];
 	reg [16:0] TL_RAM_D = 0;
 	wire [16:0] TL_RAM_Q;
 	function [9:0] YMF278B_PKG_LevelAddTLALFO;
@@ -906,7 +913,7 @@ module YMF278B (
 	wire REG_RATE1_SEL = (REG_A >= 8'hb0) && (REG_A <= 8'hc7);
 	wire REG_RATE2_SEL = (REG_A >= 8'hc8) && (REG_A <= 8'hdf);
 	reg [7:0] rt_cpu_q = 0;
-	wire rt_sel = ((REG_RATE0_SEL | REG_RATE1_SEL) | REG_RATE2_SEL) | REG_AM_SEL;
+	wire rt_sel = (((((REG_RATE0_SEL | REG_RATE1_SEL) | REG_RATE2_SEL) | REG_AM_SEL) | REG_WTN_SEL) | REG_LEVEL_SEL) | REG_PAN_SEL;
 	reg WR_N_OLD = 0;
 	reg RD_N_OLD = 0;
 	reg CS_N_OLD = 0;
@@ -1017,15 +1024,15 @@ module YMF278B (
 			end
 			if (REG_RD_DELAY == 2'b01) begin
 				if (REG_WTN_SEL)
-					REG_Q <= REG_WTN_Q;
+					REG_Q <= rt_cpu_q;
 				else if (REG_FNUM0_SEL)
 					REG_Q <= REG_FNUM_Q[15:8];
 				else if (REG_FNUM1_SEL)
 					REG_Q <= REG_FNUM_Q[7:0];
 				else if (REG_LEVEL_SEL)
-					REG_Q <= REG_LEVEL_Q;
+					REG_Q <= rt_cpu_q;
 				else if (REG_PAN_SEL)
-					REG_Q <= REG_PAN_Q;
+					REG_Q <= rt_cpu_q;
 				else if (REG_LFO_SEL)
 					REG_Q <= REG_LFO_Q;
 				else if (REG_RATE0_SEL)
@@ -1165,19 +1172,6 @@ module YMF278B (
 	assign REG_SA_Q = {sa_q[0], sa_q[1], sa_q[2]};
 	assign REG_LA_Q = {sa_q[3], sa_q[4]};
 	assign REG_EA_Q = {sa_q[5], sa_q[6]};
-	localparam sv2v_uu_REG_WTN_dw = 8;
-	localparam [7:0] sv2v_uu_REG_WTN_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_WTN(
-		.CLK(CLK),
-		.WRADDR((OP4[8] ? OP4[13-:5] : REG_A[4:0] - 5'h08)),
-		.DATA((OP4[8] ? sv2v_uu_REG_WTN_ext_DATA_0 : REG_D)),
-		.WREN((OP4[8] ? 1'b1 : (REG_WR & REG_WTN_SEL) & CYCLE1_CE)),
-		.RDADDR((REG_RD ? REG_A[4:0] - 5'h08 : SLOT)),
-		.Q(REG_WTN_Q)
-	);
 	localparam sv2v_uu_REG_FNUM0_dw = 8;
 	localparam [7:0] sv2v_uu_REG_FNUM0_ext_DATA_0 = 1'sb0;
 	OPL4_REG_RAM #(
@@ -1204,32 +1198,6 @@ module YMF278B (
 		.RDADDR((REG_RD ? REG_A[4:0] - 5'h00 : FNUM_RA)),
 		.Q(REG_FNUM_Q[7:0])
 	);
-	localparam sv2v_uu_REG_LEVEL_dw = 8;
-	localparam [7:0] sv2v_uu_REG_LEVEL_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_LEVEL(
-		.CLK(CLK),
-		.WRADDR((RST ? SLOT : REG_A[4:0] - 5'h10)),
-		.DATA((RST ? sv2v_uu_REG_LEVEL_ext_DATA_0 : REG_D)),
-		.WREN((RST ? 1'b1 : (REG_WR & REG_LEVEL_SEL) & CYCLE1_CE)),
-		.RDADDR((REG_RD ? REG_A[4:0] - 5'h10 : OP5[41-:5])),
-		.Q(REG_LEVEL_Q)
-	);
-	localparam sv2v_uu_REG_PAN_dw = 8;
-	localparam [7:0] sv2v_uu_REG_PAN_ext_DATA_0 = 1'sb0;
-	OPL4_REG_RAM #(
-		.aw(5),
-		.dw(8)
-	) REG_PAN(
-		.CLK(CLK),
-		.WRADDR((RST ? SLOT : REG_A[4:0] - 5'h08)),
-		.DATA((RST ? sv2v_uu_REG_PAN_ext_DATA_0 : REG_D)),
-		.WREN((RST ? 1'b1 : (REG_WR & REG_PAN_SEL) & CYCLE1_CE)),
-		.RDADDR((REG_RD ? REG_A[4:0] - 5'h08 : OP7[23-:5])),
-		.Q(REG_PAN_Q)
-	);
 	wire REG_LFO_LOAD = OP3[56-:4] == 4'h7;
 	localparam sv2v_uu_REG_LFO_dw = 8;
 	localparam [7:0] sv2v_uu_REG_LFO_ext_DATA_0 = 1'sb0;
@@ -1244,42 +1212,62 @@ module YMF278B (
 		.RDADDR((REG_RD ? REG_A[4:0] - 5'h00 : LFO_RA)),
 		.Q(REG_LFO_Q)
 	);
-	wire [1:0] rt_fld = (REG_RATE0_SEL ? 2'd0 : (REG_RATE1_SEL ? 2'd1 : (REG_RATE2_SEL ? 2'd2 : 2'd3)));
-	wire [4:0] rt_idx = (REG_RATE0_SEL ? REG_A[4:0] - 5'h18 : (REG_RATE1_SEL ? REG_A[4:0] - 5'h10 : (REG_RATE2_SEL ? REG_A[4:0] - 5'h08 : REG_A[4:0] - 5'h00)));
+	wire [2:0] rt_fld = (REG_RATE0_SEL ? RT_R0 : (REG_RATE1_SEL ? RT_R1 : (REG_RATE2_SEL ? RT_R2 : (REG_AM_SEL ? RT_AM : (REG_WTN_SEL ? RT_WT : (REG_LEVEL_SEL ? RT_LV : RT_PN))))));
+	wire [4:0] rt_idx = (REG_RATE0_SEL ? REG_A[4:0] - 5'h18 : (REG_RATE1_SEL ? REG_A[4:0] - 5'h10 : (REG_RATE2_SEL ? REG_A[4:0] - 5'h08 : (REG_AM_SEL ? REG_A[4:0] - 5'h00 : (REG_WTN_SEL ? REG_A[4:0] - 5'h08 : (REG_LEVEL_SEL ? REG_A[4:0] - 5'h10 : REG_A[4:0] - 5'h08))))));
+	reg [2:0] rt_rstf = 0;
+	wire rt_rst_we = (rt_rstf == RT_WT ? OP4[8] : RST);
+	wire [7:0] rt_rst_ad = (rt_rstf == RT_WT ? {RT_WT, OP4[13-:5]} : {rt_rstf, SLOT});
 	wire rt_we_load = ((OP3[57] & SLOT0_CE) & (OP3[56-:4] >= 4'd8)) & (OP3[56-:4] <= 4'd11);
 	wire rt_we_cpu = (REG_WR & CYCLE1_CE) & rt_sel;
-	wire rt_we = (RST | rt_we_load) | rt_we_cpu;
-	reg [1:0] rt_rstf = 0;
-	wire [6:0] rt_waddr = (RST ? {rt_rstf, SLOT} : (rt_we_load ? {OP3[54:53], OP3[65-:5]} : {rt_fld, rt_idx}));
-	wire [7:0] rt_wdata = (RST ? 8'd0 : (rt_we_load ? MEM_D : REG_D));
+	reg rt_cpuw_p = 0;
+	wire rt_cpuw_go = (rt_cpuw_p & ~rt_rst_we) & ~rt_we_load;
+	wire rt_we = (rt_rst_we | rt_we_load) | rt_cpuw_go;
+	reg [7:0] rt_cpuw_ad = 0;
+	wire [7:0] rt_waddr = (rt_rst_we ? rt_rst_ad : (rt_we_load ? {1'b0, OP3[54:53], OP3[65-:5]} : rt_cpuw_ad));
+	reg [7:0] rt_cpuw_dt = 0;
+	wire [7:0] rt_wdata = (rt_rst_we ? 8'd0 : (rt_we_load ? MEM_D : rt_cpuw_dt));
 	wire rt_cpurd = REG_RD & rt_sel;
-	(* syn_ramstyle = "block_ram" *) reg [7:0] rt_mem [0:127];
+	wire [4:0] rt_slot_nx = (SLOT == 5'd23 ? 5'd0 : SLOT + 5'd1);
+	reg [2:0] rt_swp = 0;
+	wire [4:0] rt_swp_ad = (rt_swp == RT_WT ? rt_slot_nx : (rt_swp == RT_LV ? OP4[13-:5] : (rt_swp == RT_PN ? OP6[33-:5] : OP3[65-:5])));
+	(* syn_ramstyle = "block_ram" *) reg [7:0] rt_mem [0:255];
 	initial begin : sv2v_autoblock_12
 		reg signed [31:0] ri = 0;
-		for (ri = 0; ri < 128; ri = ri + 1)
+		for (ri = 0; ri < 256; ri = ri + 1)
 			rt_mem[ri] = 1'sb0;
 	end
-	reg [7:0] rt_st [0:3];
+	reg [7:0] rt_st [0:6];
 	initial begin : sv2v_autoblock_13
 		reg signed [31:0] ri = 0;
-		for (ri = 0; ri < 4; ri = ri + 1)
+		for (ri = 0; ri < 7; ri = ri + 1)
 			begin
 				rt_q[ri] = 1'sb0;
 				rt_st[ri] = 1'sb0;
 			end
 	end
 	initial rt_cpu_q = 1'sb0;
-	reg [1:0] rt_swp = 0;
-	reg [1:0] rt_cap = 0;
+	reg [2:0] rt_cap = 0;
 	reg rt_swp_on = 0;
 	reg rt_cap_on = 0;
 	reg rt_cpu_on = 0;
 	reg [7:0] rt_rq = 0;
+	initial begin
+		rt_cpuw_p = 1'b0;
+		rt_cpuw_ad = 1'sb0;
+		rt_cpuw_dt = 1'sb0;
+	end
 	always @(posedge CLK) begin
 		if (rt_we)
 			rt_mem[rt_waddr] <= rt_wdata;
-		rt_rstf <= rt_rstf + 2'd1;
-		rt_rq <= rt_mem[(rt_cpurd ? {rt_fld, rt_idx} : {rt_swp, OP3[65-:5]})];
+		rt_rstf <= (rt_rstf == RT_PN ? 3'd0 : rt_rstf + 3'd1);
+		if (rt_we_cpu) begin
+			rt_cpuw_p <= 1'b1;
+			rt_cpuw_ad <= {rt_fld, rt_idx};
+			rt_cpuw_dt <= REG_D;
+		end
+		else if (rt_cpuw_go)
+			rt_cpuw_p <= 1'b0;
+		rt_rq <= rt_mem[(rt_cpurd ? {rt_fld, rt_idx} : {rt_swp, rt_swp_ad})];
 		rt_cap <= rt_swp;
 		rt_cap_on <= rt_swp_on & ~rt_cpurd;
 		rt_cpu_on <= rt_cpurd;
@@ -1288,26 +1276,34 @@ module YMF278B (
 		else if (rt_cap_on)
 			rt_st[rt_cap] <= rt_rq;
 		if (RST) begin
-			rt_q[0] <= 1'sb0;
-			rt_q[1] <= 1'sb0;
-			rt_q[2] <= 1'sb0;
-			rt_q[3] <= 1'sb0;
+			rt_q[RT_R0] <= 1'sb0;
+			rt_q[RT_R1] <= 1'sb0;
+			rt_q[RT_R2] <= 1'sb0;
+			rt_q[RT_AM] <= 1'sb0;
+			rt_q[RT_LV] <= 1'sb0;
+			rt_q[RT_PN] <= 1'sb0;
 		end
 		else if (SLOT1_CE) begin
-			rt_q[0] <= rt_st[0];
-			rt_q[1] <= rt_st[1];
-			rt_q[2] <= rt_st[2];
-			rt_q[3] <= rt_st[3];
+			rt_q[RT_R0] <= rt_st[RT_R0];
+			rt_q[RT_R1] <= rt_st[RT_R1];
+			rt_q[RT_R2] <= rt_st[RT_R2];
+			rt_q[RT_AM] <= rt_st[RT_AM];
+			rt_q[RT_LV] <= rt_st[RT_LV];
+			rt_q[RT_PN] <= rt_st[RT_PN];
 		end
+		if (OP4[8])
+			rt_q[RT_WT] <= 1'sb0;
+		else if (SLOT1_CE)
+			rt_q[RT_WT] <= rt_st[RT_WT];
 		if (CYCLE1_CE && (CYCLE_NUM == 3'd3)) begin
 			rt_swp_on <= 1'b1;
-			rt_swp <= 2'd0;
+			rt_swp <= 3'd0;
 		end
 		else if (rt_swp_on && !rt_cpurd) begin
-			if (rt_swp == 2'd3)
+			if (rt_swp == RT_PN)
 				rt_swp_on <= 1'b0;
 			else
-				rt_swp <= rt_swp + 2'd1;
+				rt_swp <= rt_swp + 3'd1;
 		end
 	end
 	wire [7:0] OPL3_DO;

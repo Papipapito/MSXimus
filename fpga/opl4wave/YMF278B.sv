@@ -860,11 +860,14 @@ module YMF278B
 					if (REG_A == 8'h05) begin MEM_RREQ <= 1; BUSY2 <= 1; end
 				end
 				if (REG_RD_DELAY == 2'b01) begin
-					if (REG_WTN_SEL) REG_Q <= REG_WTN_Q;
+					// era v3: WTN/LEVEL/PAN salen de la BSRAM unica igual
+					// que RATE/AM — el valor bueno se remuestrea en
+					// DELAY==10 (ver mas abajo)
+					if (REG_WTN_SEL) REG_Q <= rt_cpu_q;
 					else if (REG_FNUM0_SEL) REG_Q <= REG_FNUM_Q[15:8];
 					else if (REG_FNUM1_SEL) REG_Q <= REG_FNUM_Q[7:0];
-					else if (REG_LEVEL_SEL) REG_Q <= REG_LEVEL_Q;
-					else if (REG_PAN_SEL) REG_Q <= REG_PAN_Q;
+					else if (REG_LEVEL_SEL) REG_Q <= rt_cpu_q;
+					else if (REG_PAN_SEL) REG_Q <= rt_cpu_q;
 					else if (REG_LFO_SEL) REG_Q <= REG_LFO_Q;
 					// era v3: los cuatro salen de la BSRAM unica; el dato
 					// bueno se remuestrea un CE mas tarde (ver abajo)
@@ -1035,8 +1038,8 @@ module YMF278B
 	assign REG_EA_Q = {sa_q[5],sa_q[6]};
 	
 	wire       REG_WTN_SEL = (REG_A >= 8'h08 && REG_A <= 8'h1F);
-	bit [ 7:0] REG_WTN_Q;
-	OPL4_REG_RAM #(5,8) REG_WTN  (CLK, OP4.RST ? OP4.SLOT :                       REG_A[4:0]-5'h08, OP4.RST ? '0 :                    REG_D, OP4.RST ? 1'b1 : (REG_WR & REG_WTN_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h08 : SLOT), REG_WTN_Q);
+	// era v3: WTN vive en la BSRAM unica rt_mem (campo RT_WT)
+	//OPL4_REG_RAM #(5,8) REG_WTN  (CLK, OP4.RST ? OP4.SLOT :                       REG_A[4:0]-5'h08, OP4.RST ? '0 :                    REG_D, OP4.RST ? 1'b1 : (REG_WR & REG_WTN_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h08 : SLOT), REG_WTN_Q);
 	
 	wire       REG_FNUM0_SEL = (REG_A >= 8'h38 && REG_A <= 8'h4F);
 	wire       REG_FNUM1_SEL = (REG_A >= 8'h20 && REG_A <= 8'h37);
@@ -1045,12 +1048,12 @@ module YMF278B
 	OPL4_REG_RAM #(5,8) REG_FNUM1(CLK,     RST ?     SLOT :                       REG_A[4:0]-5'h00,     RST ? '0 :                    REG_D,     RST ? 1'b1 : (REG_WR & REG_FNUM1_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h00 : FNUM_RA ), REG_FNUM_Q[7:0]);
 	
 	wire       REG_LEVEL_SEL = (REG_A >= 8'h50 && REG_A <= 8'h67);
-	bit [ 7:0] REG_LEVEL_Q;
-	OPL4_REG_RAM #(5,8) REG_LEVEL(CLK,     RST ?     SLOT :                       REG_A[4:0]-5'h10,     RST ? '0 :                    REG_D,     RST ? 1'b1 : (REG_WR & REG_LEVEL_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h10 : OP5.SLOT ), REG_LEVEL_Q);
+	// era v3: LEVEL vive en la BSRAM unica rt_mem (campo RT_LV)
+	//OPL4_REG_RAM #(5,8) REG_LEVEL(CLK,     RST ?     SLOT :                       REG_A[4:0]-5'h10,     RST ? '0 :                    REG_D,     RST ? 1'b1 : (REG_WR & REG_LEVEL_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h10 : OP5.SLOT ), REG_LEVEL_Q);
 	
 	wire       REG_PAN_SEL = (REG_A >= 8'h68 && REG_A <= 8'h7F);
-	bit [ 7:0] REG_PAN_Q;
-	OPL4_REG_RAM #(5,8) REG_PAN  (CLK,     RST ?     SLOT :                       REG_A[4:0]-5'h08,     RST ? '0 :                    REG_D,     RST ? 1'b1 : (REG_WR & REG_PAN_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h08 : OP7.SLOT ), REG_PAN_Q);
+	// era v3: PAN vive en la BSRAM unica rt_mem (campo RT_PN)
+	//OPL4_REG_RAM #(5,8) REG_PAN  (CLK,     RST ?     SLOT :                       REG_A[4:0]-5'h08,     RST ? '0 :                    REG_D,     RST ? 1'b1 : (REG_WR & REG_PAN_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h08 : OP7.SLOT ), REG_PAN_Q);
 	
 	wire       REG_LFO_SEL = (REG_A >= 8'h80 && REG_A <= 8'h97);
 	wire       REG_LFO_LOAD  = (OP3.LOAD_POS == 4'h7);
@@ -1083,40 +1086,88 @@ module YMF278B
 	//    dato aterriza en rt_cpu_q, que alimenta el mux de REG_Q. El
 	//    muestreo del readback va con REG_RD_DELAY, varios CE despues.
 	// =====================================================================
-	wire [1:0] rt_fld = REG_RATE0_SEL ? 2'd0 : REG_RATE1_SEL ? 2'd1
-	                  : REG_RATE2_SEL ? 2'd2 : 2'd3;
+	// SIETE campos en UNA BSRAM 256x8 {campo[2:0], slot[4:0]}: RATE0/1/2,
+	// AM, WTN, LEVEL y PAN. Los tres ultimos entran GRATIS en BSRAM (256x8
+	// = 2 Kbit sigue siendo UN primitivo) — critico, porque el presupuesto
+	// esta en 117/118 y no habia sitio para otro bloque.
+	//
+	// MEDIDO con probe_wlp.v (3743/3743 transiciones): SLOT, OP5.SLOT y
+	// OP7.SLOT son estables dentro del slot, y la direccion del slot
+	// SIGUIENTE es (SLOT+1) mod 24, OP4.SLOT y OP6.SLOT respectivamente —
+	// que es justo lo que lee el barrido pre-frontera de cada campo.
+	localparam RT_R0=3'd0, RT_R1=3'd1, RT_R2=3'd2, RT_AM=3'd3,
+	           RT_WT=3'd4, RT_LV=3'd5, RT_PN=3'd6;
+
+	wire [2:0] rt_fld = REG_RATE0_SEL ? RT_R0 : REG_RATE1_SEL ? RT_R1
+	                  : REG_RATE2_SEL ? RT_R2 : REG_AM_SEL    ? RT_AM
+	                  : REG_WTN_SEL   ? RT_WT : REG_LEVEL_SEL ? RT_LV : RT_PN;
 	wire [4:0] rt_idx = REG_RATE0_SEL ? REG_A[4:0]-5'h18
 	                  : REG_RATE1_SEL ? REG_A[4:0]-5'h10
-	                  : REG_RATE2_SEL ? REG_A[4:0]-5'h08 : REG_A[4:0]-5'h00;
-	wire       rt_sel = REG_RATE0_SEL | REG_RATE1_SEL | REG_RATE2_SEL | REG_AM_SEL;
+	                  : REG_RATE2_SEL ? REG_A[4:0]-5'h08
+	                  : REG_AM_SEL    ? REG_A[4:0]-5'h00
+	                  : REG_WTN_SEL   ? REG_A[4:0]-5'h08
+	                  : REG_LEVEL_SEL ? REG_A[4:0]-5'h10 : REG_A[4:0]-5'h08;
+	wire       rt_sel = REG_RATE0_SEL | REG_RATE1_SEL | REG_RATE2_SEL
+	                  | REG_AM_SEL | REG_WTN_SEL | REG_LEVEL_SEL | REG_PAN_SEL;
 
+	// limpieza de reset serializada: cada campo con SU condicion y SU
+	// direccion — WTN se borra con OP4.RST en OP4.SLOT (no con RST en
+	// SLOT como los otros seis); respetarlo importa.
+	wire       rt_rst_we = (rt_rstf == RT_WT) ? OP4.RST : RST;
+	wire [7:0] rt_rst_ad = (rt_rstf == RT_WT) ? {RT_WT, OP4.SLOT}
+	                                          : {rt_rstf, SLOT};
 	wire       rt_we_load = OP3.LOAD & SLOT0_CE & (OP3.LOAD_POS >= 4'd8)
 	                                            & (OP3.LOAD_POS <= 4'd11);
 	wire       rt_we_cpu  = REG_WR & CYCLE1_CE & rt_sel;
-	wire       rt_we      = RST | rt_we_load | rt_we_cpu;
-	wire [6:0] rt_waddr   = RST        ? {rt_rstf, SLOT}
-	                      : rt_we_load ? {OP3.LOAD_POS[1:0], OP3.SLOT}
-	                                   : {rt_fld, rt_idx};
-	wire [7:0] rt_wdata   = RST ? 8'd0 : rt_we_load ? MEM_D : REG_D;
+	// Con SIETE campos en un solo puerto de escritura hay que arbitrar lo
+	// que antes tenia siete puertos: una escritura de CPU puede coincidir
+	// con un paso de la carga de cabecera (ambos piden CYCLE1_CE) y se
+	// perdia. tb_regrd lo cazo (4 de 288, esporadico). La CPU va a un
+	// buffer de UNA plaza y entra en cuanto el puerto queda libre — no
+	// tiene prisa (el siguiente acceso del Z80 esta a microsegundos) y
+	// asi la carga de cabecera nunca cede su turno.
+	wire       rt_cpuw_go = rt_cpuw_p & ~rt_rst_we & ~rt_we_load;
+	wire       rt_we      = rt_rst_we | rt_we_load | rt_cpuw_go;
+	wire [7:0] rt_waddr   = rt_rst_we  ? rt_rst_ad
+	                      : rt_we_load ? {1'b0, OP3.LOAD_POS[1:0], OP3.SLOT}
+	                                   : rt_cpuw_ad;
+	wire [7:0] rt_wdata   = rt_rst_we ? 8'd0 : rt_we_load ? MEM_D : rt_cpuw_dt;
 	wire       rt_cpurd   = REG_RD & rt_sel;
 
-	(* syn_ramstyle = "block_ram" *) bit [7:0] rt_mem [0:127];
-	initial for (int ri = 0; ri < 128; ri++) rt_mem[ri] = '0;
-	bit [7:0] rt_q  [0:3];      // banco ACTIVO (lo que consume el motor)
-	bit [7:0] rt_st [0:3];      // staging del barrido
+	// direccion del barrido: la que consumira el slot SIGUIENTE
+	wire [4:0] rt_slot_nx = (SLOT == 5'd23) ? 5'd0 : SLOT + 5'd1;
+	wire [4:0] rt_swp_ad  = (rt_swp == RT_WT) ? rt_slot_nx
+	                      : (rt_swp == RT_LV) ? OP4.SLOT
+	                      : (rt_swp == RT_PN) ? OP6.SLOT : OP3.SLOT;
+
+	(* syn_ramstyle = "block_ram" *) bit [7:0] rt_mem [0:255];
+	initial for (int ri = 0; ri < 256; ri++) rt_mem[ri] = '0;
+	bit [7:0] rt_q  [0:6];      // banco ACTIVO (lo que consume el motor)
+	bit [7:0] rt_st [0:6];      // staging del barrido
 	bit [7:0] rt_cpu_q;         // dato del readback de CPU
-	initial for (int ri = 0; ri < 4; ri++) begin rt_q[ri] = '0; rt_st[ri] = '0; end
+	initial for (int ri = 0; ri < 7; ri++) begin rt_q[ri] = '0; rt_st[ri] = '0; end
 	initial rt_cpu_q = '0;
-	bit [1:0] rt_swp, rt_cap, rt_rstf;
+	bit [2:0] rt_swp, rt_cap, rt_rstf;
 	bit       rt_swp_on, rt_cap_on, rt_cpu_on;
 	bit [7:0] rt_rq;
+	bit       rt_cpuw_p;                 // escritura de CPU en espera
+	bit [7:0] rt_cpuw_ad, rt_cpuw_dt;
+	initial begin rt_cpuw_p = 1'b0; rt_cpuw_ad = '0; rt_cpuw_dt = '0; end
 
 	always_ff @(posedge CLK) begin
 		if (rt_we) rt_mem[rt_waddr] <= rt_wdata;
-		rt_rstf <= rt_rstf + 2'd1;
+		rt_rstf <= (rt_rstf == RT_PN) ? 3'd0 : rt_rstf + 3'd1;
+
+		// buffer de la escritura de CPU (ver nota del arbitraje)
+		if (rt_we_cpu) begin
+			rt_cpuw_p  <= 1'b1;
+			rt_cpuw_ad <= {rt_fld, rt_idx};
+			rt_cpuw_dt <= REG_D;
+		end
+		else if (rt_cpuw_go) rt_cpuw_p <= 1'b0;
 
 		// puerto de lectura: la CPU tiene prioridad y roba el ciclo
-		rt_rq     <= rt_mem[rt_cpurd ? {rt_fld, rt_idx} : {rt_swp, OP3.SLOT}];
+		rt_rq     <= rt_mem[rt_cpurd ? {rt_fld, rt_idx} : {rt_swp, rt_swp_ad}];
 		rt_cap    <= rt_swp;
 		rt_cap_on <= rt_swp_on & ~rt_cpurd;
 		rt_cpu_on <= rt_cpurd;
@@ -1124,26 +1175,34 @@ module YMF278B
 		else if (rt_cap_on) rt_st[rt_cap]  <= rt_rq;
 
 		if (RST) begin
-			rt_q[0] <= '0; rt_q[1] <= '0; rt_q[2] <= '0; rt_q[3] <= '0;
+			rt_q[RT_R0] <= '0; rt_q[RT_R1] <= '0; rt_q[RT_R2] <= '0;
+			rt_q[RT_AM] <= '0; rt_q[RT_LV] <= '0; rt_q[RT_PN] <= '0;
 		end
 		else if (SLOT1_CE) begin
-			rt_q[0] <= rt_st[0]; rt_q[1] <= rt_st[1];
-			rt_q[2] <= rt_st[2]; rt_q[3] <= rt_st[3];
+			rt_q[RT_R0] <= rt_st[RT_R0]; rt_q[RT_R1] <= rt_st[RT_R1];
+			rt_q[RT_R2] <= rt_st[RT_R2]; rt_q[RT_AM] <= rt_st[RT_AM];
+			rt_q[RT_LV] <= rt_st[RT_LV]; rt_q[RT_PN] <= rt_st[RT_PN];
 		end
+		// WTN sigue a OP4.RST, no a RST (como el array original)
+		if (OP4.RST)          rt_q[RT_WT] <= '0;
+		else if (SLOT1_CE)    rt_q[RT_WT] <= rt_st[RT_WT];
 
 		if (CYCLE1_CE && CYCLE_NUM == 3'd3) begin
-			rt_swp_on <= 1'b1;  rt_swp <= 2'd0;
+			rt_swp_on <= 1'b1;  rt_swp <= 3'd0;
 		end
 		else if (rt_swp_on && !rt_cpurd) begin
-			if (rt_swp == 2'd3) rt_swp_on <= 1'b0;
-			else                rt_swp <= rt_swp + 2'd1;
+			if (rt_swp == RT_PN) rt_swp_on <= 1'b0;
+			else                 rt_swp <= rt_swp + 3'd1;
 		end
 	end
 
-	wire [7:0] REG_RATE0_Q = rt_q[0];
-	wire [7:0] REG_RATE1_Q = rt_q[1];
-	wire [7:0] REG_RATE2_Q = rt_q[2];
-	wire [7:0] REG_AM_Q    = rt_q[3];
+	wire [7:0] REG_RATE0_Q = rt_q[RT_R0];
+	wire [7:0] REG_RATE1_Q = rt_q[RT_R1];
+	wire [7:0] REG_RATE2_Q = rt_q[RT_R2];
+	wire [7:0] REG_AM_Q    = rt_q[RT_AM];
+	wire [7:0] REG_WTN_Q   = rt_q[RT_WT];
+	wire [7:0] REG_LEVEL_Q = rt_q[RT_LV];
+	wire [7:0] REG_PAN_Q   = rt_q[RT_PN];
 	
 	
 	//OPL3
