@@ -24,7 +24,7 @@ un hook de disco, lo que probablemente exonera al VDP de ese cuelgue.
 
 | # | Nombre | Mecanismo | Banco | Estado |
 |---|--------|-----------|-------|--------|
-| 1 | **_176 expulsado** | Inundación de la sc-cache: rompía el V9968DM2 (rayas donde debía haber logo translúcido) | bisección s011/s012 + análisis RTL | ✅ curado y confirmado en placa (s015) |
+| 1 | **_176 EXPULSADO** (⚠️ el `_176` **es el bug**, no un parche: la cura es QUITARLO) | Refill de escrituras no residentes en el shim: rompía el V9968DM2 (rayas donde debía haber logo translúcido) | bisección s011/s012 + análisis RTL | ✅ **ya fuera de la rama** (06/08) + `_179` con él |
 | 2 | **FIFO del motor** | `ff_transfer_ready` es un almacén de UN bit: si la CPU escribe el byte k+1 mientras el motor procesa el k, el paso por `*_next` pone TR=1 y **borra la evidencia** → el motor espera un byte que ya llegó → CE=1 para siempre | `tb_lmmcseam`: v2.1 **16/16 cuelgues**, con FIFO **16/16 OK** | ✅ curado |
 | 3 | **_183 TR en reposo** | Cualquier escritura a R#44 baja TR, y **nada lo re-arma en idle**; el chip real en reposo lee S#2 con TR=1. El poll de la BIOS no salía jamás | replay de Fleet + traza openMSX (pc=2bf8) | ✅ curado |
 | 4 | **_184 correa del /WAIT** | Timeout del fail-open del glue 12 µs → 48 µs (cubre inanición de VRAM en modos MSX1) | regresión MODE=5 0 fallos | ✅ curado |
@@ -34,9 +34,18 @@ un hook de disco, lo que probablemente exonera al VDP de ese cuelgue.
 | 8 | **_187d número de sprite** | Con 5S=0, S#0[4:0] debe llevar **el número del último plano examinado** (documentado TMS9918/V9938) y el software TMS lo lee. El _187 lo dejó clavado a 0 | tb_spcol (el número vuelve a variar) | ✅ corregido (regresión de mi propio _187) |
 | 9 | **_188 INT tragada por el poll** | La cadena if/else evaluaba los clears antes que los sets: **si el evento coincide con el ciclo de cualquier lectura de status, se pierde**. Poleando S#2 a ~20k lecturas/s = una INT de frame perdida cada ~70-80 s | `tb_intswallow` A/B: la vieja pierde el evento en **4 colisiones distintas**, la nueva **7/7** | ✅ curado (no era el asesino de Fleet, pero es defecto real) |
 
-**Para v2.1.2**: la v2.1 completa **menos _176 y _179**, **más** FIFO + _183 +
-_184 + _185 + _186b + _187/b/c/d + _188. Todo validado en banco y con
-GATE limpio en las builds entregadas.
+**Para v2.1.2 / V3 — YA NO HAY QUE COMPONER NADA A MANO**: la rama
+`claude/loving-meninsky-c4f404` contiene **la línea completa**: la v2.1
+**menos `_176` y `_179`** (ambos retirados del shim el 06/08, trayendo la
+versión **validada en placa** que Albert lleva probando desde la s015)
+**más** FIFO + `_183` + `_184` + `_185` + `_186b` + `_187/b/c/d` + `_188`.
+Integrar = coger los cinco ficheros de RTL de la rama. Nada que quitar
+después.
+
+⚠️ **Aviso de nomenclatura, que se prestó a confusión**: los números `_1xx`
+son **cambios de la línea**, no siempre arreglos. El `_176` y el `_179`
+**son defectos**: la cura consiste en **quitarlos**. Los demás (`_183` en
+adelante) sí son parches que se aplican.
 
 **Para HRA**: los números 2, 3, 5, 7, 8 y 9 están en el **RTL compartido**
 (`vdp_command.v`, `vdp_cpu_interface.v`, `vdp_sprite_select_visible_planes.v`).
