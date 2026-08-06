@@ -29,7 +29,8 @@ module dbg_trace #(
     parameter CLK_HZ   = 53_996_000,
     parameter BAUD     = 115_200,
     parameter AW       = 12,           // 4096 eventos = 16 KB de BRAM
-    parameter QUIET_MS = 50            // ms sin I/O que disparan el congelado
+    parameter QUIET_MS = 50,           // ms sin I/O que disparan el congelado
+    parameter WARM_IO  = 4096          // accesos de I/O antes de armar el disparo
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -49,7 +50,7 @@ module dbg_trace #(
     input  wire        trig_manual,    // boton de la placa (flanco)
 
     output reg         tx,
-    output wire        frozen          // 1 = anillo congelado (para el LED)
+    output wire        frozen          // 1 = el volcado MANDA en el cable
 );
 
     localparam integer DIV = CLK_HZ / BAUD;
@@ -59,7 +60,11 @@ module dbg_trace #(
     reg [31:0] ring [0:(1<<AW)-1];
     reg [AW-1:0] wp = 0;
     reg        armed = 1'b1;           // 1 = grabando
-    assign     frozen = ~armed;
+    // s032c ARREGLO 2: `frozen` solo reclama el cable MIENTRAS vuelca; al
+    // terminar lo devuelve a la radiografia (si no, tras el volcado te
+    // quedas sin telemetria y sin saber si sigue vivo).
+    reg        dump_done = 1'b0;
+    assign     frozen = ~armed & ~dump_done;
 
     reg [1:0] m1_s   = 2'b11;
     reg [1:0] iow_s  = 2'b11;
@@ -109,15 +114,27 @@ module dbg_trace #(
     // (b) boton: para congelar a mano cuando se ve el sintoma en pantalla.
     reg [31:0] quiet = 0;
     reg [1:0]  btn_s = 2'b00;
+    // s032c ARREGLO 1 — CALENTAMIENTO. El disparo por silencio NO puede estar
+    // vivo desde el reset: en el ARRANQUE hay de sobra 50 ms sin un solo
+    // acceso de I/O (init de la FPGA, DDR3, la propia BIOS antes de tocar
+    // puertos), asi que el analizador congelaba nada mas encender, volcaba el
+    // arranque —que nadie escucha aun— y se quedaba mudo para siempre.
+    // Ahora exige ver ARRANCAR LA MAQUINA: hasta que no cuenta WARM_IO
+    // accesos de I/O, el silencio no dispara.
+    reg [15:0] io_seen = 16'd0;
+    wire       warmed  = (io_seen >= WARM_IO);
     always @(posedge clk) begin
         btn_s <= { btn_s[0], trig_manual };
         if( !rst_n ) begin
-            quiet <= 0; armed <= 1'b1;
+            quiet <= 0; armed <= 1'b1; io_seen <= 16'd0;
         end
         else if( armed ) begin
-            if( iow_s == 2'b01 || ior_s == 2'b01 ) quiet <= 0;
-            else                                    quiet <= quiet + 1'b1;
-            if( quiet >= QUIET_TICKS || btn_s == 2'b01 ) armed <= 1'b0;
+            if( iow_s == 2'b01 || ior_s == 2'b01 ) begin
+                quiet <= 0;
+                if( !warmed ) io_seen <= io_seen + 16'd1;
+            end
+            else if( warmed ) quiet <= quiet + 1'b1;
+            if( (warmed && quiet >= QUIET_TICKS) || btn_s == 2'b01 ) armed <= 1'b0;
         end
     end
 
@@ -214,7 +231,7 @@ module dbg_trace #(
                     if( chr == 4'd4 ) st <= S_DONE;
                     else chr <= chr + 1'b1;
                 end
-        S_DONE: ;
+        S_DONE: dump_done <= 1'b1;
         endcase
     end
 
