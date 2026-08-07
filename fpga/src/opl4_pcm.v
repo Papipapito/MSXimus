@@ -483,6 +483,25 @@ reg        pf_kill;                // _107: el pf en vuelo quedo rancio
 wire       rd_edge = ~e_mrd_n && !mrd_d1;
 wire       wr_edge = ~e_mwr_n && !mwr_d1;
 
+// era v3: retencion de UNA plaza para la escritura que colisiona con la
+// resolucion de una lectura (ver la nota del bloque de escritura). El
+// original no la necesitaba porque su exclusion era rd_edge/wr_edge, que
+// el motor nunca solapa; al mover la resolucion a rd_edge_d1 el solape
+// pasa a ser real con las escrituras de CPU a la RAM de ondas.
+reg         wr_hold;
+reg [21:0]  wrh_addr;
+reg [7:0]   wrh_data;
+reg [4:0]   wrh_slot;
+// La escritura solo entra con la plaza del arbitro LIBRE: si entrase con
+// un fallo de lectura ya encolado lo machacaria (eng_pend es de UNA plaza)
+// y ese fetch no volveria nunca -> mem_inflight clavado -> CE congelada
+// hasta el watchdog de 3,5 ms -> el status del motor se queda pegado.
+wire        wre_free = !rd_edge_d1 && !eng_pend;
+wire        wre_go   = wre_free && (wr_hold || wr_edge);
+wire [21:0] wre_addr = wr_hold ? wrh_addr : e_addr22;
+wire [7:0]  wre_data = wr_hold ? wrh_data : e_mdo;
+wire [4:0]  wre_slot = wr_hold ? wrh_slot : e_slot;
+
 // Puertos de la BSRAM de cache (era v3). Escritura = fill; lectura corre
 // SIEMPRE (la direccion es cuasi-estatica alrededor de rd_edge). Sin reset:
 // una BSRAM no lo tiene; la validez la gobierna lb_v (FF), como siempre.
@@ -516,6 +535,7 @@ always @(posedge clk_eng or negedge erst_n) begin
         lb_v <= 256'd0; lb_pfb <= 256'd0;
         lb_hit <= 1'b0; lb_fast <= 1'b0; lb_byte <= 8'd0;
         rd_edge_d1 <= 1'b0;
+        wr_hold <= 1'b0; wrh_addr <= 22'd0; wrh_data <= 8'd0; wrh_slot <= 5'd0;
         ifw <= 18'd0; ifw_hits <= 4'd0; alive <= 4'd0;
         fill_pend <= 1'b0; fill_tag <= 21'd0; fill_is_pf <= 1'b0;
         fill_slot <= 5'd0; cur_op_slot <= 5'd0; eng_pend_slot <= 5'd0;
@@ -571,6 +591,15 @@ always @(posedge clk_eng or negedge erst_n) begin
             lb_fast <= 1'b0;
             mem_inflight <= 1'b0;
         end
+        // retencion de la escritura colisionada (una plaza; el motor no
+        // emite dos escrituras en ciclos consecutivos)
+        if (wr_edge && !wre_go) begin       // no puede entrar ya -> se retiene
+            wr_hold  <= 1'b1;
+            wrh_addr <= e_addr22;
+            wrh_data <= e_mdo;
+            wrh_slot <= e_slot;
+        end
+        else if (wr_hold && wre_go) wr_hold <= 1'b0;
         if (rd_edge) begin
             // era v3: la resolucion espera a lb_q (1 ciclo); la CYCLE1 se
             // sujeta desde YA para que el deadline no se cuele (_94)
@@ -626,14 +655,23 @@ always @(posedge clk_eng or negedge erst_n) begin
                 end
             end
         end
-        else if (wr_edge) begin
+        // ⚠️ era v3, DEFECTO PROPIO CORREGIDO: al desplazar la resolucion a
+        // rd_edge_d1, este else-if paso a poder disparar de verdad. En el
+        // original la exclusion era rd_edge/wr_edge, que NUNCA coinciden
+        // (el motor conduce MRD_N y MWR_N excluyentes); con rd_edge_d1 SI
+        // coinciden, porque las escrituras de la RAM de ondas las mete la
+        // CPU (reg 06) de forma asincrona a los fetches del motor. Una
+        // escritura que caia justo un ciclo despues de una lectura se
+        // DESCARTABA EN SILENCIO. Ahora se retiene una plaza y entra al
+        // ciclo siguiente.
+        else if (wre_go) begin
             lb_hit <= 1'b0;
-            if (e_addr22[21]) begin                // solo la RAM es escribible
+            if (wre_addr[21]) begin                // solo la RAM es escribible
                 eng_pend      <= 1'b1;
                 eng_pend_we   <= 1'b1;
-                eng_pend_addr <= e_addr22;
-                eng_pend_slot <= e_slot;
-                eng_pend_data <= e_mdo;
+                eng_pend_addr <= wre_addr;
+                eng_pend_slot <= wre_slot;
+                eng_pend_data <= wre_data;
                 mem_inflight  <= 1'b1;             // tambien en escritura (_91)
                 lb_v   <= 256'd0;                  // _107c: FLUSH total (una
                 lb_pfb <= 256'd0;                  //  escritura CPU no tiene
@@ -643,7 +681,7 @@ always @(posedge clk_eng or negedge erst_n) begin
                                                    //  netlist, solo claridad)
                 fill_pend <= 1'b0;                 // _96: cancelar fill pendiente
                 pfq_rp <= pfq_wp;                  // _107b: vaciar wants rancios
-                if (port_busy && op_is_pf && mem_addr[21:1] == e_addr22[21:1])
+                if (port_busy && op_is_pf && mem_addr[21:1] == wre_addr[21:1])
                     pf_kill <= 1'b1;               // pf en vuelo quedaria rancio
             end
             // _107: escritura con addr[21]==0 (region ROM) = NO-OP, como el
