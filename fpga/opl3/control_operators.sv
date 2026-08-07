@@ -426,7 +426,12 @@ module control_operators
         op_num_p1 <= op_num;
     end
 
-    always_comb
+    // era v3: PREASIGNADA (mismo motivo que arriba) — sin esto el
+    // 'unique case (op_num_p1)' deja huecos (op_num_p1 es de 5 bits) y se
+    // infieren 10 LATCHES mas para modulation_p1, con su red combinacional
+    // vista como reloj sin declarar. Los huecos no ocurren jamas.
+    always_comb begin
+        modulation_p1 = 0;
         unique case (op_num_p1)
         0, 1, 2, 12, 13, 14:      modulation_p1 = 0;
         3, 4, 5, 15:              modulation_p1 = cnt0_p1 ? 0 : modulation_out_p1;
@@ -474,6 +479,7 @@ module control_operators
             else                  modulation_p1 = cnt0_p1 ? 0 : modulation_out_p1;
         16, 17:                   modulation_p1 = cnt0_p1 || (ryt_p1 && bank_num_p1 == 0) ? 0 : modulation_out_p1; // snare drum and top cymbal do not use modulation
         endcase
+    end
 
     always_ff @(posedge clk)
         state <= next_state;
