@@ -203,6 +203,13 @@ module envelope_generator
 
     always_comb begin
         eg_reset_p0 = 0;
+        // era v3: PREASIGNADA como eg_reset_p0. Sin esto el 'unique case'
+        // sobre state_p0 deja huecos y se infieren 3 LATCHES (DLCE) para
+        // requested_rate_p0, gobernados por una red combinacional que el
+        // analizador ve como reloj sin declarar (TA1132) => camino SIN
+        // temporizar, a merced del placement. Todas las ramas reales
+        // siguen asignando el valor, asi que no cambia nada funcional.
+        requested_rate_p0 = 0;
 
         if (key_on_p0 && state_p0 == RELEASE) begin
             eg_reset_p0 = 1;

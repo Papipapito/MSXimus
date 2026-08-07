@@ -230,6 +230,16 @@ module control_operators
 
     always_comb begin
         cnt1_channel_mem_rd_address = 0;
+        // era v3: PREASIGNADAS como ya lo estaba cnt1. Sin esto, el
+        // 'unique case' NO cubre op_num 18..31 (op_num es de 5 bits) y el
+        // sintetizador infiere LATCHES: 14 DLCE gobernados por dos redes
+        // combinacionales que el analizador ve como relojes sin declarar
+        // (TA1132) => esos caminos NO los temporiza NADIE y su
+        // comportamiento depende del placement. Es una de las fuentes de
+        // la loteria de dados. Los valores 18..31 no ocurren jamas, asi
+        // que el comportamiento real no cambia.
+        kon_block_fnum_channel_mem_rd_address = 0;
+        fb_cnt0_channel_mem_rd_address = 0;
 
         unique case (op_num)
         0, 3: begin
