@@ -139,22 +139,32 @@ module control_operators
             operator_mem_rd_address = op_num + 4;
 
     // ========================================================================
-    // era v3 — DIETA DEL OPL3: los CUATRO ficheros de registro de 8 bits del
-    // operador (am_vib_egt_ksr_mult / ksl_tl / ar_dr / sl_rr), fusionados en
-    // UN SOLO BSRAM con escritura por byte.
+    // era v3 — DIETA DEL OPL3: DOS de los cuatro ficheros de registro de 8 bits
+    // del operador (am_vib_egt_ksr_mult y ksl_tl) pasan de FF a BSRAM.
     //
-    // Por que se puede fusionar:
-    //  - Los cuatro se leen con la MISMA direccion ({bank_num,
-    //    operator_mem_rd_address}), asi que un unico puerto de lectura de 32
-    //    bits los sirve a los cuatro a la vez.
-    //  - El BSRAM del GW5A tiene habilitacion de escritura POR BYTE
-    //    (comprobado: Gowin infiere un solo SDPB con ADA[3:0] como
-    //    byte-enables), asi que cada rango de registros escribe su carril sin
-    //    tocar los otros tres.
+    // Por que se pueden fusionar: se leen con la MISMA direccion ({bank_num,
+    // operator_mem_rd_address}), asi que un unico puerto de 16 bits sirve a
+    // los dos a la vez.
     //
-    // Lo que se lleva por delante: 4 x 22 x 8 bits x 2 bancos = 1408 FF mas
-    // los cuatro arboles de mux de lectura asincrona, que es la grasa gorda
-    // del core ahora que el GW5AT-60B no tiene SSRAM.
+    // POR QUE SOLO DOS, y no los cuatro. En la build completa Gowin gasta UN
+    // BLOQUE POR CARRIL DE 8 BITS: demuestra que los rangos de direcciones son
+    // excluyentes y parte la memoria en vez de usar el byte-enable. No hay
+    // forma de convencerlo desde el RTL — probados y medidos: syn_keep, no
+    // reutilizar las habilitaciones, esconder la decodificacion tras un
+    // modulo, y un barrido de arranque que escribe los cuatro carriles a la
+    // vez. Los cuatro trucos dan 1 solo bloque en el core AISLADO y cuatro en
+    // la build completa (PA2017: 119 bloques contra 118, campana v3d001).
+    //
+    // Y el presupuesto no da para cuatro: 117 bloques de partida, -2 que
+    // libera la fusion de bancos = 115, y el limite del chip son 118. Caben
+    // DOS carriles (117/118, el mismo que hoy). Meter los otros dos exige o
+    // liberar 2 bloques en otro sitio (la cache del V9968 esta al 89%, ahi no
+    // sobra nada) o retemporizar ar/dr/sl/rr a la etapa p1 para leer dos veces
+    // por slot con un solo puerto. Lo segundo es cirugia en el generador de
+    // envolvente y no la hago sin decidirlo antes.
+    //
+    // Lo que se lleva por delante tal cual: 2 x 22 x 8 bits x 2 bancos = 704
+    // FF mas sus dos arboles de mux de lectura asincrona.
     //
     // El BSRAM lee SINCRONO y el original leia ASINCRONO. NO se añade ni un
     // ciclo: se lee con la direccion ADELANTADA, porque 'next_state' es por
@@ -193,19 +203,7 @@ module control_operators
         else
             operator_mem_rd_address_nxt = op_num_nxt + 4;
 
-    // syn_keep OBLIGATORIO: sin el, Gowin DEMUESTRA que los cuatro rangos de
-    // direcciones son excluyentes y, en vez de usar el byte-enable, parte la
-    // memoria en cuatro BSRAM de 8 bits (medido: 4 primitivos en vez de 1, y
-    // con 118 bloques en el chip eso no cabe). Con syn_keep infiere UN SDPB
-    // de 32 bits con ADA[3:0] como byte-enables, que es lo que queremos.
-    (* syn_keep = 1 *) logic [3:0] opreg_bwe;
-
-    always_comb begin
-        opreg_bwe[0] = opl3_reg_wr.valid && opl3_reg_wr.address >= 'h20 && opl3_reg_wr.address <= 'h35;
-        opreg_bwe[1] = opl3_reg_wr.valid && opl3_reg_wr.address >= 'h40 && opl3_reg_wr.address <= 'h55;
-        opreg_bwe[2] = opl3_reg_wr.valid && opl3_reg_wr.address >= 'h60 && opl3_reg_wr.address <= 'h75;
-        opreg_bwe[3] = opl3_reg_wr.valid && opl3_reg_wr.address >= 'h80 && opl3_reg_wr.address <= 'h95;
-    end
+    logic [1:0] opreg_bwe;
 
     logic [OPREG_ADDR_WIDTH-1:0] opreg_wr_addr;
     logic [OPREG_ADDR_WIDTH-1:0] opreg_rd_addr_nxt;
@@ -213,32 +211,32 @@ module control_operators
     always_comb opreg_wr_addr      = {opl3_reg_wr.bank_num, opl3_reg_wr.address[OPREG_IDX_WIDTH-1:0]};
     always_comb opreg_rd_addr_nxt  = {bank_num_nxt, operator_mem_rd_address_nxt};
 
+    always_comb begin
+        opreg_bwe[0] = opl3_reg_wr.valid && opl3_reg_wr.address >= 'h20 && opl3_reg_wr.address <= 'h35;
+        opreg_bwe[1] = opl3_reg_wr.valid && opl3_reg_wr.address >= 'h40 && opl3_reg_wr.address <= 'h55;
+    end
+
     (* syn_ramstyle = "block_ram" *)
-    logic [31:0] opreg_mem [0:(1<<OPREG_ADDR_WIDTH)-1] = '{default: 32'b0};
-    logic [31:0] opreg_q = 0;
+    logic [15:0] opreg_mem [0:(1<<OPREG_ADDR_WIDTH)-1] = '{default: 16'b0};
+    logic [15:0] opreg_q = 0;
 
     always_ff @(posedge clk) begin
         if (opreg_bwe[0]) opreg_mem[opreg_wr_addr][ 7: 0] <= opl3_reg_wr.data;
         if (opreg_bwe[1]) opreg_mem[opreg_wr_addr][15: 8] <= opl3_reg_wr.data;
-        if (opreg_bwe[2]) opreg_mem[opreg_wr_addr][23:16] <= opl3_reg_wr.data;
-        if (opreg_bwe[3]) opreg_mem[opreg_wr_addr][31:24] <= opl3_reg_wr.data;
     end
 
     always_ff @(posedge clk)
         opreg_q <= opreg_mem[opreg_rd_addr_nxt];
 
     // Adelanto de la escritura que coincide con el flanco de captura.
-    //
-    // OJO: aqui NO se puede reutilizar opreg_bwe. Si opreg_bwe tiene una
-    // segunda salida hacia este registro, Gowin vuelve a partir la memoria en
-    // cuatro BSRAM de 8 bits pese al syn_keep (medido: 4 primitivos con
-    // reutilizacion, 1 sin ella). Por eso se guarda la direccion del registro
-    // y se vuelve a decodificar el carril aqui: cuesta 8 FF y cuatro
-    // comparadores, y es lo que mantiene la memoria en UN bloque.
+    // Se guarda la direccion del registro y se vuelve a decodificar el carril
+    // aqui en vez de reutilizar opreg_bwe: cuesta 8 FF y dos comparadores, y
+    // evita darle a la herramienta una razon mas para reestructurar la
+    // memoria (medido en su dia: reutilizar las habilitaciones la partia).
     logic        opreg_fwd_hit = 0;
     logic [REG_FILE_DATA_WIDTH-1:0] opreg_fwd_addr = 0;
     logic [REG_FILE_DATA_WIDTH-1:0] opreg_fwd_dat = 0;
-    logic [31:0] opreg_word;
+    logic [15:0] opreg_word;
 
     always_ff @(posedge clk) begin
         opreg_fwd_hit  <= opl3_reg_wr.valid && (opreg_wr_addr == opreg_rd_addr_nxt);
@@ -251,15 +249,49 @@ module control_operators
         if (opreg_fwd_hit) begin
             if (opreg_fwd_addr >= 'h20 && opreg_fwd_addr <= 'h35) opreg_word[ 7: 0] = opreg_fwd_dat;
             if (opreg_fwd_addr >= 'h40 && opreg_fwd_addr <= 'h55) opreg_word[15: 8] = opreg_fwd_dat;
-            if (opreg_fwd_addr >= 'h60 && opreg_fwd_addr <= 'h75) opreg_word[23:16] = opreg_fwd_dat;
-            if (opreg_fwd_addr >= 'h80 && opreg_fwd_addr <= 'h95) opreg_word[31:24] = opreg_fwd_dat;
         end
     end
 
     always_comb {am, vib, egt, ksr, mult} = opreg_word[ 7: 0];
     always_comb {ksl, tl}                 = opreg_word[15: 8];
-    always_comb {ar, dr}                  = opreg_word[23:16];
-    always_comb {sl, rr}                  = opreg_word[31:24];
+
+    // ar/dr y sl/rr se quedan en FF: no hay bloques de BSRAM para ellos (ver
+    // la nota de presupuesto de arriba).
+    mem_multi_bank #(
+        .DATA_WIDTH(REG_FILE_DATA_WIDTH),
+        .DEPTH('h16),
+        .OUTPUT_DELAY(0),
+        .DEFAULT_VALUE(0),
+        .NUM_BANKS(NUM_BANKS)
+    ) ar_dr_mem (
+        .clk,
+        .wea(opl3_reg_wr.valid && opl3_reg_wr.address >= 'h60 && opl3_reg_wr.address <= 'h75),
+        .reb(op_sample_clk_en),
+        .banka(opl3_reg_wr.bank_num),
+        .addra(opl3_reg_wr.address[$clog2('h16)-1:0]),
+        .bankb(bank_num),
+        .addrb(operator_mem_rd_address),
+        .dia(opl3_reg_wr.data),
+        .dob({ar, dr})
+    );
+
+    mem_multi_bank #(
+        .DATA_WIDTH(REG_FILE_DATA_WIDTH),
+        .DEPTH('h16),
+        .OUTPUT_DELAY(0),
+        .DEFAULT_VALUE(0),
+        .NUM_BANKS(NUM_BANKS)
+    ) sl_rr_mem (
+        .clk,
+        .wea(opl3_reg_wr.valid && opl3_reg_wr.address >= 'h80 && opl3_reg_wr.address <= 'h95),
+        .reb(op_sample_clk_en),
+        .banka(opl3_reg_wr.bank_num),
+        .addra(opl3_reg_wr.address[$clog2('h16)-1:0]),
+        .bankb(bank_num),
+        .addrb(operator_mem_rd_address),
+        .dia(opl3_reg_wr.data),
+        .dob({sl, rr})
+    );
 
     mem_multi_bank #(
         .DATA_WIDTH(REG_WS_WIDTH),
