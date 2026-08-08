@@ -58,6 +58,13 @@ v9968_cpu_glue u_glue (
     .bus_rdata(bus_rdata), .bus_rdata_en(bus_rdata_en)
 );
 
+// El glue se REESCRIBIO en la era _177 y 'rd_start' ya no existe. Su
+// equivalente es el ciclo en que se EMITE la transaccion de lectura: no hay
+// una en vuelo (bus_valid bajo), el ciclo I/O es de lectura y aun no se ha
+// servido. Sin esto el banco no compila contra el arbol actual.
+wire glue_rd_issue = !u_glue.bus_valid && u_glue.io_rd && !u_glue.io_wr
+                     && !u_glue.served;
+
 wire  [17:2] vram_address;
 wire         vram_write, vram_valid, vram_refresh;
 wire  [31:0] vram_wdata;
@@ -268,7 +275,7 @@ end
 // S2: INs que llegan con el puerto bloqueado + ejecuciones w_read por IN
 integer blocked_in = 0;
 always @(posedge clk)
-    if (u_glue.rd_start && (u_vdp.u_cpu_interface.ff_busy ||
+    if (glue_rd_issue && (u_vdp.u_cpu_interface.ff_busy ||
                             u_vdp.u_cpu_interface.ff_pf_inflight))
         blocked_in <= blocked_in + 1;
 
@@ -284,7 +291,7 @@ end
 integer phantom = 0;
 integer wread_this_in = 0;
 always @(posedge clk) begin
-    if (u_glue.rd_start && z_mode == 2'd0) wread_this_in <= 0;
+    if (glue_rd_issue && z_mode == 2'd0) wread_this_in <= 0;
     else if (u_vdp.u_cpu_interface.w_read && u_vdp.u_cpu_interface.ff_port0) begin
         wread_this_in <= wread_this_in + 1;
         if (wread_this_in == 1) begin
