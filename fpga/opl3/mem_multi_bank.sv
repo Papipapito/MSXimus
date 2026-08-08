@@ -76,6 +76,41 @@ module mem_multi_bank #(
     );
 
     generate
+    if (USE_BRAM) begin: fused
+        // era v3 (dieta OPL3): UN SOLO BSRAM para los NUM_BANKS bancos,
+        // direccionado por {bank, addr}. El banco no es mas que un bit de
+        // direccion, asi que la semantica es identica a la version de un
+        // primitivo por banco — pero ahorra la mitad de los bloques (el
+        // limite del GW5AT-60B son 118 y estabamos en 117) y ademas quita
+        // el mux de salida por banco (bankb_p ya no hace falta).
+        // Profundidad EXACTA (banco*DEPTH + addr), no {banco,addr}: con un
+        // DATA_WIDTH>18 el modulo deja los bits altos en FF, y redondear a
+        // potencia de dos los duplicaria sin ganar nada. Con NUM_BANKS=2 el
+        // "producto" es una suma de constante.
+        localparam FUSED_DEPTH = NUM_BANKS * DEPTH;
+
+        logic [$clog2(FUSED_DEPTH)-1:0] addra_f, addrb_f;
+
+        always_comb addra_f = banka * DEPTH + addra;
+        always_comb addrb_f = bankb * DEPTH + addrb;
+
+        mem_simple_dual_port_bram #(
+            .DATA_WIDTH(DATA_WIDTH),
+            .DEPTH(FUSED_DEPTH),
+            .OUTPUT_DELAY(OUTPUT_DELAY),
+            .DEFAULT_VALUE(DEFAULT_VALUE)
+        ) mem_fused (
+            .clka(clk),
+            .clkb(clk),
+            .wea,
+            .reb,
+            .addra(addra_f),
+            .addrb(addrb_f),
+            .dia,
+            .dob
+        );
+    end
+    else begin: perbank
     genvar i;
     for (i = 0; i < NUM_BANKS; ++i) begin: bankgen
         always_comb wea_array[i] = wea && banka == i;
@@ -93,29 +128,6 @@ module mem_multi_bank #(
                 .dia,
                 .dob(dob_array[i])
             );
-        else if (USE_BRAM) begin
-            // era v3: banco en BSRAM (sin SSRAM en el GW5AT-60B); misma
-            // semantica que mem_simple_dual_port con delay>=1
-            logic reb_mem;
-
-            always_comb reb_mem = reb && bankb == i;
-
-            mem_simple_dual_port_bram #(
-                .DATA_WIDTH(DATA_WIDTH),
-                .DEPTH(DEPTH),
-                .OUTPUT_DELAY(OUTPUT_DELAY),
-                .DEFAULT_VALUE(DEFAULT_VALUE)
-            ) mem_bank (
-                .clka(clk),
-                .clkb(clk),
-                .wea(wea_array[i]),
-                .reb(reb_mem),
-                .addra,
-                .addrb,
-                .dia,
-                .dob(dob_array[i])
-            );
-        end
         else begin
             logic reb_mem;
 
@@ -143,6 +155,7 @@ module mem_multi_bank #(
         always_comb dob = dob_array[bankb];
     else
         always_comb dob = dob_array[bankb_p[OUTPUT_DELAY]];
+    end
     endgenerate
 endmodule
 `default_nettype wire
