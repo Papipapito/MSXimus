@@ -51,3 +51,16 @@ fpga/opl4_20k_est/
 
 # --- Carpeta personal de Albert (release lista para flashear, NO subir) ---
 mi_release/
+
+# --- Volcados de simulacion del V9968 (regenerables, 5 MB cada uno) ---
+# Se retiraron 14 (~66 MB) el 08/08: los s5..s8_frame.txt eran del 21/07 y ya
+# estaban OBSOLETOS (geometria del frame cambiada; el propio
+# run_screen678_th.sh explica que no se comparan contra ellos). El metodo
+# valido es comparar shim-referencia vs shim-trabajo con el MISMO core.
+# EXCEPCION: s3r_frame.txt se conserva — es la REFERENCIA DORADA que lee
+# run_sprite3_iv.sh (regenerable con './run_sprite3_iv.sh ref').
+tools/v9968_sim/s*_frame*.txt
+!tools/v9968_sim/s3r_frame.txt
+tools/v9968_sim/s8_glitch.txt
+tools/v9968_sim/*.raw
+tools/v9968_sim/*.ppm
