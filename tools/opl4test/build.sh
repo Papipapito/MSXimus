@@ -14,6 +14,8 @@
 # 4000h-BFFFh; si el linker pasa de C000h el codigo queda INALCANZABLE y el
 # ROM "compila bien" pero se corrompe en ejecucion (basura/resets, nos paso
 # con la v11: Higher=C286). El build FALLA ruidosamente si se desborda.
+# NOTA: msxbuild.sh deja la ROM en el arbol de MSXgl (out/), NO aqui. Se copia
+# de vuelta al final: sin eso te llevas la ROM VIEJA sin enterarte.
 OUT=$(bash "/mnt/c/Users/alber/proyectosAI/sdk-tools/msx-unapi-env/msxbuild.sh" "$(cd "$(dirname "$0")" && pwd)" 2>&1)
 RC=$?
 echo "$OUT"
@@ -27,3 +29,12 @@ if [ -n "$HIGHER" ]; then
     echo "[guard] area plana OK: Higher=${HIGHER}h (tope C000h)"
 fi
 exit $RC
+
+# Traer la ROM recien compilada del arbol de MSXgl a este directorio.
+FRESH="$HOME/MSXgl/projects/$(basename "$(cd "$(dirname "$0")" && pwd)")/out/$(basename "$(cd "$(dirname "$0")" && pwd)").rom"
+if [ -f "$FRESH" ]; then
+    cp "$FRESH" "$(cd "$(dirname "$0")" && pwd)/"
+    echo "[rom] copiada desde $FRESH"
+else
+    echo "*** AVISO: no encuentro la ROM recien compilada en $FRESH ***"
+fi
