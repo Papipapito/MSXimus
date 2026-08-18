@@ -76,6 +76,37 @@ Without the OPL4 ROM the core works just the same; you simply won't have MoonSou
 
 After that, insert a microSD with your ROMs and disk images and you're done — the boot menu comes up on its own.
 
+## Wiring the ESP32-C6 (WiFi)
+
+Optional — the core works fine without it; you simply won't have WiFi. Three or four wires between the board's **J10** header and the module:
+
+<p align="center"><img src="docs/img/esp32_c6_j10.svg" alt="ESP32-C6 to J10 wiring diagram" width="820"/></p>
+
+| J10 pin | Signal | FPGA ball | ESP32-C6 |
+|---|---|---|---|
+| **11** | +5 V (power) | — | **5V** (right strip, last one) |
+| **12** | GND | — | **GND** (right strip) |
+| **14** | TX (FPGA → C6) | W21 | **IO17** (left strip, the C6's RX) |
+| **16** | RX (FPGA ← C6) | N17 | **IO16** (left strip, the C6's TX) |
+| **18** | TURBO (FPGA → C6) | N13 | **GPIO3** (right strip, first one) — optional, only feeds the display's turbo indicator |
+
+And this is the module side:
+
+<p align="center"><img src="docs/img/esp32_c6_pinout.jpg" alt="ESP32-C6 pins used by the MSXimus" width="820"/></p>
+
+- **J10 is the free 2×20 header**, labelled *SDRAM1 CONN.* in Sipeed's schematic — **not** the one holding the SDRAM module the core needs.
+- **Identifying the pins without silkscreen**: with the board powered off and a multimeter in continuity mode, **pin 12 is the only pin on the whole header with a path to ground**. Its row partner is pin 11 (+5 V), and from pin 12 towards the long side (the one leaving 14 rows, not 5) come 14, 16 and 18.
+- **Power comes from J10 itself** (pin 11 → the module's `5V`): the C6's USB-C is only needed to flash its firmware.
+- ⚠️ **Better not to have both power sources connected at once.** The module has protection and copes fine, but when flashing over USB-C it's advisable to unplug the 5 V wire (or power the board down).
+- TX and RX are **crossed**, as usual. The UART runs at 859 372 baud.
+- ⚠️ If a second SDRAM module is ever fitted on J10, the ESP has to move elsewhere.
+
+The module's firmware and its full technical inventory live in [`esp32_c6/`](esp32_c6/); flash `firmware_esp32c6_unapi_merged.bin` from the release to the C6 through its own USB-C:
+
+```
+esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_unapi_merged.bin
+```
+
 ## Status
 
 This version has been validated on hardware with HRA!'s V9968 test suite, the DEVCON demos, Metal Gear 2, Aleste 2 and the usual MSX2+ catalogue. The V9968 tracks HRA!'s **latest published revision**; its provenance and every local patch are documented in [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
