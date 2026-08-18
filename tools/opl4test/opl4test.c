@@ -606,7 +606,14 @@ void TestOPL4FM()
 	// wavetable = 9,1 dB, que es justo lo que da la formula del mezclador
 	// con MIXFM=3). El software real (BIOS/reproductores) escribe F8; aqui
 	// lo hacemos explicito y se muestra en pantalla.
+	// ⚠️ F8 vive en el espacio de registros WAVE (puertos 7E/7F) y esas
+	// escrituras estan CERRADAS por NEW2 (YMF278B.sv:826-827: 'if (NEW2)').
+	// Arriba se puso 0x01 = solo NEW. Sin el 0x03 la escritura de F8 se
+	// pierde en silencio — que es exactamente lo que paso en el primer
+	// intento de este fix: el FM seguia sonando bajo.
+	Opl4Wr1(0x05, 0x03);             // NEW + NEW2 (imprescindible para F8)
 	MoonWr(0xF8, 0x00);              // MIX: FM a 0 dB, PCM a 0 dB
+	Opl4Wr1(0x05, 0x01);             // volver a solo NEW para tocar el FM
 	Print_DrawTextAt(1, 13, "F8(MIX)=00 -> FM a 0dB");
 	Print_DrawTextAt(1, 14, "(en reset el chip deja FM a -8.5dB)");
 

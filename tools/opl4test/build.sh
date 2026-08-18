@@ -28,13 +28,32 @@ if [ -n "$HIGHER" ]; then
     fi
     echo "[guard] area plana OK: Higher=${HIGHER}h (tope C000h)"
 fi
-exit $RC
 
-# Traer la ROM recien compilada del arbol de MSXgl a este directorio.
-FRESH="$HOME/MSXgl/projects/$(basename "$(cd "$(dirname "$0")" && pwd)")/out/$(basename "$(cd "$(dirname "$0")" && pwd)").rom"
+# ---------------------------------------------------------------------------
+# PASOS POST-COMPILACION. Estaban DESPUES de un "exit $RC" y por eso nunca se
+# ejecutaban: el build decia Success y te llevabas una ROM vieja y sin voz.
+# ---------------------------------------------------------------------------
+D="$(cd "$(dirname "$0")" && pwd)"
+NAME="$(basename "$D")"
+
+# 1) msxbuild.sh compila DENTRO del arbol de MSXgl y deja el .rom en out/,
+#    no aqui. Sin esta copia te llevas el binario anterior sin enterarte.
+FRESH="$HOME/MSXgl/projects/$NAME/out/$NAME.rom"
 if [ -f "$FRESH" ]; then
-    cp "$FRESH" "$(cd "$(dirname "$0")" && pwd)/"
+    cp "$FRESH" "$D/$NAME.rom"
     echo "[rom] copiada desde $FRESH"
 else
-    echo "*** AVISO: no encuentro la ROM recien compilada en $FRESH ***"
+    echo "*** ERROR: no encuentro la ROM recien compilada en $FRESH ***"
+    exit 4
 fi
+
+# 2) La frase de voz ADPCM NO la pone el compilador: va INYECTADA en los
+#    segmentos 8-11. Sin este paso la ROM arranca, el test dice OK y la
+#    frase NO SUENA (paso el 18/08 y costo un viaje a la placa).
+if [ -f "$D/voz_adpcm.bin" ] && [ -f "$D/inject_voice.py" ]; then
+    python3 "$D/inject_voice.py" "$D/$NAME.rom" "$D/voz_adpcm.bin" || exit 3
+else
+    echo "*** AVISO: sin voz_adpcm.bin / inject_voice.py: la ROM va SIN voz ***"
+fi
+
+exit $RC
