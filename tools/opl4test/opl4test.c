@@ -455,6 +455,7 @@ __sfr __at(0xC5) g_Opl4Dat0;    // write: dato bank 0 / read: reg selecc.
 __sfr __at(0xC6) g_Opl4Sel1;    // write: reg bank 1 / read: status (espejo)
 __sfr __at(0xC7) g_Opl4Dat1;    // write: dato bank 1
 __sfr __at(0x7F) g_Opl4Wave;    // stub wave (lectura: device ID 0x20)
+void MoonWr(u8 reg, u8 v);      // definida mas abajo (puertos 7E/7F)
 
 void Opl4Wr0(u8 reg, u8 v) { g_Opl4Sel0 = reg; g_Opl4Dat0 = v; }
 
@@ -595,6 +596,20 @@ void TestOPL4FM()
 	Print_DrawTextAt(1, 8,  "Sonando: THE ENTERTAINER (Joplin)");
 	Print_DrawTextAt(1, 10, "ahora en el OPL3 del MoonSound:");
 	Print_DrawTextAt(1, 11, "melodia + bajo, timbre OPL3");
+
+	// El YMF278B arranca con el FM ATENUADO: su reset deja el registro F8
+	// (MIX) a 3 para el FM y a 0 para el PCM, o sea unos -8,5 dB de FM
+	// contra 0 dB de wavetable. Es comportamiento del chip real, no un
+	// fallo del core — pero hasta ahora este test no lo tocaba y por eso el
+	// FM se oia mucho mas flojo que el Y8950 y que la propia wavetable
+	// (medido en el video del 18/08: -28,4 dBFS de pico contra -19,3 de la
+	// wavetable = 9,1 dB, que es justo lo que da la formula del mezclador
+	// con MIXFM=3). El software real (BIOS/reproductores) escribe F8; aqui
+	// lo hacemos explicito y se muestra en pantalla.
+	MoonWr(0xF8, 0x00);              // MIX: FM a 0 dB, PCM a 0 dB
+	Print_DrawTextAt(1, 13, "F8(MIX)=00 -> FM a 0dB");
+	Print_DrawTextAt(1, 14, "(en reset el chip deja FM a -8.5dB)");
+
 	Print_DrawTextAt(1, 20, "En bucle... ESPACIO = terminar");
 
 	// --- setup: modo OPL3 (NEW=1) + voces + player de 2 pistas ---
