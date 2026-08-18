@@ -824,8 +824,19 @@ wire af_fb1 = joystick1[5] | (joystick1[7] & af_phase);   // joy1 TrigB
 // MSX PSG Port A (active-low):      bit0=Up,    bit1=Down,  bit2=Left, bit3=Right, bit4=TrigA, bit5=TrigB
 wire [7:0] joy0_msx = {2'b11, ~af_fb0, ~af_fa0, ~joystick0[0], ~joystick0[1], ~joystick0[2], ~joystick0[3]};
 wire [7:0] joy1_msx = {2'b11, ~af_fb1, ~af_fa1, ~joystick1[0], ~joystick1[1], ~joystick1[2], ~joystick1[3]};
+// ===== RATON MSX (era V3) =====
+// Emulado sobre un raton USB de PC. Vive en el PUERTO 2, que es donde lo
+// espera el software de MSX, y solo se hace cargo del puerto cuando hay un
+// raton USB enchufado; si no lo hay, el puerto 2 sigue siendo joystick como
+// siempre. El protocolo entero esta en fpga/src/msx_mouse.v (y su banco en
+// tools/mouse_sim). Los drivers detectan el raton solos ejecutando el
+// handshake, asi que no hay nada que configurar en el MSX.
+wire [7:0] msx_mouse_data;      // lo que el raton presenta en el registro 14
+wire       msx_mouse_present;   // hay un raton USB vivo
+
 wire [7:0] psg_joy_data = (!psg_reg15_joy_sel[0]) ? joy0_msx :
-                          (!psg_reg15_joy_sel[1]) ? joy1_msx :
+                          (!psg_reg15_joy_sel[1]) ? (msx_mouse_present ? msx_mouse_data
+                                                                       : joy1_msx) :
                           8'hFF;
 
 // ===== STANDALONE MERGE: USB keyboard (PPI port B 0xA9 read / port C 0xAA latch) =====
@@ -845,10 +856,22 @@ always @(posedge clk_54m or negedge bus_reset_n) begin
 end
 assign keyboard_addr = ppi_port_c[3:0];
 
-    // v1.9: FPGA/bitstream version readable on I/O port 0x2F. The boot menu reads it and
+    // FPGA/bitstream version readable on I/O port 0x2F. The boot menu reads it and
     // warns if you flashed mismatched .fs/.bin (e.g. a v1.8 bitstream + a v1.7 BIOS pack).
-    // Encoding 0x1X = version 1.X. Bump FPGA_VERSION each release together with the pack.
-    localparam [7:0] FPGA_VERSION = 8'h19;
+    // Encoding 0xMN = version M.N. Bump FPGA_VERSION each release together with the pack.
+    //
+    // era V3 (18/08): 0x19 -> 0x30. La linea v3 es la version 3.0, la primera
+    // sin SSRAM (problema de silicio del GW5AT-60B) y la que estrena el raton
+    // MSX sobre raton USB.
+    //
+    // ⚠️ ESTO VA EMPAREJADO CON EL PACK. El menu de arranque compara este byte
+    // con el que espera y AVISA si no cuadra. El fuente del menu NO esta en
+    // este repo (docs/ROADMAP.md:39: "traerlo a la carpeta menu/ cuando toque
+    // tocarlo"), asi que hasta que se regenere el pack con el menu esperando
+    // 0x30, arrancar este bitstream con el pack_bios_v2.1b da un aviso de
+    // version desemparejada. Es cosmetico -- el sistema arranca igual -- pero
+    // hay que cerrarlo antes de publicar la 3.0.
+    localparam [7:0] FPGA_VERSION = 8'h30;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
     always @ (posedge clk_54m) begin
         cpu_din <=
@@ -4952,6 +4975,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [1:0] usb1_typ, usb2_typ;
     wire       usb1_report, usb2_report;
     wire       usb1_conerr, usb2_conerr;
+    // era V3: raton MSX sobre raton USB de PC (ver fpga/src/msx_mouse.v)
+    wire [7:0] usb1_mbtn, usb2_mbtn;
+    wire signed [7:0] usb1_mdx, usb2_mdx, usb1_mdy, usb2_mdy;
     wire [7:0] usb1_mods, usb1_k1, usb1_k2, usb1_k3, usb1_k4;
     wire [7:0] usb2_mods, usb2_k1, usb2_k2, usb2_k3, usb2_k4;
     usb_hid_host usb_host1 (
@@ -4960,7 +4986,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .typ (usb1_typ), .report (usb1_report), .conerr (usb1_conerr),
         .key_modifiers (usb1_mods),
         .key1 (usb1_k1), .key2 (usb1_k2), .key3 (usb1_k3), .key4 (usb1_k4),
-        .mouse_btn (), .mouse_dx (), .mouse_dy (),
+        .mouse_btn (usb1_mbtn), .mouse_dx (usb1_mdx), .mouse_dy (usb1_mdy),
         .game_snes (), .game_l (), .game_r (), .game_u (), .game_d (),
         .game_a (), .game_b (), .game_x (), .game_y (), .game_sel (), .game_sta (),
         .game_lb (), .game_rb (),
@@ -4972,12 +4998,77 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .typ (usb2_typ), .report (usb2_report), .conerr (usb2_conerr),
         .key_modifiers (usb2_mods),
         .key1 (usb2_k1), .key2 (usb2_k2), .key3 (usb2_k3), .key4 (usb2_k4),
-        .mouse_btn (), .mouse_dx (), .mouse_dy (),
+        .mouse_btn (usb2_mbtn), .mouse_dx (usb2_mdx), .mouse_dy (usb2_mdy),
         .game_snes (), .game_l (), .game_r (), .game_u (), .game_d (),
         .game_a (), .game_b (), .game_x (), .game_y (), .game_sel (), .game_sta (),
         .game_lb (), .game_rb (),
         .dbg_hid_report ()
     );
+
+    // =======================================================================
+    //  RATON MSX sobre raton USB — cruce de dominios e instancia
+    //
+    //  usb_hid_host entrega mouse_dx/dy en el dominio de 12 MHz y los BORRA
+    //  justo despues del pulso `report`, asi que no se pueden muestrear desde
+    //  54 MHz: para cuando el pulso cruzase el sincronizador ya valdrian cero.
+    //  Se capturan en su propio dominio a un registro cuasi-estatico (estable
+    //  hasta el siguiente informe, milisegundos despues) y se avisa con un
+    //  toggle, que es el patron que ya usa el resto del proyecto para esto.
+    // =======================================================================
+    wire usb1_mouse_rep = usb1_report && (usb1_typ == 2'd2);
+    wire usb2_mouse_rep = usb2_report && (usb2_typ == 2'd2);
+
+    reg signed [7:0] mo_dx_q = 8'sd0, mo_dy_q = 8'sd0;
+    reg        [7:0] mo_btn_q = 8'd0;
+    reg              mo_tog = 1'b0;
+    reg              mo_seen = 1'b0;
+
+    always @(posedge clk_usb12) begin
+        if (!pll12_lock) begin
+            mo_tog <= 1'b0;
+            mo_seen <= 1'b0;
+        end
+        else if (usb1_mouse_rep || usb2_mouse_rep) begin
+            mo_dx_q  <= usb1_mouse_rep ? usb1_mdx  : usb2_mdx;
+            mo_dy_q  <= usb1_mouse_rep ? usb1_mdy  : usb2_mdy;
+            mo_btn_q <= usb1_mouse_rep ? usb1_mbtn : usb2_mbtn;
+            mo_tog   <= ~mo_tog;
+            mo_seen  <= 1'b1;      // una vez visto, el puerto 2 es del raton
+        end
+    end
+
+    // 2FF al dominio de 54 MHz + deteccion de cambio
+    reg [2:0] mo_tog_s = 3'b000;
+    reg       mo_seen_s0 = 1'b0, mo_seen_s1 = 1'b0;
+    always @(posedge clk_54m) begin
+        mo_tog_s   <= {mo_tog_s[1:0], mo_tog};
+        mo_seen_s0 <= mo_seen;
+        mo_seen_s1 <= mo_seen_s0;
+    end
+    wire mo_rep_54 = mo_tog_s[2] ^ mo_tog_s[1];
+
+    assign msx_mouse_present = mo_seen_s1;
+
+    // Sensibilidad: el delta se divide por 2^MOUSE_SENS. Un raton USB moderno
+    // tiene MUCHO mas DPI que uno de MSX, asi que sin dividir el puntero se va
+    // volando. 2 (=/4) es el punto de partida; el resto de la division NO se
+    // pierde (se guarda en el acumulador), asi que los movimientos lentos
+    // siguen moviendo el puntero. ⚠️ Es el numero que habra que ajustar en
+    // placa a ojo.
+    localparam [2:0] MOUSE_SENS = 3'd2;
+
+    msx_mouse u_msx_mouse (
+        .clk       (clk_54m),
+        .rst_n     (bus_reset_n),
+        .rep_pulse (mo_rep_54),
+        .dx        (mo_dx_q),
+        .dy        (mo_dy_q),
+        .btn       ({mo_btn_q[1], mo_btn_q[0]}),   // {derecho, izquierdo}
+        .sens      (MOUSE_SENS),
+        .strobe    (psgPB[5]),                     // pin 8 del PUERTO 2
+        .data      (msx_mouse_data)
+    );
+
     wire [127:0] kbd_usb1, kbd_usb2;
     usb_kbd_decode dec_usb1 (
         .clk12 (clk_usb12), .rst_n (pll12_lock),
