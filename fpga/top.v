@@ -783,15 +783,27 @@ always @(posedge clk_54m or negedge bus_reset_n) begin
         psg_addr_latch <= cpu_dout[3:0];
 end
 
-// Track PSG reg 15 (Port B) bits [7:6] which select joystick port
-// bit6=0 selects joy1, bit7=0 selects joy2 (active low)
-reg [1:0] psg_reg15_joy_sel;
+// Seleccion de puerto de joystick: registro 15 del PSG, BIT 6 Y SOLO EL BIT 6.
+//   bit6 = 0 -> puerto 1     bit6 = 1 -> puerto 2
+//
+// ⚠️ CORREGIDO 18/08. Antes esto miraba los bits [7:6] y trataba el bit 7 como
+// "seleccionar puerto 2" activo a nivel bajo. El bit 7 del registro 15 NO es
+// un selector: es el LED DE KANA. Con el bit 7 en alto (que es lo normal, LED
+// apagado) el puerto 2 devolvia 0xFF SIEMPRE, hiciera lo que hiciera el
+// software. Por eso el raton no se detectaba, y por eso el joystick USB del
+// puerto 2 tampoco podia funcionar.
+//
+// Verificado contra el One Chip MSX (esemsx3/src/sound/psg/psg.vhd:115-119),
+// que lo dice con todas las letras:
+//     -- psg register #15 bit6 - joystick select : 0=port-a, 1=port-b
+// y en la misma fuente, los pines 8: stra <= regb(4), strb <= regb(5).
+reg psg_reg15_port2;
 always @(posedge clk_54m or negedge bus_reset_n) begin
     if (!bus_reset_n)
-        psg_reg15_joy_sel <= 2'b11;
+        psg_reg15_port2 <= 1'b0;
     else if (bus_addr[7:0] == 8'hA1 && bus_iorq_n == 0 && bus_wr_n == 0 && bus_m1_n == 1
              && psg_addr_latch == 4'd15)
-        psg_reg15_joy_sel <= cpu_dout[7:6];
+        psg_reg15_port2 <= cpu_dout[6];
 end
 
 // ===== AUTOFIRE (turbo) on the otherwise-unused joystick buttons 3 & 4 =====
@@ -834,10 +846,9 @@ wire [7:0] joy1_msx = {2'b11, ~af_fb1, ~af_fa1, ~joystick1[0], ~joystick1[1], ~j
 wire [7:0] msx_mouse_data;      // lo que el raton presenta en el registro 14
 wire       msx_mouse_present;   // hay un raton USB vivo
 
-wire [7:0] psg_joy_data = (!psg_reg15_joy_sel[0]) ? joy0_msx :
-                          (!psg_reg15_joy_sel[1]) ? (msx_mouse_present ? msx_mouse_data
-                                                                       : joy1_msx) :
-                          8'hFF;
+wire [7:0] psg_joy_data = (!psg_reg15_port2) ? joy0_msx
+                                              : (msx_mouse_present ? msx_mouse_data
+                                                                   : joy1_msx);
 
 // ===== STANDALONE MERGE: USB keyboard (PPI port B 0xA9 read / port C 0xAA latch) =====
 wire ppi_portb_req_r = (bus_addr[7:0] == 8'hA9 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0) ? 1 : 0;
@@ -873,9 +884,24 @@ assign keyboard_addr = ppi_port_c[3:0];
     // hay que cerrarlo antes de publicar la 3.0.
     localparam [7:0] FPGA_VERSION = 8'h30;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
+
+    // Puerto 0x2E — DIAGNOSTICO DEL RATON. Desde BASIC: PRINT HEX$(INP(&H2E))
+    //   bit7 = hay raton USB detectado (typ==2 en alguno de los USB-A)
+    //   bit6 = el MSX tiene seleccionado el PUERTO 2 (reg15 bit6)
+    //   bit5 = nivel del pin 8 del puerto 2 (reg15 bit5) = el strobe
+    //   bit4..2 = fase de la maquina del raton (0..7)
+    //   bit1..0 = cuenta de informes USB recibidos (deberia cambiar al mover)
+    // Lo que dice cada cosa si el raton no va:
+    //   bit7=0            -> el USB no lo ha enumerado como raton
+    //   bit7=1, bit6=0    -> el software esta sondeando el PUERTO 1, no el 2
+    //   bit5 no cambia    -> el software no mueve el pin 8: no habla el protocolo
+    //   bits1..0 quietos  -> el raton USB no envia informes
+    wire mdbg_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2E);
+    wire [7:0] mouse_dbg = {msx_mouse_present, psg_reg15_port2, psgPB[5], msx_mouse_phase, mo_rep_cnt};
     always @ (posedge clk_54m) begin
         cpu_din <=
                 ( ver_req_r == 1 ) ? FPGA_VERSION :
+                ( mdbg_req_r == 1 ) ? mouse_dbg :
                 ( psg_req_r == 1 ) ? ((psg_addr_latch == 4'd14) ? psg_joy_data : 8'hFF) :
                 `ifdef ENABLE_SOUND
                      ( psg2_req_r == 1 ) ? psg2_dout :
@@ -4976,6 +5002,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire       usb1_report, usb2_report;
     wire       usb1_conerr, usb2_conerr;
     // era V3: raton MSX sobre raton USB de PC (ver fpga/src/msx_mouse.v)
+    wire [2:0] msx_mouse_phase;
     wire [7:0] usb1_mbtn, usb2_mbtn;
     wire signed [7:0] usb1_mdx, usb2_mdx, usb1_mdy, usb2_mdy;
     wire [7:0] usb1_mods, usb1_k1, usb1_k2, usb1_k3, usb1_k4;
@@ -5066,8 +5093,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         .btn       ({mo_btn_q[1], mo_btn_q[0]}),   // {derecho, izquierdo}
         .sens      (MOUSE_SENS),
         .strobe    (psgPB[5]),                     // pin 8 del PUERTO 2
-        .data      (msx_mouse_data)
+        .data      (msx_mouse_data),
+        .dbg_phase (msx_mouse_phase)
     );
+
+    // Cuenta de informes del raton USB, para saber si el USB va o no va.
+    reg [1:0] mo_rep_cnt = 2'd0;
+    always @(posedge clk_54m) if (mo_rep_54) mo_rep_cnt <= mo_rep_cnt + 2'd1;
 
     wire [127:0] kbd_usb1, kbd_usb2;
     usb_kbd_decode dec_usb1 (

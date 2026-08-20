@@ -38,7 +38,7 @@ module tb_msx_mouse;
     msx_mouse dut (
         .clk(clk), .rst_n(rst_n),
         .rep_pulse(rep_pulse), .dx(dx), .dy(dy), .btn(btn),
-        .sens(sens), .strobe(strobe), .data(data)
+        .sens(sens), .strobe(strobe), .data(data), .dbg_phase()
     );
 
     integer errores = 0;

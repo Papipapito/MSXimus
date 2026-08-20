@@ -51,7 +51,10 @@ module msx_mouse (
     input  wire        strobe,
 
     // lo que el MSX lee en el registro 14 del PSG
-    output wire [7:0]  data
+    output wire [7:0]  data,
+
+    // diagnostico (puerto 0x2E): en que fase esta la maquina
+    output wire [2:0]  dbg_phase
 );
 
     // Si algun dia el movimiento sale invertido en placa, este es el unico
@@ -196,6 +199,8 @@ module msx_mouse (
 
     // bits 4/5 = boton izquierdo/derecho, ACTIVOS A NIVEL BAJO
     assign data = {2'b11, ~btn[1], ~btn[0], nib};
+
+    assign dbg_phase = phase;
 
 endmodule
 `default_nettype wire
