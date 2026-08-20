@@ -897,7 +897,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     //   bit5 no cambia    -> el software no mueve el pin 8: no habla el protocolo
     //   bits1..0 quietos  -> el raton USB no envia informes
     wire mdbg_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2E);
-    wire [7:0] mouse_dbg = {msx_mouse_present, psg_reg15_port2, psgPB[5], msx_mouse_phase, mo_rep_cnt};
+    wire [7:0] mouse_dbg = {msx_mouse_present, psg_reg15_port2, psgPB[5], msx_mouse_phase, mo_rep_cnt[1:0]};
 
     // Puerto 0x2D — DIAGNOSTICO DEL LADO USB. PRINT HEX$(INP(&H2D))
     //   bit7   = error de conexion en USB2
@@ -911,7 +911,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // otra cosa" (que es lo que pasaba: los ratones sin subclass Boot se
     // clasificaban como gamepad).
     wire udbg_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2D);
-    wire [7:0] usb_dbg = {usb2_conerr, usb1_conerr, usb2_typ, usb1_typ, any_rep_cnt};
+    wire [7:0] usb_dbg = {usb2_conerr, usb1_conerr, usb2_typ, usb1_typ, any_rep_cnt[1:0]};
     always @ (posedge clk_54m) begin
         cpu_din <=
                 ( ver_req_r == 1 ) ? FPGA_VERSION :
@@ -4815,7 +4815,18 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         // a tiempo). SANO = 00. Si al cantar la voz esto sube, el crujido es
         // del camino de memoria; si se queda en 00, el camino esta impoluto y
         // el culpable es el remuestreador (alias 49,7k->44,1k).
-        .cnt_g({24'd0, adpcm_mem_diag}),
+        // CAZA DEL RATON (18/08): los 24 bits que aqui estaban a cero llevan
+        // ahora el estado completo del raton USB. El ADPCM conserva su byte.
+        //   [31:30] typ de USB2   [29:28] typ de USB1  (0 nada,1 tecl,2 raton,3 gpad)
+        //   [27] conerr USB2      [26] conerr USB1
+        //   [25] raton visto (pegajoso)   [24] el MSX sondea el puerto 2
+        //   [23:21] fase de la maquina    [20] pin 8 del puerto 2
+        //   [19:12] informes de RATON     [11:8] informes de cualquier tipo
+        //   [7:0]  diag del ADPCM (lo de siempre)
+        // Lectura: tools/dbg_mouse_reader.py
+        .cnt_g({usb2_typ, usb1_typ, usb2_conerr, usb1_conerr,
+                msx_mouse_present, psg_reg15_port2, msx_mouse_phase, psgPB[5],
+                mo_rep_cnt, any_rep_cnt[3:0], adpcm_mem_diag}),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
@@ -5113,8 +5124,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     );
 
     // Cuenta de informes del raton USB, para saber si el USB va o no va.
-    reg [1:0] mo_rep_cnt = 2'd0;
-    always @(posedge clk_54m) if (mo_rep_54) mo_rep_cnt <= mo_rep_cnt + 2'd1;
+    reg [7:0] mo_rep_cnt = 8'd0;
+    always @(posedge clk_54m) if (mo_rep_54) mo_rep_cnt <= mo_rep_cnt + 8'd1;
 
     // Y una cuenta de informes de CUALQUIER tipo (sin filtrar por typ): separa
     // "el USB no habla" de "el USB habla pero lo hemos clasificado mal".
@@ -5123,9 +5134,9 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         if (usb1_report || usb2_report) any_tog <= ~any_tog;
     reg [2:0] any_tog_s = 3'b000;
     always @(posedge clk_54m) any_tog_s <= {any_tog_s[1:0], any_tog};
-    reg [1:0] any_rep_cnt = 2'd0;
+    reg [7:0] any_rep_cnt = 8'd0;
     always @(posedge clk_54m)
-        if (any_tog_s[2] ^ any_tog_s[1]) any_rep_cnt <= any_rep_cnt + 2'd1;
+        if (any_tog_s[2] ^ any_tog_s[1]) any_rep_cnt <= any_rep_cnt + 8'd1;
 
     wire [127:0] kbd_usb1, kbd_usb2;
     usb_kbd_decode dec_usb1 (
