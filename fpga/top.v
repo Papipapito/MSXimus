@@ -898,10 +898,25 @@ assign keyboard_addr = ppi_port_c[3:0];
     //   bits1..0 quietos  -> el raton USB no envia informes
     wire mdbg_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2E);
     wire [7:0] mouse_dbg = {msx_mouse_present, psg_reg15_port2, psgPB[5], msx_mouse_phase, mo_rep_cnt};
+
+    // Puerto 0x2D — DIAGNOSTICO DEL LADO USB. PRINT HEX$(INP(&H2D))
+    //   bit7   = error de conexion en USB2
+    //   bit6   = error de conexion en USB1
+    //   bit5-4 = typ de USB2   (0 nada, 1 teclado, 2 RATON, 3 gamepad)
+    //   bit3-2 = typ de USB1
+    //   bit1-0 = cuenta de informes de CUALQUIER tipo (mueve el raton: si esto
+    //            cambia, el USB habla; si no, no llega nada)
+    // Este puerto existe porque el 0x2E solo dice "no hay raton" sin decir POR
+    // QUE: con el typ a la vista se distingue "no enumerado" de "enumerado como
+    // otra cosa" (que es lo que pasaba: los ratones sin subclass Boot se
+    // clasificaban como gamepad).
+    wire udbg_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2D);
+    wire [7:0] usb_dbg = {usb2_conerr, usb1_conerr, usb2_typ, usb1_typ, any_rep_cnt};
     always @ (posedge clk_54m) begin
         cpu_din <=
                 ( ver_req_r == 1 ) ? FPGA_VERSION :
                 ( mdbg_req_r == 1 ) ? mouse_dbg :
+                ( udbg_req_r == 1 ) ? usb_dbg :
                 ( psg_req_r == 1 ) ? ((psg_addr_latch == 4'd14) ? psg_joy_data : 8'hFF) :
                 `ifdef ENABLE_SOUND
                      ( psg2_req_r == 1 ) ? psg2_dout :
@@ -5100,6 +5115,17 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // Cuenta de informes del raton USB, para saber si el USB va o no va.
     reg [1:0] mo_rep_cnt = 2'd0;
     always @(posedge clk_54m) if (mo_rep_54) mo_rep_cnt <= mo_rep_cnt + 2'd1;
+
+    // Y una cuenta de informes de CUALQUIER tipo (sin filtrar por typ): separa
+    // "el USB no habla" de "el USB habla pero lo hemos clasificado mal".
+    reg       any_tog = 1'b0;
+    always @(posedge clk_usb12)
+        if (usb1_report || usb2_report) any_tog <= ~any_tog;
+    reg [2:0] any_tog_s = 3'b000;
+    always @(posedge clk_54m) any_tog_s <= {any_tog_s[1:0], any_tog};
+    reg [1:0] any_rep_cnt = 2'd0;
+    always @(posedge clk_54m)
+        if (any_tog_s[2] ^ any_tog_s[1]) any_rep_cnt <= any_rep_cnt + 2'd1;
 
     wire [127:0] kbd_usb1, kbd_usb2;
     usb_kbd_decode dec_usb1 (

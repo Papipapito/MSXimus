@@ -172,8 +172,20 @@ always @(posedge usbclk) begin : response_recognition
     end else if (save_delayed && ~save && save_r == 6) begin     
         // falling edge of save for bInterfaceProtocol
         if (regs[4] == 3) begin  // bInterfaceClass. 3: HID, other: non-HID
-            if (regs[5] == 1)    // bInterfaceSubClass. 1: Boot device
-                typ <= regs[6] == 1 ? 1 : 2;     // bInterfaceProtocol. 1: keyboard, 2: mouse
+            // MSXimus 18/08: la clasificacion original exigia bInterfaceSubClass==1
+            // (Boot device) para reconocer teclado o raton, y todo lo demas caia en
+            // "gamepad". MUCHOS RATONES USB MODERNOS NO DECLARAN EL SUBCLASS BOOT,
+            // asi que se clasificaban como gamepad y el raton MSX no los veia nunca
+            // (medido en placa: puerto 0x2E daba typ != 2 y cero informes).
+            // Ahora manda el bInterfaceProtocol, que es el dato fiable:
+            //    1 = teclado, 2 = raton; y solo si no dice nada se mira el subclass.
+            // El teclado no cambia de comportamiento: protocolo 1 sigue ganando.
+            if (regs[6] == 1)                    // bInterfaceProtocol 1: keyboard
+                typ <= 1;
+            else if (regs[6] == 2)               // bInterfaceProtocol 2: mouse
+                typ <= 2;
+            else if (regs[5] == 1)               // Boot device sin protocolo: raton
+                typ <= 2;
             else
                 typ <= 3;       // gamepad
         end else
