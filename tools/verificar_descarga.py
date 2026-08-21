@@ -157,8 +157,15 @@ def verificar(local):
     print("  QUE HAY EN CADA SECTOR MALO:")
     for sec, a, b in malos[:20]:
         uni = ("512 x %02X" % b[0]) if len(set(b)) == 1 else pinta(b)
-        if b in todos: ori = "REPETIDO: es el sector %d del original" % todos[b]
-        else:          ori = "AJENO: no esta en el original"
+        if len(set(b)) <= 2:
+            ori = "uniforme: no dice de donde viene"
+        elif b in todos:
+            dist = sec - todos[b]
+            ori = "REPETIDO: es el sector %d del original (%+d, %s)" % (
+                todos[b], -dist,
+                "multiplo de 128 = 64 KB" if dist % 128 == 0 else "sin alinear")
+        else:
+            ori = "AJENO: no esta en el original"
         # lo que TENIA que haber ahi, aparece en otro sitio del fichero recibido?
         otro = ""
         if len(set(a)) > 2 and a in mios and mios[a] != sec:
@@ -187,5 +194,21 @@ if __name__ == "__main__":
     for a in args:
         g = glob.glob(a)
         ficheros.extend(g if g else [a])
+    # Un mismo fichero puede aparecer dos veces: por su nombre largo y por su
+    # alias 8.3 (ALESTE~2.ROM). En una tarjeta sana eso NO deberia pasar, asi
+    # que se avisa en vez de callarlo: es sintoma de directorio tocado.
+    vistos, unicos = {}, []
     for f in ficheros:
+        try:
+            st = os.stat(f); clave = (st.st_dev, st.st_ino)
+        except OSError:
+            unicos.append(f); continue
+        if clave in vistos and st.st_ino:
+            print("AVISO: %s es EL MISMO fichero que %s (dos entradas de"
+                  % (os.path.basename(f), os.path.basename(vistos[clave])))
+            print("       directorio para un solo fichero -- alias 8.3). No lo repito.")
+            continue
+        vistos[clave] = f
+        unicos.append(f)
+    for f in unicos:
         verificar(f)
