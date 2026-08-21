@@ -70,6 +70,11 @@ entity FIFO is
         fifo_data_o         : out STD_LOGIC_VECTOR (DATA_WIDTH - 1 downto 0);
 
         -- flags
+        -- V3.1 (caza de las descargas corruptas): pulso de 1 ciclo cuando se
+        -- intenta escribir con la FIFO LLENA. Hasta ahora ese byte se tiraba
+        -- EN SILENCIO (el 'if (full_s = false)' de abajo, sin else), asi que
+        -- una perdida por falta de control de flujo era INVISIBLE.
+        fifo_overflow_o     : out STD_LOGIC := '0';
         fifo_empty_o        : out STD_LOGIC;
         fifo_full_o         : out STD_LOGIC
     );
@@ -125,8 +130,14 @@ begin
             end if;
 
             write_edge <= write_edge(0) & fifo_we_i;
+            fifo_overflow_o <= '0';                 -- pulso de 1 ciclo
             if (write_edge = "01") then
             --if (fifo_we_i = '1') then
+                if (full_s = true) then
+                    -- BYTE PERDIDO: la FIFO estaba llena. Antes esto no dejaba
+                    -- rastro ninguno.
+                    fifo_overflow_o <= '1';
+                end if;
                 if (full_s = false) then
                     -- Write Data to memory
                     memory(head_s) <= fifo_data_i;

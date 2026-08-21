@@ -106,7 +106,18 @@ entity wifi is
         tx_o        : out   std_logic;
         adr_i       : in    std_logic_vector( 15 downto 0 );
         db_i        : in    std_logic_vector(  7 downto 0 );
-        db_o        : out   std_logic_vector(  7 downto 0 ) := (others => 'Z')
+        db_o        : out   std_logic_vector(  7 downto 0 ) := (others => 'Z');
+        -- V3.1: sondas de la caza de las descargas corruptas. Pulsos de 1 ciclo.
+        -- Los DOS unicos mecanismos posibles de perdida, cada uno con distinto
+        -- culpable:
+        --   overflow = el ESP escribio con la FIFO llena -> BYTE TIRADO
+        --              (productor mas rapido que consumidor: falta control de
+        --               flujo en el enlace)
+        --   underrun = el Z80 leyo y no habia datos -> si el driver UNAPI no
+        --              lo mira, entrega CEROS y el fichero sale con bloques a
+        --              cero PERO alineado (que es la firma observada)
+        dbg_overflow_o : out std_logic := '0';
+        dbg_underrun_o : out std_logic := '0'
     );
 end wifi;
 
@@ -144,6 +155,7 @@ architecture Behavior of wifi is
             fifo_data_o  : out std_logic_vector(DATA_WIDTH - 1 downto 0);
 
             -- flags
+            fifo_overflow_o : out std_logic;   -- V3.1: byte tirado por FIFO llena
             fifo_empty_o : out std_logic;
             fifo_full_o  : out std_logic
         );
@@ -177,6 +189,7 @@ architecture Behavior of wifi is
     signal  fifo_read           : std_logic := '0';
     signal  fifo_data_out       : std_logic_vector (7 downto 0);
     signal  fifo_we             : std_logic := '0';
+    signal  fifo_overflow       : std_logic;
     signal  fifo_data_in        : std_logic_vector (7 downto 0);
     signal  qckbase_cnt         : std_logic_vector (19 downto 0);
     signal  qckbase_d0          : std_logic;
@@ -226,9 +239,13 @@ begin
         fifo_data_o         => fifo_data_out,
         fifo_data_i         => fifo_data_in,
         fifo_we_i           => fifo_we,
+        fifo_overflow_o     => fifo_overflow,
         fifo_full_o         => fifo_full_status,
         reset_i             => reset_fifo
     );
+
+    -- V3.1: el pulso de desbordamiento sale tal cual (ya es de 1 ciclo)
+    dbg_overflow_o <= fifo_overflow;
 
     address_06  <= '0' when adr_i (7 downto 0) = x"06" else '1';
     address_07  <= '0' when adr_i (7 downto 0) = x"07" else '1';
@@ -402,6 +419,10 @@ begin
 
                             -- bit 4 - buffer underrun?
                             out_uart_status(4) <= qckdone;
+                            -- V3.1: y ademas lo sacamos como PULSO, porque el
+                            -- bit 4 se auto-limpia al leerlo y un contador de
+                            -- fuera nunca lo veria.
+                            dbg_underrun_o <= qckdone;
 
                             -- Nothing else to do
                             my_rx_state <= STATE_RX_FINISH;

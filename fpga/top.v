@@ -1709,8 +1709,34 @@ assign keyboard_addr = ppi_port_c[3:0];
         .tx_o       (bl616_uart_tx_w),
         .adr_i      (w27_addr),
         .db_i       (w27_din),
-        .db_o       (uart_dout)
+        .db_o       (uart_dout),
+        .dbg_overflow_o (wifi_ovf_p),
+        .dbg_underrun_o (wifi_unr_p)
     );
+
+    // ===== V3.1: CAZA DE LAS DESCARGAS CORRUPTAS =====
+    // Los DOS unicos mecanismos de perdida, contados por separado porque cada
+    // uno apunta a un culpable distinto:
+    //   OVERFLOW = el ESP escribio con la FIFO llena -> byte TIRADO. Hasta
+    //              ahora esto era INVISIBLE (fifo.vhd tiraba el byte sin
+    //              dejar rastro). Si sube: falta control de flujo en el
+    //              enlace, y migrar al S3 SE LO LLEVA PUESTO.
+    //   UNDERRUN = el Z80 leyo y no habia datos. Si sube y el fichero sale
+    //              con bloques a CERO pero alineado -- que es la firma
+    //              observada (Fleet cada 25 sectores, Aleste cada 49) --
+    //              entonces el driver UNAPI esta entregando ceros sin avisar,
+    //              y el bug es del lado MSX.
+    // Si NO sube ninguno, los dos mecanismos quedan descartados de golpe.
+    wire wifi_ovf_p, wifi_unr_p;
+    reg [15:0] wifi_ovf_cnt = 16'd0;
+    reg [15:0] wifi_unr_cnt = 16'd0;
+    reg        wifi_ovf_d = 1'b0, wifi_unr_d = 1'b0;
+    always @(posedge clk_27m) begin
+        wifi_ovf_d <= wifi_ovf_p;
+        wifi_unr_d <= wifi_unr_p;
+        if (wifi_ovf_p && !wifi_ovf_d) wifi_ovf_cnt <= wifi_ovf_cnt + 16'd1;
+        if (wifi_unr_p && !wifi_unr_d) wifi_unr_cnt <= wifi_unr_cnt + 16'd1;
+    end
 
 `endif 
 
@@ -4824,9 +4850,12 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         //   [19:12] informes de RATON     [11:8] informes de cualquier tipo
         //   [7:0]  diag del ADPCM (lo de siempre)
         // Lectura: tools/dbg_mouse_reader.py
-        .cnt_g({usb2_typ, usb1_typ, usb2_conerr, usb1_conerr,
-                msx_mouse_present, psg_reg15_port2, msx_mouse_phase, psgPB[5],
-                mo_rep_cnt, any_rep_cnt[3:0], adpcm_mem_diag}),
+        // V3.1: el raton esta APARCADO, asi que esta palabra pasa a la caza
+        // de las descargas corruptas, que es lo que bloquea de verdad.
+        //   [31:16] desbordamientos de la FIFO del WiFi (byte del ESP tirado)
+        //   [15:0]  underruns (el Z80 leyo en seco)
+        // SANO = 00000000 en una descarga entera. Lectura: dbg_wifi_reader.py
+        .cnt_g({wifi_ovf_cnt, wifi_unr_cnt}),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
