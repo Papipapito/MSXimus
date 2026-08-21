@@ -50,6 +50,7 @@ def pide(tipo, busca, idx, solo_meta):
     return meta, cuerpo
 
 RITMO = None      # sectores/s, para traducir separaciones a segundos (--ritmo)
+VOLCAR = False    # --volcar: hexdump de los sectores malos
 
 def pinta(b):
     """Que PINTA tiene el sector: distinguir basura de RAM, FAT o directorio."""
@@ -173,6 +174,25 @@ def verificar(local):
         esp = ("512 x %02X" % a[0]) if len(set(a)) == 1 else "datos"
         print("    sector %-5d esperaba %-9s recibio %-16s %s%s" % (sec, esp, uni, ori, otro))
     if len(malos) > 20: print("    ... y %d mas" % (len(malos) - 20))
+
+    if VOLCAR:
+        # Los BYTES del sector malo. Es lo unico que distingue de donde sale:
+        #   nombres de fichero  -> se colo el array del navegador (ENT_ARRAY)
+        #   "HTTP/1.1", "type:" -> se colo el parser de cabeceras
+        #   FF / E5 / 00        -> nunca se escribio, es resto del formateo
+        #   trozos del fichero  -> se escribio dos veces o en el LBA de al lado
+        for sec, a, b in malos[:4]:
+            print()
+            print("  --- SECTOR %d, primeros 160 bytes de lo RECIBIDO ---" % sec)
+            for k in range(0, 160, 16):
+                t = b[k:k+16]
+                print("   %04X  %-47s  |%s|" % (k, " ".join("%02x" % c for c in t),
+                      "".join(chr(c) if 32 <= c < 127 else "." for c in t)))
+            print("  --- y lo que TENIA que haber (para comparar) ---")
+            for k in range(0, 48, 16):
+                t = a[k:k+16]
+                print("   %04X  %-47s  |%s|" % (k, " ".join("%02x" % c for c in t),
+                      "".join(chr(c) if 32 <= c < 127 else "." for c in t)))
     print()
     print("  LECTURA. Que NO hay desplazamiento esta demostrado arriba: el stream")
     print("  llego entero y el problema es del almacenamiento, no del enlace. Que el")
@@ -190,6 +210,8 @@ if __name__ == "__main__":
     if "--ritmo" in args:
         i = args.index("--ritmo")
         RITMO = float(args[i+1]); del args[i:i+2]
+    if "--volcar" in args:
+        args.remove("--volcar"); VOLCAR = True
     ficheros = []
     for a in args:
         g = glob.glob(a)
