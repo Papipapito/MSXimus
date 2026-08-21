@@ -49,6 +49,21 @@ def pide(tipo, busca, idx, solo_meta):
     r.close()
     return meta, cuerpo
 
+RITMO = None      # sectores/s, para traducir separaciones a segundos (--ritmo)
+
+def pinta(b):
+    """Que PINTA tiene el sector: distinguir basura de RAM, FAT o directorio."""
+    if len(set(b)) <= 2: return "casi uniforme"
+    # entrada de directorio FAT: 16 registros de 32 B, byte 11 = atributos
+    if sum(1 for i in range(0, 512, 32) if b[i+11] in (0x0F, 0x10, 0x20, 0x00)) >= 14:
+        return "PINTA DE DIRECTORIO"
+    # sector de FAT: palabras de 16 bits pequenas y en su mayoria crecientes
+    w = [b[i] | (b[i+1] << 8) for i in range(0, 512, 2)]
+    cre = sum(1 for i in range(len(w)-1) if 0 < w[i+1] - w[i] <= 2)
+    if cre > 180: return "PINTA DE FAT"
+    if sum(1 for c in b if 32 <= c < 127) > 460: return "TEXTO ASCII"
+    return "datos"
+
 def campo(meta, clave):
     i = meta.find(clave)
     if i < 0: return None
@@ -110,10 +125,26 @@ def verificar(local):
     idxs = [m[0] for m in malos]
     if len(idxs) > 1:
         sep = [idxs[i+1] - idxs[i] for i in range(len(idxs)-1)]
-        reg = max(sep) - min(sep) <= max(3, min(sep) // 20)
-        print("  posiciones: %s" % (idxs[:12] + (["..."] if len(idxs) > 12 else [])))
-        print("  separaciones: %s   -> %s" % (sep[:12],
-              "REGULAR (contador o temporizador, no ruido)" if reg else "irregular"))
+        print("  posiciones (TODAS):")
+        for k in range(0, len(idxs), 14):
+            print("     " + " ".join("%5d" % v for v in idxs[k:k+14]))
+        print("  separaciones (TODAS):")
+        for k in range(0, len(sep), 14):
+            print("     " + " ".join("%5d" % v for v in sep[k:k+14]))
+        base = min(sep)
+        # un hueco doble/triple es el MISMO periodo con un disparo perdido:
+        # normalizar antes de juzgar si es regular
+        norm = [x / round(x / base) for x in sep if round(x / base) >= 1]
+        disp = (max(norm) - min(norm)) / (sum(norm) / len(norm))
+        print("  periodo normalizado (los huecos dobles cuentan como 2): %.1f sectores"
+              % (sum(norm) / len(norm)))
+        print("  dispersion: %.1f%% -> %s" % (100 * disp,
+              "REGULAR: es un contador o un RELOJ, no ruido" if disp < 0.15 else "irregular"))
+        if RITMO:
+            print("  a %.1f sectores/s eso son %.2f s entre fallos"
+                  % (RITMO, (sum(norm) / len(norm)) / RITMO))
+        print("  reparto: %d de %d fallos en la PRIMERA mitad del fichero"
+              % (sum(1 for v in idxs if v < (n // 512) // 2), len(idxs)))
 
     # el resto del fichero, esta desplazado?
     sanos = n // 512 - len(malos)
@@ -121,22 +152,37 @@ def verificar(local):
           "NO hay desplazamiento, el stream llego entero" if sanos else "revisar a mano"))
 
     # de donde sale lo que hay en los sectores malos
-    todos = {ref[i:i+512] for i in range(0, len(ref), 512)}
-    for sec, a, b in malos[:6]:
-        uni = ("512 x %02X" % b[0]) if len(set(b)) == 1 else "datos"
-        ori = "REPETIDO del propio fichero" if b in todos else "AJENO: no existe en el original"
+    todos = {ref[i:i+512]: i // 512 for i in range(0, len(ref), 512)}
+    mios  = {mio[i:i+512]: i // 512 for i in range(0, len(mio), 512)}
+    print("  QUE HAY EN CADA SECTOR MALO:")
+    for sec, a, b in malos[:20]:
+        uni = ("512 x %02X" % b[0]) if len(set(b)) == 1 else pinta(b)
+        if b in todos: ori = "REPETIDO: es el sector %d del original" % todos[b]
+        else:          ori = "AJENO: no esta en el original"
+        # lo que TENIA que haber ahi, aparece en otro sitio del fichero recibido?
+        otro = ""
+        if len(set(a)) > 2 and a in mios and mios[a] != sec:
+            otro = "  [!] lo esperado aparece en el sector %d del tuyo" % mios[a]
         esp = ("512 x %02X" % a[0]) if len(set(a)) == 1 else "datos"
-        print("    sector %-5d esperaba %-9s recibio %-9s  %s" % (sec, esp, uni, ori))
-    if len(malos) > 6: print("    ... y %d mas" % (len(malos) - 6))
+        print("    sector %-5d esperaba %-9s recibio %-16s %s%s" % (sec, esp, uni, ori, otro))
+    if len(malos) > 20: print("    ... y %d mas" % (len(malos) - 20))
     print()
-    print("  LECTURA: contenido AJENO = esa escritura no llego a la tarjeta y el")
-    print("  sector conservo lo que ya habia (FF flash borrada, E5 formateo MSX-DOS,")
-    print("  restos de otro fichero). No es perdida de datos: es escritura perdida.")
+    print("  LECTURA. Que NO hay desplazamiento esta demostrado arriba: el stream")
+    print("  llego entero y el problema es del almacenamiento, no del enlace. Que el")
+    print("  contenido sea AJENO deja tres posibilidades, y hay que distinguirlas:")
+    print("    a) el sector nunca se escribio y conserva lo de antes (FF = flash")
+    print("       borrada, E5 = formateo MSX-DOS, o restos de otro fichero);")
+    print("    b) se escribio en un LBA equivocado (mirar la marca [!] de arriba);")
+    print("    c) se escribio bien pero el sistema de ficheros lee mal -- cadena de")
+    print("       clusteres tocada. PASAR chkdsk ANTES de sacar conclusiones.")
 
 if __name__ == "__main__":
     args = sys.argv[1:]
     if not args:
         sys.exit("uso: verificar_descarga.py <fichero> [mas ficheros o comodines]")
+    if "--ritmo" in args:
+        i = args.index("--ritmo")
+        RITMO = float(args[i+1]); del args[i:i+2]
     ficheros = []
     for a in args:
         g = glob.glob(a)
