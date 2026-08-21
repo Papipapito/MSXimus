@@ -4453,6 +4453,28 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 reg [15:0] sd_wr_cnt   = 16'd0;   // escrituras terminadas (TESTIGO DE VIDA)
 reg [15:0] sd_wcrc_cnt = 16'd0;   // ...de ellas, RECHAZADAS por la tarjeta
 
+// ---------------------------------------------------------------------------
+// V3.1b — TRAZA DE LBA, una linea por escritura.
+//
+// Los bytes de un sector corrupto (F1 Spirit, sectores 29-30) resultaron ser
+// una imagen SCREEN 5 — patron de 128 bytes por linea, nibbles empaquetados —
+// que YA estaba en la tarjeta antes de formatearla en rapido. O sea que ese
+// sector NUNCA SE ESCRIBIO: no es buffer pisado ni parser, es la escritura que
+// no llego a ese LBA.
+//
+// Con el sistema de ficheros INTACTO (chkdsk limpio en tarjeta virgen), sin
+// desplazamiento en el fichero, todas las escrituras completandose y ninguna
+// rechazada, lo unico que queda es que algunas vayan a un LBA equivocado. Eso
+// deduciendolo no sale: hay que VER la lista de LBA en orden.
+//
+// A ~53 escrituras/s y 66 bytes por linea son ~3,5 KB/s contra los 11,5 KB/s
+// de 115200 baud: cabe con holgura triple.
+// ---------------------------------------------------------------------------
+reg [31:0] sd_wr_lba     = 32'd0;   // LBA de la ultima escritura terminada
+reg        sd_wr_zero    = 1'b0;    // su carga era 512 bytes a CERO
+reg        sd_wr_rej     = 1'b0;    // la tarjeta la rechazo (token != 010)
+reg        sd_wr_tog     = 1'b0;    // cruce a clk_54m (dominio del dbg_uart)
+
 `ifdef ENABLE_SDCARD
 
     
@@ -4676,6 +4698,19 @@ reg [15:0] sd_wcrc_cnt = 16'd0;   // ...de ellas, RECHAZADAS por la tarjeta
     wire [7:0] sd_cd_w;
     assign sd_cd_w = ff_sd_cd;
     
+    // acumulador del OR de la carga: si al terminar sigue a 0, iban 512 ceros
+    reg sd_wr_nz = 1'b0;
+    always @(posedge clk_27m) begin
+        if (ff_sd_wstart) sd_wr_nz <= sd_wr_nz | (|sd_inbyte_w);
+        if (sd_wr_done_edge) begin
+            sd_wr_lba  <= ff_sd_sector;
+            sd_wr_zero <= ~(sd_wr_nz | (|sd_inbyte_w));
+            sd_wr_rej  <= sd_crc_error_w;
+            sd_wr_nz   <= 1'b0;
+            sd_wr_tog  <= ~sd_wr_tog;      // un cambio de nivel = una linea
+        end
+    end
+
     reg       sd_done_d  = 1'b0;
     reg [1:0] sd_wretry  = 2'd0;
     reg       sd_wr_hold = 1'b0;
@@ -4869,7 +4904,13 @@ reg [15:0] sd_wcrc_cnt = 16'd0;   // ...de ellas, RECHAZADAS por la tarjeta
     end
 
     wire usb_uart_tx_int;
-    dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
+    // el pulso nace en clk_27m y el dbg_uart vive en clk_54m: 2FF y flanco
+    reg [2:0] sd_wr_tog_s = 3'b000;
+    always @(posedge clk_54m) sd_wr_tog_s <= {sd_wr_tog_s[1:0], sd_wr_tog};
+    wire sd_wr_trig = sd_wr_tog_s[2] ^ sd_wr_tog_s[1];
+
+    dbg_uart #(.CLK_HZ(53_996_000), .TRIG_MODE(1)) u_dbguart (
+        .trig(sd_wr_trig),
         .clk(clk_54m), .rst_n(bus_reset_n),
         // _148 FIX C: {miss de SPRITE[15:0], miss de FONDO[15:0]} — antes la
         // palabra entera era el miss de fondo. Los sprites tenian CERO
@@ -4922,7 +4963,11 @@ reg [15:0] sd_wcrc_cnt = 16'd0;   // ...de ellas, RECHAZADAS por la tarjeta
         // del WiFi no se distinguia "cero fallos" de "no estoy midiendo". Aqui
         // el de arriba TIENE que subir ~1 por sector durante la descarga.
         // Lectura: dbg_wifi_reader.py
-        .cnt_g({sd_wr_cnt, sd_wcrc_cnt}),   // V3.1: escrituras / rechazadas
+        // V3.1b: una linea POR ESCRITURA con el LBA de destino.
+        //   [29] la tarjeta la rechazo   [28] la carga eran 512 ceros
+        //   [27:0] LBA (28 bits = hasta 128 GB)
+        // Lectura: tools/dbg_lba_reader.py
+        .cnt_g({2'd0, sd_wr_rej, sd_wr_zero, sd_wr_lba[27:0]}),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)

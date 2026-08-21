@@ -15,7 +15,11 @@
 module dbg_uart #(
     parameter CLK_HZ  = 53_996_000,     // clk_54m
     parameter BAUD    = 115_200,
-    parameter PERIOD_MS = 250
+    parameter PERIOD_MS = 250,
+    // TRIG_MODE=1: la linea se emite CUANDO PASA ALGO (pulso en trig), no cada
+    // PERIOD_MS. Para trazas de eventos raros y rapidos, donde muestrear por
+    // reloj no sirve: a 53 escrituras/s el periodo de 250 ms veria 1 de cada 13.
+    parameter TRIG_MODE = 0
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -26,6 +30,7 @@ module dbg_uart #(
     input  wire [31:0] cnt_e,           // _124: park {pisadas[15:0], drenajes[15:0]}
     input  wire [31:0] cnt_f,           // _154: drops del shim {s1_pfq[15:0], wq_full[15:0]} — sano = 0
     input  wire [31:0] cnt_g,           // _161c: salud del ADPCM {24'd0, wq_lost[3:0], wd_hits[3:0]} — sano = 0
+    input  wire        trig,          // TRIG_MODE=1: un pulso = una linea
     output reg         tx
 );
 
@@ -77,19 +82,29 @@ module dbg_uart #(
     reg [7:0]  cur_byte;
     reg [6:0]  msg_idx;         // _161c: 66 chars ya no caben en 6 bits
     reg        sending;
+    // Un trig que llegue MIENTRAS se transmite no se pierde: queda pendiente y
+    // arranca la linea siguiente. Sin esto, cualquier evento durante los ~5,7 ms
+    // que dura una linea desaparece sin dejar rastro, que es justo el fallo de
+    // instrumentacion que se quiere evitar.
+    reg        trig_pend;
+    wire       arranca = !sending && (TRIG_MODE ? trig_pend : (period_cnt >= TICKS));
 
     always @(posedge clk) begin
         if (!rst_n) begin
             tx <= 1'b1;
             period_cnt <= 0; baud_cnt <= 0; bit_idx <= 0;
-            msg_idx <= 0; sending <= 0; cur_byte <= 0;
+            msg_idx <= 0; sending <= 0; cur_byte <= 0; trig_pend <= 0;
             s_a <= 0; s_b <= 0; s_c <= 0; s_d <= 0; s_e <= 0; s_f <= 0; s_g <= 0;
         end
         else begin
+            // el trig que coincide con el arranque se conserva para la proxima
+            if (arranca)   trig_pend <= trig;
+            else if (trig) trig_pend <= 1'b1;
+
             if (!sending) begin
                 tx <= 1'b1;
                 period_cnt <= period_cnt + 1;
-                if (period_cnt >= TICKS) begin
+                if (arranca) begin
                     period_cnt <= 0;
                     s_a <= cnt_a; s_b <= cnt_b; s_c <= cnt_c; s_d <= cnt_d; s_e <= cnt_e; s_f <= cnt_f;
                     s_g <= cnt_g;
