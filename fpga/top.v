@@ -4429,6 +4429,30 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     end
 
 
+// ---------------------------------------------------------------------------
+// V3.1 — DESCARGAS CORRUPTAS: la tarjeta RECHAZA bloques y nadie se entera.
+//
+// Medido el 21/08 comparando 4 descargas del File-Hunter contra el CRC32 que
+// ahora da la API: el stream llega INTACTO (ni un byte perdido, cero
+// desplazamiento en todo el fichero), pero ~1 sector de cada 1120 se queda con
+// el contenido ANTIGUO de la tarjeta (FF, E5, o restos de otro fichero). O
+// sea: esa escritura no llego al medio, y el menu la dio por buena.
+//
+// LA CADENA: sd_reader captura el token de respuesta del bloque
+// (sd_reader.sv:495 — 010 = aceptado) y levanta crc_error; la FSM termina
+// NORMALMENTE (WTAIL->WBUSY->WDONE), busy baja, top.v lo expone en
+// SDC_STATUS bit0... y el menu, que en sd_wait_idle hace "and #80", solo mira
+// el bit de busy y tira crc_error a la basura. Sin reintento y sin rastro.
+//
+// El fuente del menu del MSXimus NO esta en este repo, asi que el reintento se
+// hace AQUI: si la tarjeta rechaza el bloque no se limpia wstart, la FSM de
+// comandos vuelve a IDLING, lo ve alto y repite el CMD24 con el mismo sector y
+// el mismo dpram (escribir solo LEE el buffer, no lo destruye). Invisible para
+// el menu y vale para las dos maquinas.
+// ---------------------------------------------------------------------------
+reg [15:0] sd_wr_cnt   = 16'd0;   // escrituras terminadas (TESTIGO DE VIDA)
+reg [15:0] sd_wcrc_cnt = 16'd0;   // ...de ellas, RECHAZADAS por la tarjeta
+
 `ifdef ENABLE_SDCARD
 
     
@@ -4652,10 +4676,24 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0] sd_cd_w;
     assign sd_cd_w = ff_sd_cd;
     
+    reg       sd_done_d  = 1'b0;
+    reg [1:0] sd_wretry  = 2'd0;
+    reg       sd_wr_hold = 1'b0;
+    reg       sd_wr_fail = 1'b0;
+
+    wire sd_wr_done_edge = sd_done_w && !sd_done_d && ff_sd_wstart;
+    wire sd_wr_rechazado = sd_wr_done_edge && sd_crc_error_w && !sd_timeout_error_w;
+    wire sd_wr_again     = sd_wr_rechazado && (sd_wretry != 2'd3);
+    wire sd_wr_giveup    = sd_wr_rechazado && (sd_wretry == 2'd3);
+
     always @(posedge clk_27m or negedge bus_reset_n) begin
         if (~bus_reset_n) begin
             ff_sd_rstart <= '0;
             ff_sd_wstart <= '0;
+            sd_done_d  <= 1'b0;
+            sd_wretry  <= 2'd0;
+            sd_wr_hold <= 1'b0;
+            sd_wr_fail <= 1'b0;
             ff_sd_init <= '0;
         end else begin
             // FIX 60K (AUDIT §3, fila 3): un timeout tambien limpia rstart/wstart
@@ -4663,7 +4701,33 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             // timeout_error es sticky hasta el siguiente comando, pero el strobe de
             // escritura Z80 a SDC_CMD dura varios ciclos de clk_27m y el case de
             // abajo gana, asi que un reintento explicito sigue funcionando.
-            if (sd_done_w || sd_timeout_error_w) begin
+            sd_done_d <= sd_done_w;
+
+            // Contadores y reintento SOLO en el flanco de subida de done: rdone
+            // es un nivel (vale mientras sdcmd_stat==WRITING2 && WDONE) y por
+            // nivel se contaria varias veces la misma escritura.
+            if (sd_wr_done_edge) begin
+                sd_wr_cnt <= sd_wr_cnt + 16'd1;
+                if (sd_crc_error_w) sd_wcrc_cnt <= sd_wcrc_cnt + 16'd1;
+                sd_wretry <= sd_wr_again ? (sd_wretry + 2'd1) : 2'd0;
+            end
+
+            // Tapa el hueco de busy: entre WDONE y el CMD24 del reintento la
+            // FSM pasa por IDLING, y el Z80 sondea SDC_STATUS cada ~12 us. Sin
+            // esto podria colarse justo ahi, darlo por escrito y empezar a
+            // meter el siguiente sector en el dpram que el reintento esta
+            // leyendo.
+            if (sd_wr_again)      sd_wr_hold <= 1'b1;
+            else if (sd_busy_w)   sd_wr_hold <= 1'b0;
+
+            // Reintentos agotados: dejar busy ALTO hasta el siguiente SDC_CMD.
+            // Asi el sd_wait_idle del menu agota su backstop (~2-3 s), pone
+            // SD_STATUS=3 y la descarga aborta CON ERROR VISIBLE, en vez de
+            // seguir y dejar el fichero corrupto en silencio.
+            if (sd_wr_giveup) sd_wr_fail <= 1'b1;
+            else if (sd_cs_w && ~bus_wr_n && bus_addr == SDC_CMD) sd_wr_fail <= 1'b0;
+
+            if ((sd_done_w || sd_timeout_error_w) && !sd_wr_again) begin
                 ff_sd_rstart <= '0;
                 ff_sd_wstart <= '0;
             end
@@ -4686,7 +4750,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 if (~bus_rd_n) begin
                     case(bus_addr) 
                         SDC_ENABLE:     ff_sd_cd <= { 7'b0, ff_sd_en };
-                        SDC_STATUS:     ff_sd_cd <= { sd_busy_w, 5'b0, sd_timeout_error_w, sd_crc_error_w };
+                        SDC_STATUS:     ff_sd_cd <= { sd_busy_w | sd_wr_hold | sd_wr_fail, 5'b0, sd_timeout_error_w, sd_crc_error_w };
                         SDC_C_SIZE+0:   ff_sd_cd <= sd_c_size_w[7:0];
                         SDC_C_SIZE+1:   ff_sd_cd <= sd_c_size_w[15:8];
                         SDC_C_SIZE+2:   ff_sd_cd <= { 2'b0, sd_c_size_w[21:16] };
@@ -4852,10 +4916,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         // Lectura: tools/dbg_mouse_reader.py
         // V3.1: el raton esta APARCADO, asi que esta palabra pasa a la caza
         // de las descargas corruptas, que es lo que bloquea de verdad.
-        //   [31:16] desbordamientos de la FIFO del WiFi (byte del ESP tirado)
-        //   [15:0]  underruns (el Z80 leyo en seco)
-        // SANO = 00000000 en una descarga entera. Lectura: dbg_wifi_reader.py
-        .cnt_g({wifi_ovf_cnt, wifi_unr_cnt}),
+        //   [31:16] ESCRITURAS de sector terminadas  <- TESTIGO DE VIDA
+        //   [15:0]  ...de ellas, RECHAZADAS por la tarjeta (token != 010)
+        // El testigo es lo que faltaba en la ronda anterior: con los contadores
+        // del WiFi no se distinguia "cero fallos" de "no estoy midiendo". Aqui
+        // el de arriba TIENE que subir ~1 por sector durante la descarga.
+        // Lectura: dbg_wifi_reader.py
+        .cnt_g({sd_wr_cnt, sd_wcrc_cnt}),   // V3.1: escrituras / rechazadas
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
