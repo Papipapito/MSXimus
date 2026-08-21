@@ -1,33 +1,36 @@
 #!/usr/bin/env python3
-# dbg_wifi_reader.py — CAZA DE LAS DESCARGAS CORRUPTAS (V3.1, 21/08).
+# dbg_wifi_reader.py -- lector COM11 de la caza de las descargas corruptas.
 #
-# Cableado: el de siempre — PMOD1 pin E22 (dbg_pmod1[4]) al RX del CH340,
+# Cableado: el de siempre -- PMOD1 pin E22 (dbg_pmod1[4]) al RX del CH340,
 # GND comun.
 #
 # Uso:  python tools\dbg_wifi_reader.py [COMx]      (por defecto COM11)
 #
-# Mira la palabra 7 (cnt_g) de la telemetria, que ahora lleva los DOS UNICOS
-# mecanismos por los que se puede perder informacion en el camino
-# ESP -> UART -> FIFO -> Z80 -> SD. Cada uno apunta a un culpable distinto,
-# y por eso hay que medirlos por separado ANTES de decidir nada:
+# QUE MIRA AHORA (V3.1, 21/08). La palabra 7 (cnt_g) lleva dos contadores:
 #
-#   OVERFLOW  el ESP escribio con la FIFO (2080 bytes) LLENA -> byte TIRADO.
-#             Hasta ahora era INVISIBLE: fifo.vhd lo descartaba sin dejar
-#             rastro. Si esto sube, es falta de CONTROL DE FLUJO en el
-#             enlace, y migrar al ESP32-S3 SE LO LLEVA PUESTO.
+#   OK        escrituras de sector TERMINADAS.  <-- TESTIGO DE VIDA
+#             Tiene que subir ~1 por sector mientras baja el fichero. Si no
+#             sube, la medida no vale: no estamos midiendo lo que creemos.
+#             Esto es justo lo que falto en la ronda anterior, donde los dos
+#             contadores dieron 0 y no habia forma de distinguir "cero
+#             fallos" de "instrumento muerto".
 #
-#   UNDERRUN  el Z80 leyo y no habia datos. Si esto sube, y el fichero sale
-#             con bloques a CERO pero ALINEADO -- que es la firma medida
-#             (Fleet: 21 sectores de 512 perdidos, uno cada 25; Aleste: uno
-#             cada 49) -- entonces el driver UNAPI esta entregando ceros sin
-#             avisar y el bug es del LADO MSX, no del ESP.
+#   RECHAZ.   de esas escrituras, las que la tarjeta RECHAZO: el token de
+#             respuesta del bloque llego distinto de 010 (aceptado) y
+#             sd_reader levanto crc_error. Hasta hoy nadie lo miraba: el
+#             sd_wait_idle del menu hace "and #80" y solo ve el bit de busy,
+#             asi que la escritura se daba por buena y el sector se quedaba
+#             con lo que ya hubiera en la tarjeta.
 #
-# SANO = los dos a 0 durante una descarga entera.
-# Si NO sube ninguno de los dos, ambos mecanismos quedan descartados de golpe
-# y hay que mirar mas arriba (el propio ESP, o la escritura a la SD).
+# Este bitstream ADEMAS reintenta el bloque rechazado hasta 4 veces, asi que
+# lo esperable es ver RECHAZ. subir unas pocas veces Y el fichero salir bien.
 #
-# COMO USARLO: arranca esto, lanza una descarga del File-Hunter desde el menu
-# del MSX, y mira los DELTAS mientras baja.
+# COMO LEER EL RESULTADO (verifica el fichero con verificar_descarga.py):
+#   OK sube, RECHAZ. 0, CRC cuadra    -> descarga limpia; repetir a por una mala
+#   OK sube, RECHAZ. sube, CRC cuadra -> DIAGNOSTICO CONFIRMADO Y CURADO
+#   OK sube, RECHAZ. sube, CRC MAL    -> mecanismo bueno, faltan reintentos
+#   OK sube, RECHAZ. 0, CRC MAL       -> el diagnostico es INCORRECTO
+#   OK no sube                        -> no se esta midiendo; avisar
 import sys, time
 
 try:
@@ -37,12 +40,13 @@ except ImportError:
 
 port = sys.argv[1] if len(sys.argv) > 1 else "COM11"
 ser = serial.Serial(port, 115200, timeout=2)
-print(f"escuchando {port} @115200 — caza de las descargas corruptas")
-print("Lanza ahora una descarga del File-Hunter y mira los deltas.\n")
-print("hora      OVERFLOW  d     UNDERRUN  d     veredicto")
-print("-" * 66)
+print("escuchando %s @115200 -- escrituras a la SD y bloques rechazados" % port)
+print("Lanza ahora una descarga del File-Hunter.\n")
+print("hora        OK(escrituras)   d      RECHAZADAS   d     veredicto")
+print("-" * 72)
 
-prev_o = prev_u = None
+prev_w = prev_r = None
+vivo = False
 while True:
     try:
         ln = ser.readline().decode("ascii", "replace").strip()
@@ -57,20 +61,21 @@ while True:
     if len(w) < 7:
         continue
     g = w[6]
-    ovf = (g >> 16) & 0xFFFF
-    unr = g & 0xFFFF
+    wr  = (g >> 16) & 0xFFFF     # escrituras terminadas
+    rej = g & 0xFFFF             # de ellas, rechazadas
 
-    do = 0 if prev_o is None else ((ovf - prev_o) & 0xFFFF)
-    du = 0 if prev_u is None else ((unr - prev_u) & 0xFFFF)
-    prev_o, prev_u = ovf, unr
+    dw = 0 if prev_w is None else ((wr  - prev_w) & 0xFFFF)
+    dr = 0 if prev_r is None else ((rej - prev_r) & 0xFFFF)
+    prev_w, prev_r = wr, rej
+    if dw: vivo = True
 
-    if do and du:
-        v = "<<< LOS DOS (mirar cual domina)"
-    elif do:
-        v = "<<< ENLACE: falta control de flujo"
-    elif du:
-        v = "<<< LADO MSX: el driver entrega ceros"
-    else:
+    if dr:
+        v = "<<< LA TARJETA RECHAZO %d BLOQUE(S) -- reintentados" % dr
+    elif dw:
+        v = "escribiendo"
+    elif vivo:
         v = ""
-    print("%s  %8d %+4d     %8d %+4d     %s" % (
-        time.strftime("%H:%M:%S"), ovf, do, unr, du, v))
+    else:
+        v = "(sin actividad de escritura todavia)"
+    print("%s   %10d %+5d   %10d %+4d    %s" % (
+        time.strftime("%H:%M:%S"), wr, dw, rej, dr, v))
