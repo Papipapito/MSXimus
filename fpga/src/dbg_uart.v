@@ -87,7 +87,15 @@ module dbg_uart #(
     // que dura una linea desaparece sin dejar rastro, que es justo el fallo de
     // instrumentacion que se quiere evitar.
     reg        trig_pend;
-    wire       arranca = !sending && (TRIG_MODE ? trig_pend : (period_cnt >= TICKS));
+    // En TRIG_MODE el temporizador NO se apaga: sigue emitiendo un LATIDO cada
+    // PERIOD_MS cuando no hay eventos. Dos razones:
+    //  1. Sirve para saber que el enlace respira aunque no se escriba nada.
+    //  2. Si se apaga, PERIOD_MS queda como logica muerta y la sintesis lo poda
+    //     -- y PERIOD_MS es justo lo que perturban los DADOS de la campana. Sin
+    //     el, los cuatro dados dan el MISMO bitstream (medido: los .fs solo
+    //     diferian en la hora del comentario de cabecera) y se pierde la unica
+    //     defensa contra una colocacion mala.
+    wire       arranca = !sending && (trig_pend || (period_cnt >= TICKS));
 
     always @(posedge clk) begin
         if (!rst_n) begin

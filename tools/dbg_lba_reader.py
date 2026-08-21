@@ -45,6 +45,7 @@ print("   #      LBA        marcas")
 print("-" * 52)
 
 prev = None
+prev_raw = None
 n = 0
 repes = saltos = ceros = recha = 0
 vistos = {}
@@ -60,6 +61,9 @@ try:
             g = int(p[7], 16)
         except ValueError:
             continue
+        if g == prev_raw:        # linea identica = LATIDO del temporizador,
+            continue             # no una escritura nueva (bits 31:30 ruedan)
+        prev_raw = g
         lba = g & 0x0FFFFFFF
         cero = (g >> 28) & 1
         rej  = (g >> 29) & 1

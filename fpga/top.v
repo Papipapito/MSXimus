@@ -4474,6 +4474,8 @@ reg [31:0] sd_wr_lba     = 32'd0;   // LBA de la ultima escritura terminada
 reg        sd_wr_zero    = 1'b0;    // su carga era 512 bytes a CERO
 reg        sd_wr_rej     = 1'b0;    // la tarjeta la rechazo (token != 010)
 reg        sd_wr_tog     = 1'b0;    // cruce a clk_54m (dominio del dbg_uart)
+reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
+                                    // repetida es un LATIDO, no una escritura
 
 `ifdef ENABLE_SDCARD
 
@@ -4708,6 +4710,7 @@ reg        sd_wr_tog     = 1'b0;    // cruce a clk_54m (dominio del dbg_uart)
             sd_wr_rej  <= sd_crc_error_w;
             sd_wr_nz   <= 1'b0;
             sd_wr_tog  <= ~sd_wr_tog;      // un cambio de nivel = una linea
+            sd_wr_seq  <= sd_wr_seq + 2'd1;  // distingue escritura de LATIDO
         end
     end
 
@@ -4967,7 +4970,7 @@ reg        sd_wr_tog     = 1'b0;    // cruce a clk_54m (dominio del dbg_uart)
         //   [29] la tarjeta la rechazo   [28] la carga eran 512 ceros
         //   [27:0] LBA (28 bits = hasta 128 GB)
         // Lectura: tools/dbg_lba_reader.py
-        .cnt_g({2'd0, sd_wr_rej, sd_wr_zero, sd_wr_lba[27:0]}),
+        .cnt_g({sd_wr_seq, sd_wr_rej, sd_wr_zero, sd_wr_lba[27:0]}),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
