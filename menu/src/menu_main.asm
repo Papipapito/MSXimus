@@ -368,6 +368,7 @@ WDE_LEFT	equ	#C0F5			; 1 byte: root-dir sectors left to scan
 MCE_SEC		equ	#C0F6			; 1 byte: FAT sector offset of the cluster entry
 BR_BLINK	equ	#C0F7			; 1 byte: per-row blink-attr fill byte (dir colour)
 FILTER		equ	#C0F8			; 1 byte: active tab filter (0=ROM, 1=DSK, 2=ALL)
+FH_DFERR	equ	#C0F9			; 1 byte: fh2_dfind no pudo LEER (su CF=1 no es fiable)
 ; --- multi-partition support (placed at #E800, above ENT_ARRAY C300..E700) ---
 MAX_PARTS	equ	8
 PART_TBL	equ	#E800			; up to 8 entries x 4 bytes = start LBA of each FAT16 partition
@@ -7362,7 +7363,19 @@ fh2_fhunt_ensure:
 	ld   (FH_DSECS), a
 	ld   hl, fh2_n_fhunt
 	call fh2_dfind					; busca en la raiz / CF=1 no esta
-	jr   c, .fe_mk
+	jr   nc, .fe_ok
+	; CF=1 puede ser "no esta" o "no se pudo leer", y confundirlos DESTRUYE LA
+	; TARJETA: se crea una FHUNT nueva, se pide un cluster y se escribe encima
+	; de lo que hubiera. Cazado en placa el 21/08 con la traza de LBA: escribio
+	; los 64 sectores del CLUSTER 2 (LBA 2584-2647), se llevo por delante
+	; \System Volume Information y dejo el cluster 60 con vinculo cruzado.
+	ld   a, (FH_DFERR)
+	or   a
+	jr   z, .fe_mk					; de verdad no esta -> crearla
+	ld   hl, fh2_e_sd				; no se pudo leer -> ABORTAR, no crear
+	scf
+	ret
+.fe_ok:
 	; existe: cluster en DE (comprobar que es carpeta: attr bit4)
 	bit  4, b
 	ld   hl, fh2_e_dir
@@ -7476,6 +7489,8 @@ fh2_fhunt_ensure:
 ; CF=0: DE = cluster de la entrada, B = attr, FH_FSIZ2 = size (4B)
 fh2_dfind:
 	ld   (FH_NPTR), hl
+	xor  a
+	ld   (FH_DFERR), a				; 0 = el veredicto es fiable
 	ld   hl, (FH_DLBA+0)
 	ld   (SD_LBA+0), hl
 	ld   hl, (FH_DLBA+2)
@@ -7489,7 +7504,7 @@ fh2_dfind:
 	call sd_read_sector
 	ld   a, (SD_STATUS)
 	or   a
-	jp   nz, .df_no
+	jp   nz, .df_sderr				; NO es "no esta": es "no he podido mirar"
 	ld   ix, SD_BUF
 	ld   b, 16
 .df_ent:
@@ -7537,6 +7552,9 @@ fh2_dfind:
 	dec  a
 	ld   (FH2_LEFT), a
 	jr   .df_sec
+.df_sderr:
+	ld   a, 1
+	ld   (FH_DFERR), a				; CF=1 pero NO significa "libre"
 .df_no:
 	scf
 	ret
@@ -7660,6 +7678,7 @@ fh2_dirent:
 
 	; 1) SFN unico "BASE~N" en FH_NAME83 (busca N libre en FHUNT)
 	call fh2_mk_sfn
+	jp   c, fh2_de_err				; sin nombre fiable no se escribe nada
 	; 2) checksum del SFN (enlaza las LFN con el 8.3)
 	call fh2_lfn_cksum
 	; 3) puntero + longitud del nombre completo (en FH_METAB)
@@ -7796,14 +7815,21 @@ fh2_mk_sfn:
 	djnz .ms_pad
 .ms_chk:
 	ld   hl, FH_NAME83
-	call fh2_dfind					; CF=1 = libre (no existe) -> usar
-	ret  c
+	call fh2_dfind					; CF=1 = no existe... o no se pudo leer
+	jr   nc, .ms_next				; existe -> probar el siguiente N
+	ld   a, (FH_DFERR)
+	or   a
+	ret  z							; libre de verdad -> usarlo (CF=0)
+	scf								; error de SD: no inventarse un nombre
+	ret
+.ms_next:
 	ld   a, (FH_SFNN)
 	inc  a
 	ld   (FH_SFNN), a
 	cp   10
-	jr   c, .ms_try					; 1..9; si se agotan, se reusa el 9
-	ret
+	jr   c, .ms_try					; 1..9
+	scf								; agotados: FALLAR. Antes salia con el ~9,
+	ret								; que YA sabia ocupado -> entrada duplicada
 
 ; ---- checksum LFN del SFN (FH_NAME83, 11B) -> FH_CKSUM ----
 fh2_lfn_cksum:
