@@ -46,6 +46,7 @@ print("-" * 52)
 
 prev = None
 prev_raw = None
+hay_seq = False
 n = 0
 repes = saltos = ceros = recha = 0
 vistos = {}
@@ -61,8 +62,16 @@ try:
             g = int(p[7], 16)
         except ValueError:
             continue
-        if g == prev_raw:        # linea identica = LATIDO del temporizador,
-            continue             # no una escritura nueva (bits 31:30 ruedan)
+        # El LATIDO del temporizador repite la linea anterior. Se distingue por
+        # el contador de 2 bits [31:30], que rueda con cada escritura. Pero ese
+        # contador solo existe desde la v31e: en la v31d esos bits son SIEMPRE
+        # 0, y descartar "lineas repetidas" alli se come ESCRITURAS DE VERDAD
+        # (las 7 seguidas al mismo sector de directorio de cada fichero).
+        # Por eso el descarte se activa solo si se ve el contador moverse.
+        if ((g >> 30) & 3) != ((prev_raw >> 30) & 3 if prev_raw is not None else 0):
+            hay_seq = True
+        if hay_seq and g == prev_raw:
+            continue             # latido, no escritura
         prev_raw = g
         lba = g & 0x0FFFFFFF
         cero = (g >> 28) & 1
