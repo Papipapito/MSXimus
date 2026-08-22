@@ -7341,7 +7341,7 @@ fh2_flush:
 	ld   hl, fh2_e_full
 	jr   .fl_e2
 .fl_err:
-	ld   hl, fh2_e_sd
+	ld   hl, fh2_e_e0
 .fl_e2:
 	push hl
 	di
@@ -7372,7 +7372,7 @@ fh2_fhunt_ensure:
 	ld   a, (FH_DFERR)
 	or   a
 	jr   z, .fe_mk					; de verdad no esta -> crearla
-	ld   hl, fh2_e_sd				; no se pudo leer -> ABORTAR, no crear
+	ld   hl, fh2_e_e1				; no se pudo leer -> ABORTAR, no crear
 	scf
 	ret
 .fe_ok:
@@ -7394,7 +7394,7 @@ fh2_fhunt_ensure:
 	ld   (FH_DIRCLUS), de
 	ld   (NEW_CLUS), de
 	call mark_cluster_eof
-	ld   hl, fh2_e_sd
+	ld   hl, fh2_e_e2
 	ret  c
 	; limpiar los sectores del cluster
 	ld   hl, SD_BUF					; SD_BUF = 512 ceros
@@ -7412,7 +7412,7 @@ fh2_fhunt_ensure:
 	call sd_write_sector
 	ld   a, (SD_STATUS)
 	or   a
-	ld   hl, fh2_e_sd
+	ld   hl, fh2_e_e3
 	jp   nz, .fe_sderr
 	call inc_sd_lba
 	ld   a, (FH2_LEFT)
@@ -7457,7 +7457,7 @@ fh2_fhunt_ensure:
 	call sd_write_sector
 	ld   a, (SD_STATUS)
 	or   a
-	ld   hl, fh2_e_sd
+	ld   hl, fh2_e_e4
 	jp   nz, .fe_sderr
 	; dirent "FHUNT" en la raiz
 	ld   hl, (FH_DIRCLUS)
@@ -8412,6 +8412,14 @@ fh2_e_fat32:	.db "FH: la SD es FAT32 (v1 solo FAT16). Tecla",0
 fh2_e_dl:	.db "FH: error/timeout de descarga. Tecla",0
 fh2_e_api:	.db "FH: respuesta inesperada de la API. Tecla",0
 fh2_e_sd:	.db "FH: error escribiendo en la SD. Tecla",0
+; Cada aborto con su codigo: un "error en la SD" generico no dice DONDE, y
+; ese texto salia en 5 sitios distintos. Con el pack v3.0 la descarga fallaba
+; siempre y no habia forma de saber cual era.
+fh2_e_e0:	.db "FH: E0 fallo escribiendo (flush). Tecla",0
+fh2_e_e1:	.db "FH: E1 no puedo LEER la raiz. Tecla",0
+fh2_e_e2:	.db "FH: E2 fallo marcando la FAT. Tecla",0
+fh2_e_e3:	.db "FH: E3 fallo limpiando FHUNT. Tecla",0
+fh2_e_e4:	.db "FH: E4 fallo en . y .. de FHUNT. Tecla",0
 fh2_e_full:	.db "FH: sin espacio libre en la SD. Tecla",0
 fh2_e_dir:	.db "FH: error con la carpeta FHUNT. Tecla",0
 
