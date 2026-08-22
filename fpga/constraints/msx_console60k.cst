@@ -22,19 +22,39 @@
 //  clock_locked & ~bl616_jtagsel (el BL616 reclama JTAG subiendo su línea;
 //  PULL_UP = sin firmware companion la placa queda reprogramable por JTAG).
 // Reloj SPI del companion en red local (como C64Nano console60k): mcu_spi_new
-// clockea FFs directamente con spi_sclk (13.33 MHz del BL616).
+// clockea FFs directamente con spi_sclk (13,33 MHz; antes del BL616, ahora
+// del ESP32-S3 por el J10 -- y en U20, que ES pin de reloj global).
 CLOCK_LOC "spi_sclk" LOCAL_CLOCK;
 NET_LOC   "jtagseln" V_JTAGSELN;
 IO_PORT   "jtagseln" PULL_MODE=DOWN IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
 IO_LOC    "bl616_jtagsel" V14;
 IO_PORT   "bl616_jtagsel" PULL_MODE=UP IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
 
-// ---- Companion BL616 ONBOARD (mismos nets spi_* del MSXnano) ----
-IO_LOC  "spi_csn"  T13;  IO_PORT "spi_csn"  PULL_MODE=UP   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;  // TMS  [ALTA]
-IO_LOC  "spi_sclk" V12;  IO_PORT "spi_sclk" PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // TCK [ALTA]
-IO_LOC  "spi_dat"  R13;  IO_PORT "spi_dat"  PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // TDI/MOSI [ALTA]
-IO_LOC  "spi_dir"  U13;  IO_PORT "spi_dir"  PULL_MODE=NONE DRIVE=8   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // TDO/MISO [ALTA]
-IO_LOC  "spi_irqn" U15;  IO_PORT "spi_irqn" PULL_MODE=NONE DRIVE=8   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3; // [ALTA]
+// ---- Companion SPI: ahora el ESP32-S3 por el J10, NO el BL616 ------------
+// Estas cinco senales las servia el BL616 de a bordo por los pines JTAG
+// reconfigurados... salvo que ese BL616 nunca llego a llevar firmware, asi que
+// fpga_companion (top.v) llevaba todo este tiempo instanciado y OCIOSO,
+// esperando un maestro. Ahora se lo da el S3.
+//
+// Se mudan al J10, donde el S3 ya esta cableado para el UART del UNAPI y el
+// turbo. spi_sclk va a U20 a proposito: es GCLKT_8, entrada de reloj GLOBAL, y
+// mcu_spi_new clockea biestables directamente con ella.
+//
+//   J10 p19 = V20  (B8, GCLKC_8)  spi_dat   MOSI, entrada   <- GPIO5  del S3
+//   J10 p20 = U20  (B8, GCLKT_8)  spi_sclk  reloj, entrada  <- GPIO4
+//   J10 p21 = Y22  (B8)           spi_dir   MISO, salida    -> GPIO6
+//   J10 p22 = Y21  (B8)           spi_csn   CS#,  entrada   <- GPIO7
+//   J10 p23 = AB22 (B8)           spi_irqn  IRQ#, salida    -> GPIO15
+//
+// spi_csn con PULL_UP: sin maestro conectado queda DESELECCIONADO, que es lo
+// seguro. Si flotara, el ruido dispararia tramas fantasma.
+// ⚠ Siguen siendo pines del slot SDRAM1: si algun dia se pincha un 2o modulo
+//   de SDRAM en el J10, todo esto se muda.
+IO_LOC  "spi_dat"  V20;  IO_PORT "spi_dat"  PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+IO_LOC  "spi_sclk" U20;  IO_PORT "spi_sclk" PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+IO_LOC  "spi_dir"  Y22;  IO_PORT "spi_dir"  PULL_MODE=NONE DRIVE=8   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+IO_LOC  "spi_csn"  Y21;  IO_PORT "spi_csn"  PULL_MODE=UP            IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+IO_LOC  "spi_irqn" AB22; IO_PORT "spi_irqn" PULL_MODE=NONE DRIVE=8   IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
 //  m0s[0..4] del dock M0S ELIMINADOS (decisión: companion onboard). Al portar
 //  top.v se quita spi_ext/mux (fpga_companion.v:47-59) → desaparece el TA1132.
 
