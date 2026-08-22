@@ -4450,6 +4450,10 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 // el mismo dpram (escribir solo LEE el buffer, no lo destruye). Invisible para
 // el menu y vale para las dos maquinas.
 // ---------------------------------------------------------------------------
+// Bring-up del enlace SPI con el S3 (se rellenan junto al companion)
+wire [15:0] spi_hid_cnt_w;
+wire [15:0] spi_kbd_cnt_w;
+
 reg [15:0] sd_wr_cnt   = 16'd0;   // escrituras terminadas (TESTIGO DE VIDA)
 reg [15:0] sd_wcrc_cnt = 16'd0;   // ...de ellas, RECHAZADAS por la tarjeta
 
@@ -4912,8 +4916,10 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     always @(posedge clk_54m) sd_wr_tog_s <= {sd_wr_tog_s[1:0], sd_wr_tog};
     wire sd_wr_trig = sd_wr_tog_s[2] ^ sd_wr_tog_s[1];
 
-    dbg_uart #(.CLK_HZ(53_996_000), .TRIG_MODE(1)) u_dbguart (
-        .trig(sd_wr_trig),
+    dbg_uart #(.CLK_HZ(53_996_000)) u_dbguart (
+        .trig(1'b0),        // vuelta al modo PERIODICO: para el bring-up del
+                            // SPI interesa una lectura continua, no una linea
+                            // por evento de escritura a la SD (que ya no hay)
         .clk(clk_54m), .rst_n(bus_reset_n),
         // _148 FIX C: {miss de SPRITE[15:0], miss de FONDO[15:0]} — antes la
         // palabra entera era el miss de fondo. Los sprites tenian CERO
@@ -4970,7 +4976,12 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         //   [29] la tarjeta la rechazo   [28] la carga eran 512 ceros
         //   [27:0] LBA (28 bits = hasta 128 GB)
         // Lectura: tools/dbg_lba_reader.py
-        .cnt_g({sd_wr_seq, sd_wr_rej, sd_wr_zero, sd_wr_lba[27:0]}),
+        // V3.1f: la traza de LBA ya no sirve (la BIOS V3.1 no descarga nada),
+        // asi que esta palabra pasa al bring-up del enlace con el S3:
+        //   [31:16] bytes HID recibidos del S3   <- TESTIGO DE VIDA
+        //   [15:0]  cambios del vector de teclado
+        // Lectura: tools/dbg_spi_reader.py
+        .cnt_g({spi_hid_cnt_w, spi_kbd_cnt_w}),
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
@@ -5348,6 +5359,32 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .ws2812_color (),   // LEDs are discrete; WS2812 not used
         .dbg_hid_strobe (dbg_hid_strobe_w)
     );
+
+    // ---- BRING-UP DEL ENLACE CON EL S3 ---------------------------------
+    // Dos testigos en DOS PUNTOS DISTINTOS de la cadena, que es lo que permite
+    // saber DONDE se rompe en vez de solo que no va:
+    //
+    //   spi_hid_cnt  bytes HID que han llegado del S3. Si NO sube, el problema
+    //                esta en el cable o en el maestro: la FPGA no recibe nada.
+    //   spi_kbd_cnt  veces que ha CAMBIADO el vector de teclado. Si el de
+    //                arriba sube y este no, los bytes llegan pero no se estan
+    //                interpretando (comando mal, o el bit 7 al reves).
+    //
+    // La sonda dbg_hid_strobe ya existia en fpga_companion, pero su cable se
+    // quedaba colgando sin ir a ningun sitio: existir no es lo mismo que poder
+    // mirarlo.
+    reg  [15:0] spi_hid_cnt = 16'd0;
+    reg  [15:0] spi_kbd_cnt = 16'd0;
+    reg         dbg_hid_d   = 1'b0;
+    reg [127:0] kbd_spi_d   = 128'd0;
+    always @(posedge clk_27m) begin
+        dbg_hid_d <= dbg_hid_strobe_w;
+        kbd_spi_d <= keyboard_spi;
+        if (dbg_hid_strobe_w && !dbg_hid_d)   spi_hid_cnt <= spi_hid_cnt + 16'd1;
+        if (keyboard_spi != kbd_spi_d)        spi_kbd_cnt <= spi_kbd_cnt + 16'd1;
+    end
+    assign spi_hid_cnt_w = spi_hid_cnt;
+    assign spi_kbd_cnt_w = spi_kbd_cnt;
 
     usb_keyboard_msx usb_keyboard_msx
     (
