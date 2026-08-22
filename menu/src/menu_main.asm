@@ -101,19 +101,9 @@ main_menu_entry:
 	jr   c, .pm_done
 	ld   a, 1
 	ld   (SD_READY), a
-	ld   de, 2						; ~1s extra de logo con la SD ya lista
-.pm_w1:
-	ld   bc, 0
-.pm_w2:
-	dec  bc
-	ld   a, b
-	or   c
-	jr   nz, .pm_w2
-	dec  de
-	ld   a, d
-	or   e
-	jr   nz, .pm_w1
 .pm_done:
+	call logo_key_window			; V3.1: el retardo del logo ES la ventana de
+									; teclas. Vive en el banco >=A010 (aqui no cabe).
 	call restore_palette			; restaurar la paleta de fabrica AL SALIR del
 									; logo (no mientras sigue en pantalla)
 	ld   a, 2
@@ -130,9 +120,13 @@ main_menu_entry:
 ; redraw WITHOUT re-capturing the BIOS context (which is only valid on the
 ; very first entry from the cartridge INIT).
 main_menu_restart:
+	jp   menu_dispatch				; V3.1: S=Ajustes, W=WiFi, nada=arrancar el MSX
+	; ---- desde aqui, codigo YA NO ALCANZABLE (navegador, lanzador y
+	; ---- File-Hunter). Se borra en una segunda pasada, cuando esto valide.
+main_menu_muerto:
 	xor  a
-	ld   (BROWSING), a				; leaving the browser: stop marquee animation
-	call init_screen				; Reuse screen/blink init (shared routine)
+	ld   (BROWSING), a
+	call init_screen
 	; UNIFIED UI (Picoverse-style): the SD browser IS the home screen. Boot and
 	; every "return to menu" land here. ESC in the browser = boot the system,
 	; 'A' = settings. The old 4-option menu below is kept but no longer reached.
@@ -369,6 +363,7 @@ MCE_SEC		equ	#C0F6			; 1 byte: FAT sector offset of the cluster entry
 BR_BLINK	equ	#C0F7			; 1 byte: per-row blink-attr fill byte (dir colour)
 FILTER		equ	#C0F8			; 1 byte: active tab filter (0=ROM, 1=DSK, 2=ALL)
 FH_DFERR	equ	#C0F9			; 1 byte: fh2_dfind no pudo LEER (su CF=1 no es fiable)
+BOOT_KEY	equ	#C0FA			; 1 byte: tecla cazada durante el logo (0 nada, 1 S, 2 W)
 ; --- multi-partition support (placed at #E800, above ENT_ARRAY C300..E700) ---
 MAX_PARTS	equ	8
 PART_TBL	equ	#E800			; up to 8 entries x 4 bytes = start LBA of each FAT16 partition
@@ -4905,6 +4900,80 @@ ENDIF
 ; bloque vive ahora al FINAL de la seccion de datos, tras los structs).
 	ds   #A000-$
 	.org #A010
+
+; ===========================================================================
+;  V3.1 — BIOS SIN MENU
+;
+;  Sale el logo, se mira el teclado un momento, y se arranca el MSX.
+;    S = Ajustes     W = WiFi     nada = arrancar
+;
+;  El navegador de la SD, el lanzador de ROMs y el File-Hunter se van: de eso
+;  se encarga MSX-DOS, que lleva 30 anos haciendolo bien. Con ellos se va la
+;  clase entera de fallos que destrozaba tarjetas -- aqui ya no hay nada que
+;  escriba en la FAT.
+;
+;  Estas dos rutinas viven en ESTE banco y no en el de codigo porque alli
+;  quedaban 55 bytes y no cabian. El guard 'ds #A000-$' lo canto a la primera.
+; ===========================================================================
+
+; ---- logo_key_window: el retardo del logo, sondeando el teclado -----------
+; Sale con BOOT_KEY = 0 (nada), 1 (S) o 2 (W).
+;
+; Se sondea la MATRIZ y no la BIOS a proposito: asi no depende de que haya
+; interrupciones ni de que el teclado USB haya llegado a enumerar. La fila 5
+; lleva S T U V W X Y Z, o sea que S (bit 0) y W (bit 4) caen en la MISMA
+; lectura. Del puerto C se cambia SOLO el nibble bajo: los bits altos llevan
+; el motor del casete, el click y el LED de kana.
+logo_key_window:
+	xor  a
+	ld   (BOOT_KEY), a
+	ld   de, 2						; ~3 s (el sondeo alarga bastante el bucle)
+.lk_w1:
+	ld   bc, 0
+.lk_w2:
+	in   a, (#AA)
+	and  #F0
+	or   5							; fila 5
+	out  (#AA), a
+	in   a, (#A9)					; teclas activas a nivel BAJO
+	bit  0, a
+	jr   nz, .lk_noS
+	ld   a, 1						; S
+	ld   (BOOT_KEY), a
+	ret
+.lk_noS:
+	bit  4, a
+	jr   nz, .lk_sigue
+	ld   a, 2						; W
+	ld   (BOOT_KEY), a
+	ret
+.lk_sigue:
+	dec  bc
+	ld   a, b
+	or   c
+	jr   nz, .lk_w2
+	dec  de
+	ld   a, d
+	or   e
+	jr   nz, .lk_w1
+	ret
+
+; ---- menu_dispatch: adonde vamos tras el logo -----------------------------
+; Tambien es el punto de vuelta de Ajustes y de WiFi. BOOT_KEY se CONSUME: se
+; lee y se borra, asi que al salir de cualquiera de los dos se arranca el MSX
+; en vez de volver a entrar en bucle.
+menu_dispatch:
+	ld   a, (BOOT_KEY)
+	push af
+	xor  a
+	ld   (BOOT_KEY), a
+	pop  af
+	dec  a
+	jp   z, config_menu_entry		; S
+	dec  a
+	jp   z, main_action_wifi		; W
+	jp   boot_system				; nada -> arrancar el MSX
+
 help1Str:
 	.db "Arriba/Abajo          : mover (Izq/Der = pagina)",0
 help2Str:
