@@ -1250,6 +1250,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire        lnz_vdp_ioreq, lnz_vdp_write, lnz_vdp_valid;
     wire [7:0]  lnz_vdp_wdata;
     wire        lnz_sd_rstart;
+    wire        lnz_sd_init;
     wire [31:0] lnz_sd_rsector;
 
 `ifdef ENABLE_WIFI
@@ -4710,7 +4711,10 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .psn(sd_psn_w),
         .crc_error(sd_crc_error_w),
         .timeout_error(sd_timeout_error_w),
-        .init(ff_sd_init)
+        // OR, no mux: encender la tarjeta es idempotente y lo puede pedir
+        // cualquiera de los dos. El sd_reader solo mira init en STANDBY, asi
+        // que pedirlo dos veces no hace nada.
+        .init(ff_sd_init | lnz_sd_init)
     );
     
     assign sd_dat1 = 1;
@@ -5393,12 +5397,14 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     wire        lnz_sd_outen_i   = sd_outen_w;
     wire [8:0]  lnz_sd_outaddr_i = sd_outaddr_w;
     wire [7:0]  lnz_sd_outbyte_i = sd_outbyte_w;
+    wire [3:0]  lnz_sd_stat_i    = sd_card_stat_w;
 `else
     wire        lnz_sd_rbusy_i   = 1'b0;
     wire        lnz_sd_rdone_i   = 1'b0;
     wire        lnz_sd_outen_i   = 1'b0;
     wire [8:0]  lnz_sd_outaddr_i = 9'd0;
     wire [7:0]  lnz_sd_outbyte_i = 8'd0;
+    wire [3:0]  lnz_sd_stat_i    = 4'd0;
 `endif
 `ifdef ENABLE_USB_KBD
     wire [127:0] lnz_kbd_usb = kbd_usb_s2;
@@ -5441,7 +5447,9 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .sd_rdone (lnz_sd_rdone_i),
         .sd_outen (lnz_sd_outen_i),
         .sd_outaddr (lnz_sd_outaddr_i),
-        .sd_outbyte (lnz_sd_outbyte_i)
+        .sd_outbyte (lnz_sd_outbyte_i),
+        .sd_card_stat (lnz_sd_stat_i),
+        .lnz_sd_init (lnz_sd_init)
     );
 
     // ---- BRING-UP DEL ENLACE CON EL S3 ---------------------------------

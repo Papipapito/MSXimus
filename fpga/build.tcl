@@ -183,6 +183,9 @@ add_file msx_console60k/src/pll_init.v
 # NOTE: add mcu_spi_new.v ONLY (mcu_spi.v has a colliding "module mcu_spi").
 add_file src/usb/fpga_companion.v
 add_file src/usb/hid.v
+# lanzador del S3: pinta por el VDP (destino OSD) y lee la SD (destino SDC)
+add_file src/usb/launcher_svc.v
+add_file src/usb/sdc_bridge.v
 add_file src/usb/mcu_spi_new.v
 add_file src/usb/sys_ctrl.v
 add_file src/usb/usb_keyboard_msx.vhd

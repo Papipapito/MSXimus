@@ -58,8 +58,17 @@ module sdc_bridge #(
     input  wire [8:0]  outaddr,
     input  wire [7:0]  outbyte,
 
+    input  wire [3:0]  card_stat,       // progreso de arranque de la tarjeta
+
     // ---- gobierno --------------------------------------------------------
-    output reg         hold             // 1 = el S3 manda: retener el Z80
+    output reg         hold,            // 1 = el S3 manda: retener el Z80
+
+    // 🚨 QUIEN ENCIENDE LA TARJETA. El sd_reader se queda en STANDBY con rbusy
+    // ALTO hasta que alguien le pide init (sd_reader.sv:258), y en el MSX quien
+    // lo pide es el Z80 escribiendo un registro (top.v: ff_sd_init |= dato[7]).
+    // O sea que el lanzador retenia al Z80 y luego le pedia sectores a una
+    // tarjeta que solo ese Z80 sabia arrancar. Ahora lo pide el puente.
+    output reg         sd_init          // se queda a 1: es idempotente
 );
 
     localparam VERSION = 8'd1;
@@ -86,6 +95,7 @@ module sdc_bridge #(
     always @(posedge clk) begin
         if (reset) begin
             hold <= 1'b0;               // por defecto NO retenemos: sin S3, el
+            sd_init <= 1'b0;
             rstart <= 1'b0;             // MSX arranca solo. Degradar a "MSX
             rsector <= 32'd0;           // normal", nunca a ladrillo.
             leyendo <= 1'b0;
@@ -112,7 +122,10 @@ module sdc_bridge #(
                     rd_ptr <= 9'd0;
                     case (din[2:0])
                         3'd0: dout <= VERSION;
-                        3'd1: begin hold <= 1'b1; dout <= 8'h01; end
+                        // TOMAR: ademas de retener, ENCENDER la tarjeta. No
+                        // se retira nunca: el lector solo mira init en STANDBY,
+                        // asi que pedirlo de mas no hace nada.
+                        3'd1: begin hold <= 1'b1; sd_init <= 1'b1; dout <= 8'h01; end
                         3'd2: begin hold <= 1'b0; dout <= 8'h00; end
                         3'd4: dout <= buf_mem[9'd0];
                         default: dout <= 8'd0;
@@ -122,8 +135,14 @@ module sdc_bridge #(
                     arg <= (arg == 3'd7) ? arg : arg + 3'd1;
                     case (cmd)
                     3'd0: begin                     // ESTADO
-                        if (arg == 3'd0) dout <= {7'b0, leyendo | rbusy};
-                        else             dout <= {7'b0, hold};
+                        case (arg)
+                        3'd0: dout <= {7'b0, leyendo | rbusy};
+                        3'd1: dout <= {7'b0, hold};
+                        // El progreso de arranque de la tarjeta. Se anade
+                        // porque su ausencia costo una ronda entera: "ocupada"
+                        // no distingue "leyendo" de "ni siquiera ha arrancado".
+                        default: dout <= {3'b0, sd_init, card_stat};
+                        endcase
                     end
                     3'd3: begin                     // LEER: 4 bytes de LBA
                         case (arg)
