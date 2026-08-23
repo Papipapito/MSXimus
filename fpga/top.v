@@ -1242,19 +1242,34 @@ assign keyboard_addr = ppi_port_c[3:0];
     // y no se re-arma: los soft-reset siguen siendo instantaneos (regla de la
     // megaram) y el coste real es ~1.5-2s extra (el stream de flash ya tapa
     // parte). Sin ENABLE_WIFI no aplica.
+    // ================= LANZADOR DEL S3 (destinos SPI 2 y 3) ===============
+    // Se declaran aqui arriba porque lnz_hold gobierna esp_boot_ok, y eso pasa
+    // muy por encima de donde se instancia el companion.
+    wire        lnz_hold;              // 1 = manda el S3: Z80 retenido
+    wire [2:0]  lnz_vdp_address;
+    wire        lnz_vdp_ioreq, lnz_vdp_write, lnz_vdp_valid;
+    wire [7:0]  lnz_vdp_wdata;
+    wire        lnz_sd_rstart;
+    wire [31:0] lnz_sd_rsector;
+
 `ifdef ENABLE_WIFI
     reg [26:0] esp_boot_cnt = 0;
-    reg        esp_boot_ok  = 0;
+    reg        esp_boot_tmr = 0;
     always @(posedge clk_27m) begin
-        if (!esp_boot_ok) begin
+        if (!esp_boot_tmr) begin
             if (esp_boot_cnt == 27'd81000000)   // ~3.0s @ 27 MHz
-                esp_boot_ok <= 1;
+                esp_boot_tmr <= 1;
             else
                 esp_boot_cnt <= esp_boot_cnt + 1'b1;
         end
     end
+    // El lanzador RETIENE al Z80 mientras pinta el menu y lee la SD. El
+    // temporizador de siempre se queda como PERRO GUARDIAN: si el S3 no esta o
+    // se cuelga, lnz_hold nunca sube y la maquina arranca sola a los 3 s. Un
+    // companion averiado degrada a "MSX normal", nunca a ladrillo.
+    wire esp_boot_ok = esp_boot_tmr & ~lnz_hold;
 `else
-    wire esp_boot_ok = 1'b1;
+    wire esp_boot_ok = ~lnz_hold;
 `endif
 
     // ===== Turbo mode toggle (F11) =====
@@ -1899,11 +1914,27 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire        v68_vram_stall;
     wire        v68_hs, v68_vs, v68_de;
     wire [7:0]  v68_r8, v68_g8, v68_b8;
+    // ---- mux del puerto CPU del VDP: glue del Z80 <-> lanzador del S3 ----
+    // Mientras el S3 retiene al Z80 el bus del VDP es suyo. NO hay concurrencia
+    // que arbitrar: o manda uno o manda el otro. El selector se sincroniza a
+    // clk_86 porque lnz_hold nace en clk_27m, y un glitch aqui partiria una
+    // transaccion por la mitad.
+    reg lnz_hold_86_1 = 1'b0, lnz_hold_86 = 1'b0;
+    always @(posedge clk_86) begin
+        lnz_hold_86_1 <= lnz_hold;
+        lnz_hold_86   <= lnz_hold_86_1;
+    end
+    wire [2:0] v68_addr_mx  = lnz_hold_86 ? lnz_vdp_address : v68_bus_address;
+    wire       v68_ioreq_mx = lnz_hold_86 ? lnz_vdp_ioreq   : v68_ioreq;
+    wire       v68_write_mx = lnz_hold_86 ? lnz_vdp_write   : v68_write;
+    wire       v68_valid_mx = lnz_hold_86 ? lnz_vdp_valid   : v68_valid;
+    wire [7:0] v68_wdata_mx = lnz_hold_86 ? lnz_vdp_wdata   : v68_wdata;
+
     vdp u_v9968 (
         .reset_n(rst86_n), .clk(clk_86), .initial_busy(1'b0),
-        .bus_address(v68_bus_address), .bus_ioreq(v68_ioreq), .bus_write(v68_write),
-        .bus_valid(v68_valid), .bus_ready(v68_ready),
-        .bus_wdata(v68_wdata), .bus_rdata(v68_rdata), .bus_rdata_en(v68_rdata_en),
+        .bus_address(v68_addr_mx), .bus_ioreq(v68_ioreq_mx), .bus_write(v68_write_mx),
+        .bus_valid(v68_valid_mx), .bus_ready(v68_ready),
+        .bus_wdata(v68_wdata_mx), .bus_rdata(v68_rdata), .bus_rdata_en(v68_rdata_en),
         .int_n(vdp_int),
         .vram_address(v68_vram_address), .vram_write(v68_vram_write),
         .vram_valid(v68_vram_valid), .vram_wdata(v68_vram_wdata),
@@ -4659,8 +4690,10 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .sddat0(sd_dat0),                  
         .card_stat(sd_card_stat_w),        // show the sdcard initialize status
         .card_type(sd_card_type_w),        // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
-        .rstart(ff_sd_rstart), 
-        .rsector(ff_sd_sector),
+        // mux: con el Z80 retenido quien pide sectores es el S3 (sdc_bridge).
+        // Ambos son de clk_27m, asi que aqui no hace falta sincronizar nada.
+        .rstart(lnz_hold ? lnz_sd_rstart  : ff_sd_rstart),
+        .rsector(lnz_hold ? lnz_sd_rsector : ff_sd_sector),
         .rbusy(sd_busy_w),
         .rdone(sd_done_w),
         .outen(sd_outen_w),                // when outen=1, a byte of sector content is read out from outbyte
@@ -4831,7 +4864,6 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
 
     // Switched I/O ports
     reg [1:0] Slot2Mode;
-    wire  swio_req;
     wire [7:0] io42_id212;
     wire iSlt2_linear;
     wire swio_req;
@@ -5341,6 +5373,39 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
 `else
     assign esp_turbo_o = 1'b0;
 `endif
+    // ---- alias para el lanzador -----------------------------------------
+    // El bus del VDP, el lector de SD y el teclado USB viven cada uno bajo su
+    // `ifdef; el companion NO. Sin estos alias, apagar cualquiera de los tres
+    // dejaria puertos colgando (que en Verilog es una x silenciosa, no un
+    // error de compilacion).
+`ifdef ENABLE_V9968_VDP
+    wire        lnz_clk_vdp     = clk_86;
+    wire        lnz_rst_vdp_n   = rst86_n;
+    wire        lnz_vdp_ready_i = v68_ready;
+`else
+    wire        lnz_clk_vdp     = clk_27m;
+    wire        lnz_rst_vdp_n   = bus_reset_n;
+    wire        lnz_vdp_ready_i = 1'b1;
+`endif
+`ifdef ENABLE_SDCARD
+    wire        lnz_sd_rbusy_i   = sd_busy_w;
+    wire        lnz_sd_rdone_i   = sd_done_w;
+    wire        lnz_sd_outen_i   = sd_outen_w;
+    wire [8:0]  lnz_sd_outaddr_i = sd_outaddr_w;
+    wire [7:0]  lnz_sd_outbyte_i = sd_outbyte_w;
+`else
+    wire        lnz_sd_rbusy_i   = 1'b0;
+    wire        lnz_sd_rdone_i   = 1'b0;
+    wire        lnz_sd_outen_i   = 1'b0;
+    wire [8:0]  lnz_sd_outaddr_i = 9'd0;
+    wire [7:0]  lnz_sd_outbyte_i = 8'd0;
+`endif
+`ifdef ENABLE_USB_KBD
+    wire [127:0] lnz_kbd_usb = kbd_usb_s2;
+`else
+    wire [127:0] lnz_kbd_usb = 128'd0;   // sin teclado USB no hay navegacion
+`endif
+
     fpga_companion fpga_companion_inst
     (
         .clk (clk_27m),
@@ -5357,7 +5422,26 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .joystick0_console (),
         .joystick1 (joystick1),
         .ws2812_color (),   // LEDs are discrete; WS2812 not used
-        .dbg_hid_strobe (dbg_hid_strobe_w)
+        .dbg_hid_strobe (dbg_hid_strobe_w),
+
+        // ---- lanzador: pintar por el VDP y leer la SD con el Z80 parado ----
+        .kbd_usb (lnz_kbd_usb),
+        .clk_vdp (lnz_clk_vdp),
+        .rst_vdp_n (lnz_rst_vdp_n),
+        .lnz_vdp_address (lnz_vdp_address),
+        .lnz_vdp_ioreq (lnz_vdp_ioreq),
+        .lnz_vdp_write (lnz_vdp_write),
+        .lnz_vdp_valid (lnz_vdp_valid),
+        .lnz_vdp_ready (lnz_vdp_ready_i),
+        .lnz_vdp_wdata (lnz_vdp_wdata),
+        .lnz_hold (lnz_hold),
+        .lnz_sd_rstart (lnz_sd_rstart),
+        .lnz_sd_rsector (lnz_sd_rsector),
+        .sd_rbusy (lnz_sd_rbusy_i),
+        .sd_rdone (lnz_sd_rdone_i),
+        .sd_outen (lnz_sd_outen_i),
+        .sd_outaddr (lnz_sd_outaddr_i),
+        .sd_outbyte (lnz_sd_outbyte_i)
     );
 
     // ---- BRING-UP DEL ENLACE CON EL S3 ---------------------------------

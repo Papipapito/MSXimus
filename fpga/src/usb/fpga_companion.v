@@ -16,7 +16,30 @@ module fpga_companion (
     output [7:0] joystick0_console,
     output [7:0] joystick1,
     output [23:0] ws2812_color,
-    output dbg_hid_strobe     // sonda bring-up: bytes HID llegando del MCU
+    output dbg_hid_strobe,    // sonda bring-up: bytes HID llegando del MCU
+
+    // ==================== lanzador del S3 (destinos 2 y 3) ================
+    // El S3 pinta el menu por el VDP y lee la SD por el puente, con el Z80
+    // retenido. Ver launcher_svc.v y sdc_bridge.v.
+    input  wire [127:0] kbd_usb,        // teclado USB del FPGA (para navegar)
+
+    input  wire         clk_vdp,        // clk_86: el bus del V9968
+    input  wire         rst_vdp_n,
+    output wire [2:0]   lnz_vdp_address,
+    output wire         lnz_vdp_ioreq,
+    output wire         lnz_vdp_write,
+    output wire         lnz_vdp_valid,
+    input  wire         lnz_vdp_ready,
+    output wire [7:0]   lnz_vdp_wdata,
+
+    output wire         lnz_hold,       // 1 = el S3 manda: retener el Z80
+    output wire         lnz_sd_rstart,
+    output wire [31:0]  lnz_sd_rsector,
+    input  wire         sd_rbusy,
+    input  wire         sd_rdone,
+    input  wire         sd_outen,
+    input  wire [8:0]   sd_outaddr,
+    input  wire [7:0]   sd_outbyte
 );
 
 assign dbg_hid_strobe = mcu_hid_strobe;
@@ -31,6 +54,8 @@ wire spi_intn;
 wire [7:0] mcu_data_out;
 wire [7:0] sys_data_out;
 wire [7:0] hid_data_out;
+wire [7:0] osd_data_out;     // launcher_svc (destino 2)
+wire [7:0] sdc_data_out;     // sdc_bridge   (destino 3)
 
 // -------------------------- MCU interface -----------------------
 // intn and dout are outputs driven by the FPGA to the MCU
@@ -63,8 +88,8 @@ mcu_spi mcu (
         .mcu_dout(mcu_data_out),
         .mcu_sys_din(sys_data_out),
         .mcu_hid_din(hid_data_out),
-        .mcu_osd_din(8'b00000000),
-        .mcu_sdc_din(8'b00000000)
+        .mcu_osd_din(osd_data_out),   // antes atado a cero: no habia pintor
+        .mcu_sdc_din(sdc_data_out)    // antes atado a cero: no habia puente
         );
 
 wire [7:0] int_ack;
@@ -114,5 +139,46 @@ sysctrl sysctrl (
         .leds(system_leds),
         .color(ws2812_color)
          );   
+
+// ===================== lanzador: pintar por el VDP =======================
+launcher_svc launcher_inst (
+        .clk(clk),
+        .reset(reset),
+        .strobe(mcu_osd_strobe),
+        .start(mcu_start),
+        .din(mcu_data_out),
+        .dout(osd_data_out),
+        .keys(kbd_usb),
+
+        .clk_vdp(clk_vdp),
+        .rst_vdp_n(rst_vdp_n),
+        .owns(lnz_hold),              // solo pinta mientras retiene al Z80
+        .vdp_address(lnz_vdp_address),
+        .vdp_ioreq(lnz_vdp_ioreq),
+        .vdp_write(lnz_vdp_write),
+        .vdp_valid(lnz_vdp_valid),
+        .vdp_ready(lnz_vdp_ready),
+        .vdp_wdata(lnz_vdp_wdata)
+        );
+
+// ===================== lanzador: leer la SD ==============================
+sdc_bridge sdc_inst (
+        .clk(clk),
+        .reset(reset),
+        .strobe(mcu_sdc_strobe),
+        .start(mcu_start),
+        .din(mcu_data_out),
+        .dout(sdc_data_out),
+
+        .rstart(lnz_sd_rstart),
+        .rsector(lnz_sd_rsector),
+        .rbusy(sd_rbusy),
+        .rdone(sd_rdone),
+        .outen(sd_outen),
+        .outaddr(sd_outaddr),
+        .outbyte(sd_outbyte),
+
+        .hold(lnz_hold)
+        );
 
 endmodule
