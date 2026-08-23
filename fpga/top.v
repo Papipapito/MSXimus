@@ -501,6 +501,10 @@ end
     );
 
     wire bus_reset_n;
+    // (Se probo meter aqui un warm-reset pedido por el lanzador y se REVIRTIO:
+    // pulsar S1 -- que hace exactamente eso -- NO recuperaba la maquina, o sea
+    // que el problema no era ese. Y tocar bus_reset_n es de las cosas mas caras
+    // de equivocar: si el termino se queda pegado, la maquina no arranca nunca.)
     PINFILTER dn3(
         .clk(clk_54m),
         .reset_n(1),
@@ -1251,6 +1255,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire [7:0]  lnz_vdp_wdata;
     wire        lnz_sd_rstart;
     wire        lnz_sd_init;
+    wire        lnz_sd_rst;      // devuelve el lector a STANDBY al soltar
     wire [31:0] lnz_sd_rsector;
 
 `ifdef ENABLE_WIFI
@@ -4684,7 +4689,15 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .CLK_DIV(3'd2),
         .SIMULATE(0)
     ) sd1 (
-        .rstn(bus_reset_n),
+        // 🚨 EL LECTOR VUELVE A VIRGEN AL SOLTAR EL MANDO. sd_reader solo
+        // atiende `init` estando en STANDBY (sd_reader.sv:258). Si el puente
+        // arranca la tarjeta, el lector pasa a IDLING y la peticion de
+        // inicializacion que hace NEXTOR al arrancar el MSX SE IGNORA EN
+        // SILENCIO: Nextor se queda esperando algo que ya no va a pasar, y el
+        // MSX no arranca. Medido: con v31h (sin encender la tarjeta) el MSX
+        // arranca tras soltar; con v31i (encendiendola) no. Devolverlo a
+        // STANDBY deja la tarjeta como Nextor espera encontrarla.
+        .rstn(bus_reset_n & ~lnz_sd_rst),
         .clk(clk_27m),
         .sdclk(sd_sclk),
         .sdcmd(sd_cmd),
@@ -5449,7 +5462,8 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .sd_outaddr (lnz_sd_outaddr_i),
         .sd_outbyte (lnz_sd_outbyte_i),
         .sd_card_stat (lnz_sd_stat_i),
-        .lnz_sd_init (lnz_sd_init)
+        .lnz_sd_init (lnz_sd_init),
+        .lnz_sd_rst (lnz_sd_rst)
     );
 
     // ---- BRING-UP DEL ENLACE CON EL S3 ---------------------------------

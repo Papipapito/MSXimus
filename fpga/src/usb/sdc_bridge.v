@@ -68,7 +68,15 @@ module sdc_bridge #(
     // lo pide es el Z80 escribiendo un registro (top.v: ff_sd_init |= dato[7]).
     // O sea que el lanzador retenia al Z80 y luego le pedia sectores a una
     // tarjeta que solo ese Z80 sabia arrancar. Ahora lo pide el puente.
-    output reg         sd_init          // se queda a 1: es idempotente
+    output reg         sd_init,         // se queda a 1: es idempotente
+
+    // 🚨 AL SOLTAR, EL LECTOR DE SD VUELVE A VIRGEN. sd_reader solo atiende
+    // `init` estando en STANDBY; si lo dejamos arrancado, la peticion de
+    // inicializacion de NEXTOR se ignora en silencio y el MSX no arranca.
+    // Medido: v31h (sin encender la tarjeta) arranca tras soltar, v31i
+    // (encendiendola) no. El pulso es LARGO a proposito: el lector lo muestrea
+    // con su propio reloj y un pulso corto podria perderse.
+    output reg         sd_rst
 );
 
     localparam VERSION = 8'd1;
@@ -86,6 +94,7 @@ module sdc_bridge #(
     reg       leyendo;                  // lectura en vuelo
 
     reg [31:0] wdog;
+    reg [7:0]  rst_cnt;         // estirador del reset del lector de SD
 
     // El sd_reader vuelca el sector segun lo va recibiendo.
     always @(posedge clk) begin
@@ -96,6 +105,8 @@ module sdc_bridge #(
         if (reset) begin
             hold <= 1'b0;               // por defecto NO retenemos: sin S3, el
             sd_init <= 1'b0;
+            sd_rst  <= 1'b0;
+            rst_cnt <= 8'd0;
             rstart <= 1'b0;             // MSX arranca solo. Degradar a "MSX
             rsector <= 32'd0;           // normal", nunca a ladrillo.
             leyendo <= 1'b0;
@@ -105,9 +116,23 @@ module sdc_bridge #(
         else begin
             rstart <= 1'b0;             // pulso de un ciclo
 
+            // estirador del reset del lector: ~250 ciclos (~9 us a 27 MHz)
+            if (rst_cnt != 8'd0) begin
+                rst_cnt <= rst_cnt - 8'd1;
+                sd_rst  <= 1'b1;
+            end else sd_rst <= 1'b0;
+
             // ---- perro guardian --------------------------------------------
             if (hold) begin
-                if (wdog >= WDOG_TICKS) hold <= 1'b0;   // el S3 no da senales
+                if (wdog >= WDOG_TICKS) begin
+                    // el S3 no da senales: soltar TODO, igual que en SOLTAR.
+                    // Si el guardian dejara la tarjeta arrancada, un S3 colgado
+                    // dejaria la maquina sin arrancar -- justo lo que este
+                    // guardian existe para evitar.
+                    hold    <= 1'b0;
+                    sd_init <= 1'b0;
+                    rst_cnt <= 8'd250;
+                end
                 else                    wdog <= wdog + 32'd1;
             end
 
@@ -126,7 +151,15 @@ module sdc_bridge #(
                         // se retira nunca: el lector solo mira init en STANDBY,
                         // asi que pedirlo de mas no hace nada.
                         3'd1: begin hold <= 1'b1; sd_init <= 1'b1; dout <= 8'h01; end
-                        3'd2: begin hold <= 1'b0; dout <= 8'h00; end
+                        // SOLTAR: quitar el mando, apagar la peticion de
+                        // arranque y devolver el lector a STANDBY para que
+                        // Nextor lo encuentre como espera.
+                        3'd2: begin
+                            hold    <= 1'b0;
+                            sd_init <= 1'b0;
+                            rst_cnt <= 8'd250;
+                            dout    <= 8'h00;
+                        end
                         3'd4: dout <= buf_mem[9'd0];
                         default: dout <= 8'd0;
                     endcase

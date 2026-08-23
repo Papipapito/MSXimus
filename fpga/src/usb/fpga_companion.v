@@ -41,7 +41,8 @@ module fpga_companion (
     input  wire [8:0]   sd_outaddr,
     input  wire [7:0]   sd_outbyte,
     input  wire [3:0]   sd_card_stat,
-    output wire         lnz_sd_init      // el puente enciende la tarjeta
+    output wire         lnz_sd_init,     // el puente enciende la tarjeta
+    output wire         lnz_sd_rst       // ...y devuelve el lector a STANDBY
 );
 
 assign dbg_hid_strobe = mcu_hid_strobe;
@@ -182,7 +183,8 @@ sdc_bridge sdc_inst (
         .card_stat(sd_card_stat),
 
         .hold(lnz_hold),
-        .sd_init(lnz_sd_init)
+        .sd_init(lnz_sd_init),
+        .sd_rst(lnz_sd_rst)
         );
 
 endmodule
