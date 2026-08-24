@@ -95,6 +95,7 @@ module sdc_bridge #(
 
     reg [31:0] wdog;
     reg [7:0]  rst_cnt;         // estirador del reset del lector de SD
+    reg [15:0] rs_cnt;          // tope del sostenido de rstart
 
     // El sd_reader vuelca el sector segun lo va recibiendo.
     always @(posedge clk) begin
@@ -107,6 +108,7 @@ module sdc_bridge #(
             sd_init <= 1'b0;
             sd_rst  <= 1'b0;
             rst_cnt <= 8'd0;
+            rs_cnt  <= 16'd0;
             rstart <= 1'b0;             // MSX arranca solo. Degradar a "MSX
             rsector <= 32'd0;           // normal", nunca a ladrillo.
             leyendo <= 1'b0;
@@ -114,7 +116,21 @@ module sdc_bridge #(
             dout <= 8'd0; wdog <= 32'd0;
         end
         else begin
-            rstart <= 1'b0;             // pulso de un ciclo
+            // 🚨 rstart NO ES UN PULSO. sd_reader solo mira rstart cuando su
+            // secuenciador esta libre, a SU cadencia -- no cada ciclo de 27 MHz.
+            // Un pulso de un ciclo SE PIERDE. El camino del Z80 lo mantiene
+            // alto (top.v: ff_sd_rstart |= dato) y por eso el suyo si funciona.
+            //
+            // Esto es lo que hacia que NINGUNA lectura del puente arrancara. Y
+            // no daba la cara porque el buffer se llena de la salida del lector
+            // sea quien sea quien pidio el sector: al arrancar, Nextor lee el
+            // sector 0, y de ahi salia el "55AA" que dimos por bueno. Verdad de
+            // referencia (Windows): la particion 1 empieza en el LBA 1 y ahi hay
+            // un FAT16 valido; el puente leia ceros.
+            if (rstart) begin
+                if (rbusy || rs_cnt == 16'd0) rstart <= 1'b0;
+                else                          rs_cnt <= rs_cnt - 16'd1;
+            end
 
             // estirador del reset del lector: ~250 ciclos (~9 us a 27 MHz)
             if (rst_cnt != 8'd0) begin
@@ -190,6 +206,7 @@ module sdc_bridge #(
                             // MSX, que es como se corrompen sistemas de ficheros.
                             if (hold && !leyendo && !rbusy) begin
                                 rstart  <= 1'b1;
+                                rs_cnt  <= 16'd27000;   // ~1 ms de tope
                                 leyendo <= 1'b1;
                             end
                         end
