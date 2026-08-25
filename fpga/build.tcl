@@ -180,14 +180,15 @@ add_file msx_console60k/src/gowin_pll/gowin_pll_mod.v
 add_file msx_console60k/src/pll_init.v
 
 # ----- USB subsystem (BL616 FPGA Companion, onboard — sin dock M0S) -----
-# NOTE: add mcu_spi_new.v ONLY (mcu_spi.v has a colliding "module mcu_spi").
-add_file src/usb/fpga_companion.v
-add_file src/usb/hid.v
+# ---- V3.1 PELDANO 1: iosys de TangCore (nand2mario/nestang, GPL-3.0) -------
+# OJO: olvidar estas lineas ya costo una campana entera con el modulo
+# convertido en caja negra ("Instantiating unknown module").
+add_file src/iosys/iosys_bl616.v
+add_file src/iosys/textdisp.v
+add_file src/iosys/uart_fixed.v
+add_file src/iosys/gowin_dpb_menu.v
+
 # lanzador del S3: pinta por el VDP (destino OSD) y lee la SD (destino SDC)
-add_file src/usb/launcher_svc.v
-add_file src/usb/sdc_bridge.v
-add_file src/usb/mcu_spi_new.v
-add_file src/usb/sys_ctrl.v
 add_file src/usb/usb_keyboard_msx.vhd
 
 # ----- VHDL -----

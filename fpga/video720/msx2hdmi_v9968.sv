@@ -131,7 +131,14 @@ module msx2hdmi_v9968 #(
     output wire        dbg_rd_act,   // clk_pixel: nivel ventana activa lectura
     output wire [31:0] dbg_apkt,     // _127I: {ovr[7:0], 8'h00, paquetes_audio[15:0]}
     output wire [5:0]  dbg_defer,    // _134: yanks diferidos (esperado ~60/s)
-    output wire [4:0]  dbg_tear      // _134: resets en zona de peligro (esperado 0)
+    output wire [4:0]  dbg_tear,     // _134: resets en zona de peligro (esperado 0)
+    // ---- V3.1 OVERLAY del iosys (TangCore) --------------------------------
+    // El core exporta la posicion del pixel y recibe su color, igual que en
+    // nestang_top.sv. Todo esto vive en clk_pixel = su `hclk`.
+    output wire [7:0]  ovl_x,        // 0..255
+    output wire [7:0]  ovl_y,        // 0..223
+    input  wire [14:0] ovl_color,    // BGR5 que devuelve textdisp
+    input  wire        ovl_on        // 1 = tapar la imagen con el overlay
 );
 
     localparam HS_ACTIVE_LOW   = 0;  // V9968: display_hs/vs activos ALTOS
@@ -561,10 +568,76 @@ module msx2hdmi_v9968 #(
         end
     end
 
-    wire [23:0] rgb_out = dim_r ? {1'b0, rgb[23:17],
+    wire [23:0] rgb_dim = dim_r ? {1'b0, rgb[23:17],
                                    1'b0, rgb[15:9],
                                    1'b0, rgb[7:1]}
                                 : rgb;
+
+    // ========================================================================
+    // V3.1 OVERLAY (iosys_bl616 / textdisp de TangCore)
+    // ------------------------------------------------------------------------
+    // textdisp pinta una imagen de 256x224. Se mapea sobre la ventana activa
+    // (1280x720, _143 full-screen) con factores ENTEROS, sin un solo divisor:
+    //   horizontal  256 * 5 = 1280  EXACTO  -> ovl_x sube 1 cada 5 pixeles
+    //   vertical    224 * 3 =  672          -> banda cy en [24,696), 1 de cada 3
+    // Fuera de la banda vertical el overlay pinta negro, para que al encenderlo
+    // tape la pantalla ENTERA y no deje dos franjas con imagen del MSX.
+    //
+    // Los contadores van 2 CICLOS POR DELANTE de cx, igual que xx/yy con el
+    // ring: la cabecera de textdisp avisa de "2-cycle latency", asi que el
+    // color llega justo en el ciclo del pixel al que corresponde. El desfase
+    // residual es de 2 pixeles de 1280 -- invisible, y NO deriva.
+    // ========================================================================
+    localparam [9:0] OVL_Y0 = 10'd24;    // 720 - 672 = 48, centrada
+    localparam [9:0] OVL_Y1 = 10'd696;
+
+    reg [2:0] ox_ph = 3'd0;
+    reg [7:0] ox_r  = 8'd0;
+    reg [1:0] oy_ph = 2'd0;
+    reg [7:0] oy_r  = 8'd0;
+    reg       oy_en = 1'b0;
+
+    // misma ancla que el escalador: xrst_now = (cx == wlast - 2)
+    wire [9:0] cy_nx = (cy >= 10'd749) ? 10'd0 : cy + 10'd1;
+
+    always @(posedge clk_pixel) begin
+        if (xrst_now) begin
+            ox_ph <= 3'd0;
+            ox_r  <= 8'd0;
+            if (cy_nx == OVL_Y0) begin
+                oy_ph <= 2'd0; oy_r <= 8'd0; oy_en <= 1'b1;
+            end else if (cy_nx == OVL_Y1) begin
+                oy_en <= 1'b0;
+            end else if (oy_en) begin
+                if (oy_ph == 2'd2) begin oy_ph <= 2'd0; oy_r <= oy_r + 8'd1; end
+                else                     oy_ph <= oy_ph + 2'd1;
+            end
+        end else begin
+            if (ox_ph == 3'd4) begin ox_ph <= 3'd0; ox_r <= ox_r + 8'd1; end
+            else                     ox_ph <= ox_ph + 3'd1;
+        end
+    end
+
+    assign ovl_x = ox_r;
+    assign ovl_y = oy_r;
+
+    // oy_en registrado una vez mas: ovl_color llega 2 ciclos tarde, y la banda
+    // tiene que juzgarse con el MISMO retardo o se cuela una linea de basura
+    // en los bordes de la banda.
+    reg oy_en_d1 = 1'b0, oy_en_d2 = 1'b0;
+    always @(posedge clk_pixel) begin
+        oy_en_d1 <= oy_en;
+        oy_en_d2 <= oy_en_d1;
+    end
+
+    // BGR5 -> RGB888. COLOR_TEXT de textdisp es 15'b10000_11111_11111 y se
+    // describe como amarillo: eso solo cuadra con [14:10]=B [9:5]=G [4:0]=R.
+    wire [23:0] ovl_rgb = { ovl_color[4:0],   3'b000,     // R
+                            ovl_color[9:5],   3'b000,     // G
+                            ovl_color[14:10], 3'b000 };   // B
+
+    wire [23:0] rgb_out = ovl_on ? (oy_en_d2 ? ovl_rgb : 24'h000000)
+                                 : rgb_dim;
 
     // ========================================================================
     // Audio: divisor a 44100 Hz desde clk_pixel + cruce 2FF (como sms2hdmi)

@@ -31,6 +31,7 @@
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
 //`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
 //`define ENABLE_VRAM_DDR3   // _128X EXPERIMENTO: la VRAM del V9968 en la DDR3 del SOM (v9968_ddr3_backend; requiere ENABLE_V9968_VDP y USE_VRAM_DDR3=1 en build.tcl). ADVERTENCIA: DDR3 analogicamente marginal en esta placa (saga _94-_103)
+`define ENABLE_IOSYS       // V3.1 PELDANO 1 (TangCore): iosys_bl616 + textdisp por la UART del BL616 (V14/U15) y overlay sobre el HDMI. Sin firmware en el MCU todavia: el overlay se enciende solo unos segundos al arrancar para demostrar la cadena y luego se aparta.
 //`define DISABLE_BOOT_MENU  // _127D: arranque MSX DIRECTO (enmascara la firma AB del menu; tambien salta el init FM de esa pagina). Solo builds de prueba.
 
 // _159: la RAM de muestras del ADPCM-B pasa de 32KB en BSRAM a los 256KB
@@ -93,6 +94,10 @@ module top
     // placa queda en modo JTAG = siempre reprogramable).
     input  wire bl616_jtagsel,
     output wire jtagseln,
+    // V3.1 (TangCore): TX del enlace con el BL616. U15 = GPIO27 RX del MCU, y
+    // quedo LIBRE cuando el companion SPI se mudo al J10 (spi_irqn -> AB22).
+    // El RX no necesita pad nuevo: bl616_jtagsel YA ES el V14 = GPIO28 TX.
+    output wire iosys_uart_tx,
 
     // discrete status LEDs (active low)
     output wire [5:0] led,
@@ -340,7 +345,19 @@ end
     // JTAG: el flasheo del FPGA via partner queda intacto y sin flapeos.
     assign jtagseln = 1'b0;
 `else
+`ifdef ENABLE_IOSYS
+    // 🚨 CON EL FIRMWARE TANGCORE, V14 YA NO SIGNIFICA "reclamo el JTAG":
+    // es el TX de la UART del MCU (GPIO28) a 2 Mbps. Mantener la mecanica
+    // C64Nano aqui haria que el fabric arrebatase y soltase los pines JTAG
+    // con CADA BIT que mande el MCU -- y son justo los pines por los que el
+    // BL616 programa la FPGA.
+    // Se le dejan al BL616 y punto. No cuesta nada: el companion SPI que
+    // vivia en ellos se mudo al J10 hace tiempo, asi que hoy no hay ni una
+    // senal del diseno en esos pads (verificado en el .cst).
+    assign jtagseln = 1'b0;
+`else
     assign jtagseln = clock_locked & ~bl616_jtagsel;
+`endif
 `endif
 
     // ================================================================
@@ -774,7 +791,8 @@ end
 wire psg_req_r;
 assign psg_req_r = (bus_addr[7:0] == 8'hA2 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0) ? 1 : 0;
 
-// USB joystick data wires (driven by fpga_companion instance below)
+// Gamepads USB. Antes los servia el companion SPI (el ESP32-S3); desde el
+// 25/08 los lee el BL616 y llegan por hid1/hid2 del iosys (comando 9).
 wire [7:0] joystick0;
 wire [7:0] joystick1;
 
@@ -1246,17 +1264,13 @@ assign keyboard_addr = ppi_port_c[3:0];
     // y no se re-arma: los soft-reset siguen siendo instantaneos (regla de la
     // megaram) y el coste real es ~1.5-2s extra (el stream de flash ya tapa
     // parte). Sin ENABLE_WIFI no aplica.
-    // ================= LANZADOR DEL S3 (destinos SPI 2 y 3) ===============
-    // Se declaran aqui arriba porque lnz_hold gobierna esp_boot_ok, y eso pasa
-    // muy por encima de donde se instancia el companion.
-    wire        lnz_hold;              // 1 = manda el S3: Z80 retenido
-    wire [2:0]  lnz_vdp_address;
-    wire        lnz_vdp_ioreq, lnz_vdp_write, lnz_vdp_valid;
-    wire [7:0]  lnz_vdp_wdata;
-    wire        lnz_sd_rstart;
-    wire        lnz_sd_init;
-    wire        lnz_sd_rst;      // devuelve el lector a STANDBY al soltar
-    wire [31:0] lnz_sd_rsector;
+    // El LANZADOR POR SPI DEL ESP32-S3 (destinos 2 y 3) se RETIRA el 25/08.
+    // Nunca llego a leer la SD de forma fiable y el enlace SPI resulto
+    // intermitente; su sustituto es el iosys_bl616 de TangCore por UART, que
+    // ya pinta y detecta el core (core_id=77 validado en placa).
+    // Con el se van launcher_svc, sdc_bridge, mcu_spi, hid y sysctrl:
+    // ~3.325 LUT y ~4.749 registros, y -- lo que mas importa -- CINCO
+    // multiplexores que vivian en el bus del V9968, en clk_86.
 
 `ifdef ENABLE_WIFI
     reg [26:0] esp_boot_cnt = 0;
@@ -1269,13 +1283,11 @@ assign keyboard_addr = ppi_port_c[3:0];
                 esp_boot_cnt <= esp_boot_cnt + 1'b1;
         end
     end
-    // El lanzador RETIENE al Z80 mientras pinta el menu y lee la SD. El
-    // temporizador de siempre se queda como PERRO GUARDIAN: si el S3 no esta o
-    // se cuelga, lnz_hold nunca sube y la maquina arranca sola a los 3 s. Un
-    // companion averiado degrada a "MSX normal", nunca a ladrillo.
-    wire esp_boot_ok = esp_boot_tmr & ~lnz_hold;
+    // Sin lanzador, el temporizador vuelve a ser lo que era: dar tiempo al ESP
+    // antes de soltar al Z80.
+    wire esp_boot_ok = esp_boot_tmr;
 `else
-    wire esp_boot_ok = ~lnz_hold;
+    wire esp_boot_ok = 1'b1;
 `endif
 
     // ===== Turbo mode toggle (F11) =====
@@ -1920,21 +1932,16 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire        v68_vram_stall;
     wire        v68_hs, v68_vs, v68_de;
     wire [7:0]  v68_r8, v68_g8, v68_b8;
-    // ---- mux del puerto CPU del VDP: glue del Z80 <-> lanzador del S3 ----
-    // Mientras el S3 retiene al Z80 el bus del VDP es suyo. NO hay concurrencia
-    // que arbitrar: o manda uno o manda el otro. El selector se sincroniza a
-    // clk_86 porque lnz_hold nace en clk_27m, y un glitch aqui partiria una
-    // transaccion por la mitad.
-    reg lnz_hold_86_1 = 1'b0, lnz_hold_86 = 1'b0;
-    always @(posedge clk_86) begin
-        lnz_hold_86_1 <= lnz_hold;
-        lnz_hold_86   <= lnz_hold_86_1;
-    end
-    wire [2:0] v68_addr_mx  = lnz_hold_86 ? lnz_vdp_address : v68_bus_address;
-    wire       v68_ioreq_mx = lnz_hold_86 ? lnz_vdp_ioreq   : v68_ioreq;
-    wire       v68_write_mx = lnz_hold_86 ? lnz_vdp_write   : v68_write;
-    wire       v68_valid_mx = lnz_hold_86 ? lnz_vdp_valid   : v68_valid;
-    wire [7:0] v68_wdata_mx = lnz_hold_86 ? lnz_vdp_wdata   : v68_wdata;
+    // 🏆 AQUI VIVIAN CINCO MULTIPLEXORES, y estaban EN clk_86 -- el reloj por
+    // el que llevamos toda la sesion peleando picosegundos. Los ponia el
+    // lanzador del S3 para robarle el bus del VDP al Z80. Retirado el lanzador,
+    // el camino queda directo: los alias los pliega la sintesis y el
+    // instanciado de abajo no se toca.
+    wire [2:0] v68_addr_mx  = v68_bus_address;
+    wire       v68_ioreq_mx = v68_ioreq;
+    wire       v68_write_mx = v68_write;
+    wire       v68_valid_mx = v68_valid;
+    wire [7:0] v68_wdata_mx = v68_wdata;
 
     vdp u_v9968 (
         .reset_n(rst86_n), .clk(clk_86), .initial_busy(1'b0),
@@ -2111,6 +2118,185 @@ assign keyboard_addr = ppi_port_c[3:0];
 
     wire [15:0] amp_hdmi;   // _133: vumetro del lado HDMI (ver dbg_uart)
 
+    // ========================================================================
+    // V3.1 PELDANO 1 -- iosys de TangCore (nand2mario), enlace UART con el BL616
+    // ------------------------------------------------------------------------
+    // Que se esta probando aqui, y por que asi:
+    //
+    //  * EL ENLACE NO NECESITA CABLE. bl616_jtagsel es el pad V14, que top.v ya
+    //    documenta como "GPIO28 TX del BL616": exactamente el UART_RXD de la
+    //    console.cst de nestang. Y U15 (GPIO27 RX del MCU) quedo libre al mudar
+    //    el companion SPI al J10. Son los DOS MISMOS pines que usa TangCore.
+    //
+    //  * TODAVIA NO HAY FIRMWARE EN EL BL616, asi que nadie va a hablar por esa
+    //    UART. Para que el bitstream diga ALGO, la BSRAM del overlay se genera
+    //    con texto ya escrito en el buffer de caracteres (tools/gen_iosys_bram.py):
+    //    al encender, textdisp lo pinta sin que intervenga nadie.
+    //
+    //  * Y COMO overlay_reg NACE A 1 en iosys_bl616, sin MCU que lo apague el
+    //    overlay taparia la pantalla PARA SIEMPRE. De ahi el temporizador: unos
+    //    segundos de overlay y se aparta. Asi un solo .fs contesta dos preguntas
+    //    -- si la cadena BSRAM->textdisp->mux->HDMI pinta, y si el MSX sigue
+    //    arrancando igual con el iosys dentro. El temporizador se va el dia que
+    //    el MCU mande el comando 8.
+    // ========================================================================
+    wire        iosys_overlay;
+    wire [7:0]  iosys_ovl_x, iosys_ovl_y;
+    wire [14:0] iosys_ovl_color;
+
+`ifdef ENABLE_IOSYS
+
+    // ~6 s a 27 MHz. Cuenta solo mientras el PLL esta enganchado.
+    reg [27:0] iosys_demo_cnt = 28'd0;
+    always @(posedge clk_27m) begin
+        if (!clock_locked)                 iosys_demo_cnt <= 28'd0;
+        else if (iosys_demo_cnt != 28'd162_000_000)
+                                           iosys_demo_cnt <= iosys_demo_cnt + 28'd1;
+    end
+    wire iosys_demo_win = (iosys_demo_cnt != 28'd162_000_000);
+
+    // ¿Ha hablado alguien por la UART? En reposo la linea esta ALTA; un bit de
+    // arranque a 2 Mbps dura 500 ns = ~13 ciclos de 27 MHz. Con 6 ciclos bajos
+    // seguidos basta para distinguirlo de un glitch, y sobra margen.
+    //
+    // PARA QUE: sin MCU, el temporizador aparta el overlay a los 6 s y la
+    // maquina queda usable (lo de siempre). En cuanto el MCU dice algo, el
+    // mando es SUYO -- enciende y apaga el overlay con el comando 8 -- y el
+    // temporizador deja de existir. Sin esto, el MCU pintaria su menu y a los
+    // 6 s se lo tragaria nuestro contador.
+    reg  [1:0] v14_sync = 2'b11;
+    reg  [2:0] v14_bajo = 3'd0;
+    reg        mcu_visto = 1'b0;
+    always @(posedge clk_27m) begin
+        v14_sync <= {v14_sync[0], bl616_jtagsel};
+        if (v14_sync[1]) v14_bajo <= 3'd0;
+        else if (v14_bajo != 3'd6) v14_bajo <= v14_bajo + 3'd1;
+        if (v14_bajo == 3'd6) mcu_visto <= 1'b1;
+    end
+
+    wire iosys_ovl_on = iosys_overlay & (mcu_visto | iosys_demo_win);
+
+    // ========================================================================
+    // TECLADO USB -> MENU DEL MCU
+    // ------------------------------------------------------------------------
+    // Los USB-A de la Console 60K van al FABRIC (ENABLE_USB_KBD, usb_hid_host
+    // directo), mientras que el host USB del BL616 esta en el USB-C. Son puertos
+    // distintos y no hay forma de que el MCU vea nuestro teclado... ni falta.
+    //
+    // iosys_bl616 tiene entradas joy1/joy2 que TRANSMITE AL MCU CADA 20 ms
+    // (SEND_JOYPAD). O sea que el camino FPGA -> MCU para los mandos ya existe:
+    // basta con presentarle el teclado como si fuera un pad. Cero cableado.
+    //
+    // Bits, sacados de joy_choice() del firmware -- no del comentario del
+    // modulo, que enumera los botones pero no dice las mascaras:
+    //   0x10 arriba · 0x20 abajo · 0x40/0x80 pagina · 0x100 A · 0x1 B
+    //   0x84 = combinacion del OSD (enciende y apaga el overlay)
+    //
+    // `keyboard` esta indexado por USB HID usage, NO por celda de la matriz MSX
+    // (por eso keyboard[68] es F11 mas arriba). Flechas = 79..82, Enter = 40,
+    // Esc = 41, F12 = 69.
+    //
+    // F12 monta 0x84 ENTERO porque joy_choice compara por IGUALDAD EXACTA
+    // (joy1 == overlay_key_code), no por mascara: con un solo bit no entraria
+    // nunca. Y 0x84 es el valor POR DEFECTO del firmware
+    // (OPTION_OSD_KEY_SELECT_RIGHT), asi que funciona sin tocar opciones.
+    // ⇒ F12 es la salida de emergencia: aparta el overlay y deja ver el MSX.
+    // ========================================================================
+    wire k_up  = keyboard[82], k_dn = keyboard[81];
+    wire k_lf  = keyboard[80], k_rt = keyboard[79];
+    wire k_ent = keyboard[40], k_esc = keyboard[41];
+    wire k_f12 = keyboard[69];
+
+    wire [11:0] joy_raw = (k_ent ? 12'h100 : 12'd0) |   // A     = Enter
+                          (k_esc ? 12'h001 : 12'd0) |   // B     = Esc
+                          (k_up  ? 12'h010 : 12'd0) |   // arriba
+                          (k_dn  ? 12'h020 : 12'd0) |   // abajo
+                          (k_lf  ? 12'h040 : 12'd0) |   // pagina anterior
+                          (k_rt  ? 12'h080 : 12'd0) |   // pagina siguiente
+                          (k_f12 ? 12'h084 : 12'd0);    // OSD (exacto)
+
+    // `keyboard` nace en el dominio del host USB. Son pulsaciones humanas que el
+    // MCU muestrea cada 20 ms, pero el cruce se sincroniza igual: un bit
+    // metaestable aqui sale gratis de evitar.
+    reg [11:0] joy_s0 = 12'd0, joy_s1 = 12'd0;
+    always @(posedge clk_27m) begin
+        joy_s0 <= joy_raw;
+        joy_s1 <= joy_s0;
+    end
+    wire [11:0] iosys_joy = joy_s1;
+
+    // ---- gamepads USB del BL616 -> puertos de joystick del MSX -------------
+    // El MCU manda el estado de los mandos con el comando 9. El formato lo dice
+    // usb_gamepad.cpp: "SNES: R L X A RT LT DN UP ST SE Y B", o sea bit 11 -> 0.
+    // 🚨 NO es el mismo mapa que usa joy_choice para el menu: alli las flechas
+    // izquierda/derecha son los bits 6/7 (los gatillos, que hacen de pagina
+    // anterior/siguiente), mientras que la CRUCETA de verdad son los bits 10/11.
+    // Confundirlos deja los mandos girados 90 grados.
+    //
+    // Nuestro joystick0/1: [0]=arriba [1]=abajo [2]=izq [3]=der
+    //                      [4]=disparo A [5]=disparo B [6]/[7]=autofire
+    wire [15:0] mcu_hid1, mcu_hid2;
+    assign joystick0 = { mcu_hid1[9],  mcu_hid1[1],    // autofire  <- X, Y
+                         mcu_hid1[0],  mcu_hid1[8],    // TrigB/A   <- B, A
+                         mcu_hid1[11], mcu_hid1[10],   // der / izq
+                         mcu_hid1[5],  mcu_hid1[4] };  // abajo / arriba
+    assign joystick1 = { mcu_hid2[9],  mcu_hid2[1],
+                         mcu_hid2[0],  mcu_hid2[8],
+                         mcu_hid2[11], mcu_hid2[10],
+                         mcu_hid2[5],  mcu_hid2[4] };
+
+    iosys_bl616 #(
+        .FREQ      (27_000_000),      // dominio de clk_27m; el baud (2 Mbps) lo
+                                      // saca BaudTickGen con acumulador fraccionario
+        .CORE_ID   (16'd77),          // 'M'. nestang=1, snestang=2.
+        .COLOR_LOGO(15'b00000_10101_00000)
+    ) u_iosys (
+        .clk            (clk_27m),
+        .hclk           (clk_hdmi),
+        .resetn         (clock_locked),
+
+        .overlay        (iosys_overlay),
+        .overlay_x      (iosys_ovl_x),
+        .overlay_y      (iosys_ovl_y),
+        .overlay_color  (iosys_ovl_color),
+
+        .joy1           (iosys_joy),       // el teclado USB que YA lee la FPGA
+        .joy2           (12'd0),
+        .hid1           (mcu_hid1),
+        .hid2           (mcu_hid2),
+
+        // Peldano 1: la carga de ROM NO se conecta todavia. El sumidero natural
+        // ya existe (rom_addr/rom_dout/rom_write con flash_idle, ~linea 2270),
+        // pero eso es el peldano siguiente y aqui solo se quiere el coste.
+        .rom_loading    (),
+        .rom_do         (),
+        .rom_do_valid   (),
+
+        // Interfaz de disco del core PCXT: sin usar (nuestra SD sigue siendo de
+        // Nextor, que es justo lo que evita el traspaso de mando).
+        .mgmt_address   (),
+        .mgmt_read      (),
+        .mgmt_readdata  (16'd0),
+        .mgmt_write     (),
+        .mgmt_writedata (),
+        .fdd_request    (2'd0),
+
+        .kbd_data       (),
+        .kbd_data_valid (),
+        .core_config    (),
+
+        .uart_rx        (bl616_jtagsel),   // V14 <- TX del BL616
+        .uart_tx        (iosys_uart_tx)    // U15 -> RX del BL616
+    );
+`else
+    // Sin iosys: el overlay se apaga y el pad de TX queda en reposo (la UART
+    // en reposo es NIVEL ALTO; dejarlo a 0 seria un BREAK permanente para el
+    // MCU). Este par de builds A/B es lo que da el coste real en CLS.
+    assign iosys_overlay   = 1'b0;
+    assign iosys_ovl_color = 15'd0;
+    assign iosys_uart_tx   = 1'b1;
+`endif
+
     msx2hdmi_v9968 u_msx2hdmi68 (
         .clk          (clk_86),
         .resetn       (rst86_n),
@@ -2146,7 +2332,11 @@ assign keyboard_addr = ppi_port_c[3:0];
         .dbg_rd_act   (),
         .dbg_apkt     (v68_dbg_apkt),    // _127I: {ovr, 0, paquetes_audio}
         .dbg_defer    (v68_dbg_defer),   // _134: yanks diferidos (~60/s sano)
-        .dbg_tear     (v68_dbg_tear)     // _134: resets en zona de peligro (0 sano)
+        .dbg_tear     (v68_dbg_tear),    // _134: resets en zona de peligro (0 sano)
+        .ovl_x        (iosys_ovl_x),
+        .ovl_y        (iosys_ovl_y),
+        .ovl_color    (iosys_ovl_color),
+        .ovl_on       (iosys_ovl_on)
     );
 
     // ---- dh/dl: divisor LIBRE clk_108m ÷8/÷16 — el patron EXACTO con el
@@ -4487,9 +4677,6 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
 // el mismo dpram (escribir solo LEE el buffer, no lo destruye). Invisible para
 // el menu y vale para las dos maquinas.
 // ---------------------------------------------------------------------------
-// Bring-up del enlace SPI con el S3 (se rellenan junto al companion)
-wire [15:0] spi_hid_cnt_w;
-wire [15:0] spi_kbd_cnt_w;
 
 reg [15:0] sd_wr_cnt   = 16'd0;   // escrituras terminadas (TESTIGO DE VIDA)
 reg [15:0] sd_wcrc_cnt = 16'd0;   // ...de ellas, RECHAZADAS por la tarjeta
@@ -4697,17 +4884,17 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         // MSX no arranca. Medido: con v31h (sin encender la tarjeta) el MSX
         // arranca tras soltar; con v31i (encendiendola) no. Devolverlo a
         // STANDBY deja la tarjeta como Nextor espera encontrarla.
-        .rstn(bus_reset_n & ~lnz_sd_rst),
+        .rstn(bus_reset_n),
         .clk(clk_27m),
         .sdclk(sd_sclk),
         .sdcmd(sd_cmd),
         .sddat0(sd_dat0),                  
         .card_stat(sd_card_stat_w),        // show the sdcard initialize status
         .card_type(sd_card_type_w),        // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
-        // mux: con el Z80 retenido quien pide sectores es el S3 (sdc_bridge).
-        // Ambos son de clk_27m, asi que aqui no hace falta sincronizar nada.
-        .rstart(lnz_hold ? lnz_sd_rstart  : ff_sd_rstart),
-        .rsector(lnz_hold ? lnz_sd_rsector : ff_sd_sector),
+        // La SD vuelve a ser EXCLUSIVAMENTE de Nextor: se acabo el traspaso de
+        // mando que nos costo dos noches.
+        .rstart(ff_sd_rstart),
+        .rsector(ff_sd_sector),
         .rbusy(sd_busy_w),
         .rdone(sd_done_w),
         .outen(sd_outen_w),                // when outen=1, a byte of sector content is read out from outbyte
@@ -4724,10 +4911,7 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .psn(sd_psn_w),
         .crc_error(sd_crc_error_w),
         .timeout_error(sd_timeout_error_w),
-        // OR, no mux: encender la tarjeta es idempotente y lo puede pedir
-        // cualquiera de los dos. El sd_reader solo mira init en STANDBY, asi
-        // que pedirlo dos veces no hace nada.
-        .init(ff_sd_init | lnz_sd_init)
+        .init(ff_sd_init)
     );
     
     assign sd_dat1 = 1;
@@ -5030,7 +5214,7 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         //   [31:16] bytes HID recibidos del S3   <- TESTIGO DE VIDA
         //   [15:0]  cambios del vector de teclado
         // Lectura: tools/dbg_spi_reader.py
-        .cnt_g({spi_hid_cnt_w, spi_kbd_cnt_w}),
+        .cnt_g(32'd0),                  // (eran los testigos del SPI del S3)
         .tx(usb_uart_tx_int)
     );
     assign usb_uart_tx = usb_uart_tx_int;   // (por si el USB-C tambien escucha)
@@ -5114,7 +5298,6 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     // r7 (_23dbg): FORENSE DE CUELGUES (SCREEN 3 / F11) — clasifica el cuelgue:
     //  wait clavado + ram_busy fijo = arbitro de memoria; INT muerto con CPU
     //  viva = interrupcion del VDP; todo vivo pero sin M1 = CPU en HALT.
-    wire dbg_hid_strobe_w;   // (se mantiene conectado al companion)
     wire dbg_m1act_led;
     // sondas en el dominio de 54M: no cargar el arbol de 27M (hold de paleta)
     led_stretch #(.HOLD(2000000)) dbg_st_m1act (
@@ -5361,20 +5544,18 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         kbd_usb_s1 <= kbd_usb1 | kbd_usb2;
         kbd_usb_s2 <= kbd_usb_s1;
     end
-    wire [127:0] keyboard_spi;
-    assign keyboard = keyboard_spi | kbd_usb_s2;
+    assign keyboard = kbd_usb_s2;
 `else
-    wire [127:0] keyboard_spi;
-    assign keyboard = keyboard_spi;
+    // Sin el companion no queda otra fuente: el teclado del MSX se apaga.
+    assign keyboard = 128'd0;
 `endif
     // F1 (_73): el pad U15 (spi_irqn) se entrega a la UART del BL616 cuando el
     // WiFi onboard esta activo; el companion (ya sin SPI: jtagseln=0) pierde su
     // IRQ — teclado por soft-host USB-A, joysticks USB del companion inertes.
-    wire companion_irqn_w;
 `ifdef ENABLE_WIFI
     assign spi_irqn = bl616_uart_tx_w;
 `else
-    assign spi_irqn = companion_irqn_w;
+    assign spi_irqn = 1'b1;          // sin companion: en reposo (activo bajo)
 `endif
     // _153: el TX del wifi_lite tambien sale por el PMOD0 hacia el ESP32-C6.
     // Se emite SIEMPRE (broadcast inofensivo); sin ENABLE_WIFI queda en idle.
@@ -5395,102 +5576,22 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     // `ifdef; el companion NO. Sin estos alias, apagar cualquiera de los tres
     // dejaria puertos colgando (que en Verilog es una x silenciosa, no un
     // error de compilacion).
-`ifdef ENABLE_V9968_VDP
-    wire        lnz_clk_vdp     = clk_86;
-    wire        lnz_rst_vdp_n   = rst86_n;
-    wire        lnz_vdp_ready_i = v68_ready;
-`else
-    wire        lnz_clk_vdp     = clk_27m;
-    wire        lnz_rst_vdp_n   = bus_reset_n;
-    wire        lnz_vdp_ready_i = 1'b1;
-`endif
-`ifdef ENABLE_SDCARD
-    wire        lnz_sd_rbusy_i   = sd_busy_w;
-    wire        lnz_sd_rdone_i   = sd_done_w;
-    wire        lnz_sd_outen_i   = sd_outen_w;
-    wire [8:0]  lnz_sd_outaddr_i = sd_outaddr_w;
-    wire [7:0]  lnz_sd_outbyte_i = sd_outbyte_w;
-    wire [3:0]  lnz_sd_stat_i    = sd_card_stat_w;
-`else
-    wire        lnz_sd_rbusy_i   = 1'b0;
-    wire        lnz_sd_rdone_i   = 1'b0;
-    wire        lnz_sd_outen_i   = 1'b0;
-    wire [8:0]  lnz_sd_outaddr_i = 9'd0;
-    wire [7:0]  lnz_sd_outbyte_i = 8'd0;
-    wire [3:0]  lnz_sd_stat_i    = 4'd0;
-`endif
-`ifdef ENABLE_USB_KBD
-    wire [127:0] lnz_kbd_usb = kbd_usb_s2;
-`else
-    wire [127:0] lnz_kbd_usb = 128'd0;   // sin teclado USB no hay navegacion
-`endif
-
-    fpga_companion fpga_companion_inst
-    (
-        .clk (clk_27m),
-        .reset (~bus_reset_n),
-
-        .spi_sclk (spi_sclk),
-        .spi_csn (spi_csn),
-        .spi_dir (spi_dir),
-        .spi_dat (spi_dat),
-        .spi_irqn (companion_irqn_w),
-
-        .keyboard (keyboard_spi),
-        .joystick0 (joystick0),
-        .joystick0_console (),
-        .joystick1 (joystick1),
-        .ws2812_color (),   // LEDs are discrete; WS2812 not used
-        .dbg_hid_strobe (dbg_hid_strobe_w),
-
-        // ---- lanzador: pintar por el VDP y leer la SD con el Z80 parado ----
-        .kbd_usb (lnz_kbd_usb),
-        .clk_vdp (lnz_clk_vdp),
-        .rst_vdp_n (lnz_rst_vdp_n),
-        .lnz_vdp_address (lnz_vdp_address),
-        .lnz_vdp_ioreq (lnz_vdp_ioreq),
-        .lnz_vdp_write (lnz_vdp_write),
-        .lnz_vdp_valid (lnz_vdp_valid),
-        .lnz_vdp_ready (lnz_vdp_ready_i),
-        .lnz_vdp_wdata (lnz_vdp_wdata),
-        .lnz_hold (lnz_hold),
-        .lnz_sd_rstart (lnz_sd_rstart),
-        .lnz_sd_rsector (lnz_sd_rsector),
-        .sd_rbusy (lnz_sd_rbusy_i),
-        .sd_rdone (lnz_sd_rdone_i),
-        .sd_outen (lnz_sd_outen_i),
-        .sd_outaddr (lnz_sd_outaddr_i),
-        .sd_outbyte (lnz_sd_outbyte_i),
-        .sd_card_stat (lnz_sd_stat_i),
-        .lnz_sd_init (lnz_sd_init),
-        .lnz_sd_rst (lnz_sd_rst)
-    );
-
-    // ---- BRING-UP DEL ENLACE CON EL S3 ---------------------------------
-    // Dos testigos en DOS PUNTOS DISTINTOS de la cadena, que es lo que permite
-    // saber DONDE se rompe en vez de solo que no va:
+    // ========================================================================
+    // fpga_companion RETIRADO (25/08)
+    // ------------------------------------------------------------------------
+    // Aqui vivia el companion SPI del ESP32-S3: mcu_spi + hid + sysctrl +
+    // launcher_svc + sdc_bridge. 3.325 LUT y 4.749 registros, de los cuales
+    // 4.255 eran el buffer de sector del sdc_bridge -- 512 bytes que la
+    // sintesis puso en BIESTABLES en vez de en BSRAM.
     //
-    //   spi_hid_cnt  bytes HID que han llegado del S3. Si NO sube, el problema
-    //                esta en el cable o en el maestro: la FPGA no recibe nada.
-    //   spi_kbd_cnt  veces que ha CAMBIADO el vector de teclado. Si el de
-    //                arriba sube y este no, los bytes llegan pero no se estan
-    //                interpretando (comando mal, o el bit 7 al reves).
+    // Lo sustituye el iosys_bl616 de TangCore por UART (413 LUT, 191 registros
+    // y 1 BSRAM), que ya pinta el menu del MCU en la tele y detecta el core.
     //
-    // La sonda dbg_hid_strobe ya existia en fpga_companion, pero su cable se
-    // quedaba colgando sin ir a ningun sitio: existir no es lo mismo que poder
-    // mirarlo.
-    reg  [15:0] spi_hid_cnt = 16'd0;
-    reg  [15:0] spi_kbd_cnt = 16'd0;
-    reg         dbg_hid_d   = 1'b0;
-    reg [127:0] kbd_spi_d   = 128'd0;
-    always @(posedge clk_27m) begin
-        dbg_hid_d <= dbg_hid_strobe_w;
-        kbd_spi_d <= keyboard_spi;
-        if (dbg_hid_strobe_w && !dbg_hid_d)   spi_hid_cnt <= spi_hid_cnt + 16'd1;
-        if (keyboard_spi != kbd_spi_d)        spi_kbd_cnt <= spi_kbd_cnt + 16'd1;
-    end
-    assign spi_hid_cnt_w = spi_hid_cnt;
-    assign spi_kbd_cnt_w = spi_kbd_cnt;
+    // El TECLADO no se pierde: los USB-A van directos al fabric
+    // (ENABLE_USB_KBD / usb_hid_host) y `keyboard` pasa a ser solo kbd_usb_s2.
+    // Los JOYSTICKS si colgaban del `hid`, y por eso se reenganchan abajo a
+    // hid1/hid2 del iosys: ahora los gamepads USB los lee el BL616.
+    // ========================================================================
 
     usb_keyboard_msx usb_keyboard_msx
     (

@@ -27,6 +27,11 @@
 CLOCK_LOC "spi_sclk" LOCAL_CLOCK;
 NET_LOC   "jtagseln" V_JTAGSELN;
 IO_PORT   "jtagseln" PULL_MODE=DOWN IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
+// V3.1 (TangCore): TX del enlace UART con el BL616. U15 = GPIO27 RX del
+// MCU; quedo libre al mudar spi_irqn al J10 (AB22). El RX no lleva pad
+// propio: bl616_jtagsel (V14) YA ES el TX del BL616.
+IO_LOC    "iosys_uart_tx" U15;
+IO_PORT   "iosys_uart_tx" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
 IO_LOC    "bl616_jtagsel" V14;
 IO_PORT   "bl616_jtagsel" PULL_MODE=UP IO_TYPE=LVCMOS33 BANK_VCCIO=3.3;
 
