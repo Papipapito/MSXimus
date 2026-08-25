@@ -97,6 +97,16 @@ module sdc_bridge #(
     reg [7:0]  rst_cnt;         // estirador del reset del lector de SD
     reg [15:0] rs_cnt;          // tope del sostenido de rstart
 
+    // 🚨 CONTADORES. Se llega a esto tras varias rondas razonando sobre por que
+    // "no se lee" cuando el RTL, el banco y el cableado dicen que deberia
+    // funcionar. Desde fuera, "el puente no pide", "el lector no responde" y
+    // "responde con el sector equivocado" se ven EXACTAMENTE IGUAL: el buffer
+    // trae el sector 0. Estos tres numeros los separan sin interpretacion.
+    reg [7:0] n_pide;           // veces que hemos levantado rstart
+    reg [7:0] n_acaba;          // pulsos de rdone vistos
+    reg [7:0] n_sector;         // sectores volcados al buffer (outaddr==511)
+    reg [31:0] ult_sec;         // rsector con el que se lanzo la ultima lectura
+
     // El sd_reader vuelca el sector segun lo va recibiendo.
     always @(posedge clk) begin
         if (outen) buf_mem[outaddr] <= outbyte;
@@ -109,6 +119,8 @@ module sdc_bridge #(
             sd_rst  <= 1'b0;
             rst_cnt <= 8'd0;
             rs_cnt  <= 16'd0;
+            n_pide  <= 8'd0; n_acaba <= 8'd0; n_sector <= 8'd0;
+            ult_sec <= 32'd0;
             rstart <= 1'b0;             // MSX arranca solo. Degradar a "MSX
             rsector <= 32'd0;           // normal", nunca a ladrillo.
             leyendo <= 1'b0;
@@ -152,7 +164,8 @@ module sdc_bridge #(
                 else                    wdog <= wdog + 32'd1;
             end
 
-            if (rdone) leyendo <= 1'b0;
+            if (rdone) begin leyendo <= 1'b0; n_acaba <= n_acaba + 8'd1; end
+            if (outen && outaddr == 9'd511) n_sector <= n_sector + 8'd1;
 
             if (strobe) begin
                 wdog <= 32'd0;          // hay trafico: el S3 vive
@@ -190,7 +203,17 @@ module sdc_bridge #(
                         // El progreso de arranque de la tarjeta. Se anade
                         // porque su ausencia costo una ronda entera: "ocupada"
                         // no distingue "leyendo" de "ni siquiera ha arrancado".
-                        default: dout <= {3'b0, sd_init, card_stat};
+                        3'd2: dout <= {3'b0, sd_init, card_stat};
+                        3'd3: dout <= n_pide;
+                        3'd4: dout <= n_acaba;
+                        // El rsector CONGELADO en el momento de lanzar la
+                        // ultima lectura. Es lo unico que no se puede ver desde
+                        // fuera: los contadores dicen que se pide y se lee, y el
+                        // dato que vuelve es siempre el sector 0. O el numero no
+                        // se captura bien aqui, o se pierde camino del lector.
+                        3'd5: dout <= ult_sec[ 7: 0];
+                        3'd6: dout <= ult_sec[15: 8];
+                        default: dout <= n_sector;
                         endcase
                     end
                     3'd3: begin                     // LEER: 4 bytes de LBA
@@ -208,6 +231,10 @@ module sdc_bridge #(
                                 rstart  <= 1'b1;
                                 rs_cnt  <= 16'd27000;   // ~1 ms de tope
                                 leyendo <= 1'b1;
+                                n_pide  <= n_pide + 8'd1;
+                                // se congela lo que se le va a dar al lector:
+                                // los 24 bits ya latcheados mas el que entra AHORA
+                                ult_sec <= {din, rsector[23:0]};
                             end
                         end
                         default: ;
