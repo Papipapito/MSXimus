@@ -183,6 +183,7 @@ add_file msx_console60k/src/pll_init.v
 # ---- V3.1 PELDANO 1: iosys de TangCore (nand2mario/nestang, GPL-3.0) -------
 # OJO: olvidar estas lineas ya costo una campana entera con el modulo
 # convertido en caja negra ("Instantiating unknown module").
+add_file src/msx_s1990.v          ;# V3.1: S1990 del turboR (E4h-E7h)
 add_file src/iosys/iosys_bl616.v
 add_file src/iosys/textdisp.v
 add_file src/iosys/uart_fixed.v

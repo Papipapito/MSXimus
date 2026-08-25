@@ -22,6 +22,12 @@ localparam [14:0] COLOR_BACK    = 15'b00000_00000_00000;
 localparam [14:0] COLOR_TEXT    = 15'b10000_11111_11111;    // yellow
 localparam [14:0] COLOR_CURSOR  = 15'b10000_11000_11111;    // orange
 parameter [14:0] COLOR_LOGO    = 15'b00000_10101_00000;    // green
+// MSXimus: color alternativo. El byte del caracter tenia el BIT 7 SIN USAR --
+// el original mapeaba todo lo que fuera >=128 al caracter '?' y ahi se acababa.
+// Reciclado como ATRIBUTO: bit7=1 -> este color. Sale gratis (ni un bit de
+// memoria mas) y da dos colores en cualquier celda, que es lo que hacia falta
+// para que el OSD no fuera un muro amarillo.
+localparam [14:0] COLOR_ALT     = 15'b11111_11111_11111;    // blanco
 
 // 72x14 pixels 1bpp logo
 localparam LOGO_X = 128-36;
@@ -62,6 +68,7 @@ reg [6:0] logo_addr;
 reg [2:0] logo_xoff;
 reg logo_active;
 reg [14:0] color_buf;
+reg        attr;        // bit 7 del caracter en curso
 reg [7:0] x_r;
 
 // Rendering state machine
@@ -75,14 +82,16 @@ always @* begin             // address and output logic
     color = color_buf;
     case (state)
     MAIN:           mem_addr_b = {1'b0, y[7:3], x[7:3]};   
-    FETCH_FONT:     mem_addr_b = {1'b1, mem_do_b[7] ? 7'h3F : mem_do_b[6:0], y[2:0]};  
+    FETCH_FONT:     mem_addr_b = {1'b1, mem_do_b[6:0], y[2:0]};   // bit7 = color, no caracter
     FETCH_LOGO:     mem_addr_b = {4'b0111, logo_addr};
     OUTPUT: begin
         mem_addr_b = {1'b0, y[7:3], x[7:3]};
         if (logo_active)
             color = mem_do_b[logo_xoff] ? COLOR_LOGO : COLOR_BACK;
         else
-            color = mem_do_b[x[2:0]] ? (is_cursor ? COLOR_CURSOR : COLOR_TEXT) : COLOR_BACK;
+            color = mem_do_b[x[2:0]] ? (attr ? COLOR_ALT
+                                             : (is_cursor ? COLOR_CURSOR : COLOR_TEXT))
+                                    : COLOR_BACK;
     end
     default: mem_addr_b = 0;
     endcase
@@ -113,7 +122,12 @@ always @(posedge hclk) begin    // actual state machine
         is_cursor <= x[7:3] == 0;
     end
 
-    FETCH_FONT, FETCH_LOGO: state <= OUTPUT;
+    FETCH_FONT: begin
+        attr  <= mem_do_b[7];   // aqui mem_do_b es aun el CARACTER; en OUTPUT ya es la fuente
+        state <= OUTPUT;
+    end
+
+    FETCH_LOGO: state <= OUTPUT;
 
     default: ;
     endcase

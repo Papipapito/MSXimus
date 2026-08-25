@@ -59,6 +59,11 @@ module iosys_bl616 #(
     
     output reg [31:0] core_config,
 
+    // MSXimus: estado del core hacia el MCU (comando 14). El original solo sabe
+    // RESPONDER core id y config string; sin esto el OSD no puede ensenar nada
+    // real y las casillas mentirian en cuanto algo cambie por otro camino.
+    input [63:0] status_in,
+
     // UART interface
     input  uart_rx,
     output uart_tx
@@ -234,8 +239,8 @@ always @(posedge clk) begin
 
             RECV_CMD: if (rx_valid) begin
                 cmd_reg <= rx_data;
-                if (rx_data == 1 || rx_data == 2) 
-                    recv_state <= RECV_RESPONSE_REQ;    // request sending core id / config string
+                if (rx_data == 1 || rx_data == 2 || rx_data == 14) 
+                    recv_state <= RECV_RESPONSE_REQ;    // core id / config string / estado (14, MSXimus)
                 else if (len_reg > 1)
                     recv_state <= RECV_PARAM;
                 else
@@ -324,7 +329,7 @@ always @(posedge clk) begin
 
             RECV_RESPONSE_REQ:                      // request to send config string
                 case (cmd_reg)
-                    1,2: begin                      // 1: core ID, 2: config string
+                    1,2,14: begin                   // 1: core ID, 2: config string, 14: estado
                         response_type <= cmd_reg;
                         response_req ^= 1;
                         recv_state <= RECV_RESPONSE_ACK;
@@ -352,8 +357,11 @@ localparam SEND_FDD_READ = 5;
 
 localparam SEND_HEADER = 6;
 localparam SEND_DONE = 7;
+localparam SEND_STATUS = 8;      // MSXimus: estado del core
 
-reg [2:0] send_state, send_state_next;
+// MSXimus: de 3 a 4 bits. Los ocho estados 0..7 del original estaban TODOS
+// usados, asi que SEND_STATUS (8) no cabia.
+reg [3:0] send_state, send_state_next;
 reg [$clog2(STR_LEN+1)-1:0] send_idx;
 localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
 reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
@@ -405,6 +413,10 @@ always @(posedge clk) begin
                         send_state_next <= SEND_CORE_ID;
                         send_state <= SEND_HEADER;
                         resp_frame_len <= 2;
+                    end else if (response_type == 14) begin
+                        send_state_next <= SEND_STATUS;
+                        send_state <= SEND_HEADER;
+                        resp_frame_len <= 9;    // 1 byte de tipo + 8 de estado
                     end
                 end
             end
@@ -424,6 +436,19 @@ always @(posedge clk) begin
                         end
                         default: ;
                     endcase
+                end
+            end
+
+            // MSXimus: 8 bytes de estado, del mas alto al mas bajo.
+            SEND_STATUS: begin
+                if (tx_ready && ~tx_valid) begin
+                    tx_data <= status_in[8*(7 - send_idx[2:0]) +: 8];
+                    tx_valid <= 1;
+                    send_idx <= send_idx + 1;
+                    if (send_idx == 7) begin
+                        send_state <= SEND_IDLE;
+                        response_ack <= response_req;
+                    end
                 end
             end
 

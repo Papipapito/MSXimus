@@ -31,6 +31,7 @@
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
 //`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
 //`define ENABLE_VRAM_DDR3   // _128X EXPERIMENTO: la VRAM del V9968 en la DDR3 del SOM (v9968_ddr3_backend; requiere ENABLE_V9968_VDP y USE_VRAM_DDR3=1 en build.tcl). ADVERTENCIA: DDR3 analogicamente marginal en esta placa (saga _94-_103)
+`define ENABLE_TURBOR_ID   // V3.1: S1990 del turboR (E4h-E7h) — la maquina se identifica como turboR y CHGCPU mueve el turbo. NO hay R800: ver fpga/src/msx_s1990.v
 `define ENABLE_IOSYS       // V3.1 PELDANO 1 (TangCore): iosys_bl616 + textdisp por la UART del BL616 (V14/U15) y overlay sobre el HDMI. Sin firmware en el MCU todavia: el overlay se enciende solo unos segundos al arrancar para demostrar la cadena y luego se aparta.
 //`define DISABLE_BOOT_MENU  // _127D: arranque MSX DIRECTO (enmascara la firma AB del menu; tambien salta el init FM de esa pagina). Solo builds de prueba.
 
@@ -1006,6 +1007,9 @@ assign keyboard_addr = ppi_port_c[3:0];
                      ( uart_req == 1 ) ? uart_dout :
                 `endif
                      ( logo_req == 1 ) ? ram_dout :
+                `ifdef ENABLE_TURBOR_ID
+                     ( s1990_req == 1 ) ? s1990_dout :   // E4h-E7h: S1990 del turboR
+                `endif
                      ( rtc_req_r == 1 ) ? rtc_dout :
                      ( ppi_req_r == 1 ) ? ppi_port_a :
                      ( slot0_req_r == 1 ) ? 8'hff :
@@ -1290,6 +1294,13 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire esp_boot_ok = 1'b1;
 `endif
 
+    // ===== S1990 del turboR (puertos E4h-E7h) =====
+    // Se declara aqui porque el mux de lectura de E/S vive mas arriba en el
+    // fichero; la instancia va abajo, junto al resto de dispositivos.
+    wire [7:0] s1990_dout;
+    wire       s1990_req;
+    wire       s1990_turbo_set, s1990_turbo_val;
+
     // ===== Turbo mode toggle (F11) =====
     // Default turbo=0 -> M1 wait active -> ~100% real-MSX speed (3.58MHz behaviour).
     // Press F11 (USB HID usage 0x44 = keyboard[68]) to toggle. v1.9: turbo=1 switches
@@ -1305,6 +1316,23 @@ assign keyboard_addr = ppi_port_c[3:0];
     // (fix de cadencia del nano, validado en su HW) COMBINADO con el guard de
     // bus/memoria en reposo propio del 60K (SDRAM externa: no conmutar con un
     // acceso en vuelo). El esquema turbo_req anterior queda sustituido.
+`ifdef ENABLE_TURBOR_ID
+    // clk_27m -> clk_54m. El pulso se convierte en un TOGGLE que sobrevive al
+    // cruce; el valor viaja al lado y se muestrea cuando el toggle cambia (para
+    // entonces lleva ciclos estable).
+    reg s1990_tg = 1'b0, s1990_val_h = 1'b0;
+    always @(posedge clk_27m) if (s1990_turbo_set) begin
+        s1990_tg    <= ~s1990_tg;
+        s1990_val_h <= s1990_turbo_val;
+    end
+    reg s1990_tg_s1 = 1'b0, s1990_tg_s2 = 1'b0, s1990_tg_s3 = 1'b0;
+    reg s1990_val_s1 = 1'b0, s1990_val_s2 = 1'b0;
+    always @(posedge clk_54m) begin
+        s1990_tg_s1 <= s1990_tg;   s1990_tg_s2 <= s1990_tg_s1;  s1990_tg_s3 <= s1990_tg_s2;
+        s1990_val_s1 <= s1990_val_h; s1990_val_s2 <= s1990_val_s1;
+    end
+`endif
+
     reg boot_done = 1'b0;   // 1 tras la PRIMERA (fria) salida de reset; sobrevive warm resets
     reg f11_s0  = 1'b0;
     reg f11_s1  = 1'b0;
@@ -1316,6 +1344,14 @@ assign keyboard_addr = ppi_port_c[3:0];
 `ifdef ENABLE_TURBO
         if (f11_s1 & ~f11_prev)     // rising edge = F11 pressed
             turbo <= ~turbo;        // toggle real-MSX <-> turbo
+`endif
+`ifdef ENABLE_TURBOR_ID
+        // Tercera fuente: CHGCPU por el S1990. El software pide "R800" y aqui
+        // eso significa turbo. Llega de clk_27m, asi que se cruza por TOGGLE
+        // (un pulso de un ciclo de 27 MHz podria no verse desde 54, o verse dos
+        // veces). FIJA el valor, no conmuta: el software dice cual quiere.
+        if (s1990_tg_s2 != s1990_tg_s3)
+            turbo <= s1990_val_s2;
 `endif
         // v1.9: control software Panasonic — OUT &H41,n con el dispositivo 8
         // seleccionado (decode pana41_wr junto al bloque config). bit0 activo-bajo:
@@ -2225,6 +2261,12 @@ assign keyboard_addr = ppi_port_c[3:0];
     end
     wire [11:0] iosys_joy = joy_s1;
 
+    // Estado del core hacia el OSD y congelacion del MSX. Se DECLARAN aqui y se
+    // arman al final del modulo: caps_on, kana_on y fan_dbg_cnt nacen mucho mas
+    // abajo en el fichero.
+    wire [63:0] iosys_status;
+    reg         iosys_frz = 1'b0;
+
     // ---- gamepads USB del BL616 -> puertos de joystick del MSX -------------
     // El MCU manda el estado de los mandos con el comando 9. El formato lo dice
     // usb_gamepad.cpp: "SNES: R L X A RT LT DN UP ST SE Y B", o sea bit 11 -> 0.
@@ -2284,6 +2326,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         .kbd_data       (),
         .kbd_data_valid (),
         .core_config    (),
+        .status_in      (iosys_status),   // MSXimus: comando 14
 
         .uart_rx        (bl616_jtagsel),   // V14 <- TX del BL616
         .uart_tx        (iosys_uart_tx)    // U15 -> RX del BL616
@@ -2591,7 +2634,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     .bus_rfsh_n(bus_rfsh_n),
     // _181: mismo termino que el RESET_n del T80 — el refresco autonomo solo
     // puede disparar cuando el Z80 esta provadamente parado (ver memory.v)
-    .cpu_run(bus_reset_n & reset3_n & flash_idle & esp_boot_ok),
+    .cpu_run(bus_reset_n & reset3_n & flash_idle & esp_boot_ok & ~iosys_frz),
 
     .ram_dout(ram_dout),
     .vram_dout(VrmDbi2),
@@ -5592,6 +5635,70 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     // Los JOYSTICKS si colgaban del `hid`, y por eso se reenganchan abajo a
     // hid1/hid2 del iosys: ahora los gamepads USB los lee el BL616.
     // ========================================================================
+
+    // ========================================================================
+    // ESTADO DEL CORE HACIA EL OSD (comando 14) + CONGELACION DEL MSX
+    // ------------------------------------------------------------------------
+    // POR QUE EXISTE: el MCU ESCRIBE core_config pero hasta ahora no podia LEER
+    // nada del core. Sin camino de vuelta el OSD tendria que SUPONER el estado, y
+    // en cuanto algo cambiase por otro sitio -- F11, el puerto $41 del MSX, la
+    // pantalla de Ajustes de la BIOS -- la pantalla estaria mintiendo.
+    //
+    //   byte 0  {3'b0, kana, caps, ventilador, hay_SD, turbo}
+    //   byte 1  {2'b0, tipo_SD[1:0], estado_SD[3:0]}
+    //   byte 2-3  termometro: fan_dbg_cnt[19:4] (oscilador de anillo del u_fanctrl)
+    //   byte 4-5  wifi_ovf_cnt  (bytes TIRADOS: falta control de flujo)
+    //   byte 6-7  wifi_unr_cnt  (lecturas en vacio: el ESP no entrega)
+    // ========================================================================
+    wire sd_hay = (sd_card_stat_w != 4'd0);
+    assign iosys_status = {
+        {3'b000, kana_on, caps_on, fan_en_ctrl, sd_hay, turbo_eff},
+        {2'b00, sd_card_type_w, sd_card_stat_w},
+        fan_dbg_cnt[19:4],
+        wifi_ovf_cnt,
+        wifi_unr_cnt
+    };
+
+    // El MCU enciende y apaga el overlay con el comando 8 (F12 desde el teclado),
+    // asi que la congelacion se cuelga del MISMO hilo: no hace falta protocolo
+    // nuevo. Sincronizado porque `overlay` nace en clk_27m y cpu_run se consume
+    // en otro dominio; un glitch aqui partiria un ciclo del Z80 por la mitad.
+    //
+    // PARAR cpu_run (no resetear) es lo que hacia el lanzador viejo, y ESA parte
+    // si quedo validada en placa: la maquina se paraba y volvia. El refresco de
+    // la SDRAM no sufre -- es autonomo justo cuando el Z80 no emite RFSH.
+    reg iosys_frz_0 = 1'b0;
+    always @(posedge clk_54m) begin
+        iosys_frz_0 <= iosys_ovl_on;
+        iosys_frz   <= iosys_frz_0;
+    end
+
+`ifdef ENABLE_TURBOR_ID
+    // ---- S1990: que la maquina se identifique como turboR -------------------
+    // Solo los registros y el temporizador; no hay R800. El bit de modo de CPU
+    // va atado al turbo en los dos sentidos (ver la cabecera del modulo).
+    reg turbo_eff_27 = 1'b0, turbo_eff_27a = 1'b0;
+    always @(posedge clk_27m) begin
+        turbo_eff_27a <= turbo_eff;      // cuasi-estatico: 2FF basta
+        turbo_eff_27  <= turbo_eff_27a;
+    end
+
+    msx_s1990 #(.CLK_HZ(27_000_000)) u_s1990 (
+        .clk(clk_27m), .reset_n(bus_reset_n),
+        .iorq_n(bus_iorq_n), .rd_n(bus_rd_n), .wr_n(bus_wr_n), .m1_n(bus_m1_n),
+        .addr(bus_addr[7:0]), .din(cpu_dout),
+        .dout(s1990_dout), .req(s1990_req),
+        .pause_sw(1'b0),                 // la Console no tiene boton PAUSE
+        .rom_mode(),
+        .turbo_on(turbo_eff_27),
+        .turbo_set(s1990_turbo_set), .turbo_val(s1990_turbo_val)
+    );
+`else
+    assign s1990_dout = 8'hFF;
+    assign s1990_req  = 1'b0;
+    assign s1990_turbo_set = 1'b0;
+    assign s1990_turbo_val = 1'b0;
+`endif
 
     usb_keyboard_msx usb_keyboard_msx
     (
