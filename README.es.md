@@ -66,7 +66,7 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
-| 1 | `msximus_v3.1*.fs` | **`0x000000`** | Sí — es el core |
+| 1 | `MSXimus_v3.1.fs` | **`0x000000`** | Sí — es el core |
 | 2 | Pack de BIOS (`pack_bios-*_msximus.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.rom` | **`0x500000`** | No — solo para MoonSound/OPL4 |
 
@@ -92,11 +92,11 @@ Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **E
 
 ### Sobre el pack de BIOS
 
-La release trae el bitstream y los firmwares, pero **no el pack**. El pack contiene las BIOS del MSX, que son propiedad de sus dueños y no se pueden redistribuir aquí — igual que `yrw801.rom`, que es la wavetable de Yamaha del OPL4. Tienes que aportarlos tú, de un MSX que poseas o de donde tengas licencia para hacerlo.
+La release trae **todo lo necesario**: el core, los **dos** packs de BIOS, la `yrw801.rom` del OPL4 y los firmwares. Descargas, grabas y arranca.
 
-Para montar el pack está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con tus propias ROMs, Nextor incluido.
+Si prefieres montarte el pack con tus propias ROMs, está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con ellas, Nextor incluido.
 
-Sin OPL4 el core funciona igual; simplemente no tendrás MoonSound.
+Sin la `yrw801.rom` el core funciona igual; simplemente no tendrás MoonSound.
 
 ### Dos BIOS — elige la que quieras
 
@@ -148,7 +148,7 @@ Dos imágenes, y **conviven** — la de fábrica de Sipeed se queda donde está:
 
 1. **Mantén pulsado el botón BOOT mientras enchufas el USB.** Eso mete el chip en modo ISP.
 2. Aparece un **puerto COM nuevo** — ese es el BL616. (Listar los puertos antes y después de enchufar es la forma fácil de saber cuál.)
-3. Abre **BLDevCube**, elige **BL616** y escribe cada uno de los dos ficheros en su dirección.
+3. Abre **BLDevCube** y carga el **`flash_prog_cfg.ini`** de la release: ya trae las dos imágenes con sus direcciones, así que no hay que teclearlas. Déjalo en la misma carpeta que los dos `.bin`.
 4. Desenchufa, vuelve a enchufar y haz un ciclo de apagado de la placa.
 
 El modo ISP vive en la ROM del chip, no en su flash, así que funciona pase lo que pase con lo que hayas escrito. **Es la marcha atrás que nunca falla**: por aquí no puedes dejar la placa inservible.

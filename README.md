@@ -66,7 +66,7 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 
 | # | File | Address | Required? |
 |---|---|---|---|
-| 1 | `msximus_v3.1*.fs` | **`0x000000`** | Yes — this is the core |
+| 1 | `MSXimus_v3.1.fs` | **`0x000000`** | Yes — this is the core |
 | 2 | BIOS pack (`pack_bios-*_msximus.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
 | 3 | `yrw801.rom` | **`0x500000`** | No — only for MoonSound/OPL4 |
 
@@ -92,11 +92,11 @@ Two more pieces are **optional** and do not live in that flash: the **ESP32-C6**
 
 ### About the BIOS pack
 
-The release ships the bitstream and the firmwares, but **not the pack**. The pack contains MSX BIOS ROMs, which belong to their owners and cannot be redistributed here — same for `yrw801.rom`, Yamaha's OPL4 wavetable. You must supply them yourself, from an MSX you own or wherever you're licensed to.
+The release ships **everything you need**: the core, **both** BIOS packs, the OPL4's `yrw801.rom` and the firmwares. Download, flash, and it boots.
 
-To build the pack there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from your own ROMs, Nextor included.
+If you would rather build the pack from your own ROMs, there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from them, Nextor included.
 
-Without the OPL4 ROM the core works just the same; you simply won't have MoonSound.
+Without `yrw801.rom` the core works just the same; you simply won't have MoonSound.
 
 ### Two BIOSes — pick the one you want
 
@@ -148,7 +148,7 @@ Two images, and they **coexist** — the Sipeed factory one stays where it is:
 
 1. **Hold the BOOT button down while you plug in the USB.** That puts the chip in ISP mode.
 2. A **new COM port** appears — that one is the BL616. (Listing the ports before and after plugging it in is the easy way to tell which.)
-3. Open **BLDevCube**, pick **BL616**, and write each of the two files at its address above.
+3. Open **BLDevCube** and load the release's **`flash_prog_cfg.ini`**: it already carries both images with their addresses, so there is nothing to type. Keep it in the same folder as the two `.bin` files.
 4. Unplug, plug back in, and power-cycle the board.
 
 ISP mode lives in the chip's ROM, not in its flash, so it works no matter what you have written. **It is the reverse gear that never fails** — you cannot brick the board this way.
