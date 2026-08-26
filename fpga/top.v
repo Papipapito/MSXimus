@@ -31,6 +31,7 @@
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
 //`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
 //`define ENABLE_VRAM_DDR3   // _128X EXPERIMENTO: la VRAM del V9968 en la DDR3 del SOM (v9968_ddr3_backend; requiere ENABLE_V9968_VDP y USE_VRAM_DDR3=1 en build.tcl). ADVERTENCIA: DDR3 analogicamente marginal en esta placa (saga _94-_103)
+//`define TURBO_SIN_GUARDA_SDRAM  // 🧪 EXPERIMENTO 26/08 — **PROBADO Y DESCARTADO**: sin la guarda el MSX SE CUELGA al poner el turbo (placa, 26/08). La guarda NO estaba obsoleta pese a que la VRAM se mudo a la DDR3: lo que la justifica no es la CONTENCION del VDP sino la LATENCIA de la SDRAM (y su refresco), que a 5,37 no cabe en un T-estado de 186 ns. Se deja el define por si algun dia se acelera el controlador. Coste medido de la guarda: 18% (4,41 de 5,37).
 `define ENABLE_TURBOR_ID   // V3.1: S1990 del turboR (E4h-E7h) — la maquina se identifica como turboR y CHGCPU mueve el turbo. NO hay R800: ver fpga/src/msx_s1990.v
 `define ENABLE_IOSYS       // V3.1 PELDANO 1 (TangCore): iosys_bl616 + textdisp por la UART del BL616 (V14/U15) y overlay sobre el HDMI. Sin firmware en el MCU todavia: el overlay se enciende solo unos segundos al arrancar para demostrar la cadena y luego se aparta.
 //`define DISABLE_BOOT_MENU  // _127D: arranque MSX DIRECTO (enmascara la firma AB del menu; tambien salta el init FM de esa pagina). Solo builds de prueba.
@@ -1167,7 +1168,13 @@ assign keyboard_addr = ppi_port_c[3:0];
                     // Moraleja: cuando ram_busy=1 los datos NO estan; no hay margen en el
                     // handshake. Ir mas alla de ~4.3 efectivos exige acelerar el propio
                     // controlador de memoria (P1c), no apostar en el guard.
+`ifdef TURBO_SIN_GUARDA_SDRAM
+                    // 🧪 sin el termino de ram_busy: queda EXACTAMENTE la
+                    // condicion del MSXnano, que llega a 5,36 sin problemas.
+                    if ( ram_write == 1 || (ex_bus_iorq_n == 0)&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin
+`else
                     if ( ram_write == 1 || (turbo_eff == 1 && bus_mreq_n == 0 && bus_rd_n == 0 && ram_busy == 1) || (ex_bus_iorq_n == 0)&& (bus_rd_n == 0 || bus_wr_n == 0) ) begin  // P2: sin Compatible Mode (= v1.9 nano)
+`endif
                         wait_io_ff <= 0;
                         state_wait <= WAIT_STATE1;
                     end
@@ -1186,7 +1193,11 @@ assign keyboard_addr = ppi_port_c[3:0];
                 end
                 // P1-iter.2: en turbo, ademas, NO liberar con la SDRAM ocupada.
                 WAIT_STATE2: begin
+`ifdef TURBO_SIN_GUARDA_SDRAM
+                    if ( (turbo_eff ? clk_falling_5m4_54 : clk_falling_3m6_54) == 1 ) begin
+`else
                     if ( (turbo_eff ? clk_falling_5m4_54 : clk_falling_3m6_54) == 1 && (turbo_eff == 0 || ram_busy == 0) ) begin
+`endif
                         wait_io_ff <= 1;
                         state_wait <= WAIT_STATE3;
                     end
