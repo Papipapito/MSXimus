@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>A complete MSX2+ on a Tang Console 60K — now with the V9968 VDP</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v2.1-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v3.1-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="license" src="https://img.shields.io/badge/license-GPLv3-orange">
 </p>
@@ -19,6 +19,16 @@
 
 It doesn't need an MSX. It **is** an MSX.
 
+## Why v3.1 and not v2.2
+
+Because the ground moved.
+
+In August 2026 Gowin confirmed that the **SSRAM of the GW5AT-60B is withdrawn on purpose**: there is a silicon problem under investigation, and their recommendation is to migrate anything that uses it to BSRAM or to registers.
+
+Version 2.1 leaned on that resource heavily — the audio engines alone accounted for most of it. So v3 is not v2.1 with more features stacked on top: it is the same MSX **rebuilt so that not one bit lives on the withdrawn resource**. Every memory that was there moved to BSRAM or to registers, and that meant reworking the OPL4 wavetable engine, the OPL3 register files and the PCM cache from the inside out.
+
+That is a change at the foundation rather than on the surface, and it earned its own number. Everything you already knew works exactly the same; what changed is what it is standing on.
+
 ## What's inside
 
 **Video** · Full-screen 720p HDMI output · **V9968** or V9958 · CRT-style borders · scanlines toggle, right from the menu
@@ -27,11 +37,13 @@ It doesn't need an MSX. It **is** an MSX.
 
 **Storage** · Nextor over microSD · megaram with Konami4, Konami-SCC, ASCII8 and ASCII16 mappers
 
-**Input** · USB keyboard straight into the board (no hub needed), with physical F1–F10 · USB gamepads mapped to MSX joysticks
+**Input** · USB keyboard straight into the board (no hub needed), with physical F1–F10 · USB gamepads mapped to MSX joysticks · USB mouse as an MSX mouse
+
+**On screen** · Optional **status panel on F12**, painted over the MSX by the BL616 the board already carries
 
 **WiFi** · UNAPI through an external **ESP32-C6**, with an **optional display** for extra information
 
-**Extras** · 5.37 MHz Panasonic-style turbo · custom boot menu with file browser · boot logo · temperature-driven fan control · serial-port telemetry for diagnostics
+**Extras** · 5.37 MHz Panasonic-style turbo on **F11** · turboR-style machine identification · your choice of two BIOSes · boot logo · temperature-driven fan control · serial-port telemetry for diagnostics
 
 ## Required hardware
 
@@ -42,7 +54,9 @@ It doesn't need an MSX. It **is** an MSX.
 | Optional | **20×20 mm heatsink** on the SOM | Recommended: the core keeps the chip busy. [Like these](https://s.click.aliexpress.com/e/_c4WMlpD9) |
 | Optional | **20×20 mm 5 V fan** | **1.25 mm JST connector, 2-pin** — [like this one](https://s.click.aliexpress.com/e/_c328rXwB). Fully temperature-controlled by the core |
 | Optional | **USB** keyboard and gamepad | Straight into the board's USB-A ports, no hub |
+| Optional | **USB mouse**, wired | Straight into the board. ⚠️ A **wireless** receiver will not work: it presents itself as a composite device |
 | Optional | **ESP32-C6** (Waveshare C6-LCD-1.3) | For **WiFi**, with an optional info display |
+| Optional | *Nothing to buy* — the board's own **BL616** | Enables the F12 status panel. Needs its firmware flashed once |
 
 The fan is not needed for operation. If you fit one, the core drives it by itself: it measures the die temperature with an internal thermometer and only spins it when needed.
 
@@ -52,9 +66,19 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 
 | # | File | Address | Required? |
 |---|---|---|---|
-| 1 | `MSXimus_v*.fs` | **`0x000000`** | Yes — this is the core |
-| 2 | BIOS pack (`pack_bios_*.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
+| 1 | `msximus_v3.1*.fs` | **`0x000000`** | Yes — this is the core |
+| 2 | BIOS pack (`pack_bios-*_msximus.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
 | 3 | `yrw801.rom` | **`0x500000`** | No — only for MoonSound/OPL4 |
+
+Two more pieces are **optional** and do not live in that flash: the **ESP32-C6** firmware (WiFi) and the **BL616** firmware (the F12 panel). Each has its own section below.
+
+**The tools you need**, all free and all official:
+
+| For | Tool |
+|---|---|
+| The three files above | [**Gowin Programmer**](https://www.gowinsemi.com/en/support/download_eda/) (the one bundled with the 1.9.12 IDE works fine) |
+| ESP32-C6 (WiFi) | [**esptool-js**](https://espressif.github.io/esptool-js/) in the browser — nothing to install — or `esptool` |
+| BL616 (F12 panel) | [**Bouffalo Lab Dev Cube**](https://github.com/bouffalolab/bouffalo_sdk) (BLDevCube) |
 
 ### How to flash
 
@@ -68,13 +92,68 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 
 ### About the BIOS pack
 
-The release **ships the bitstream only**. The pack contains MSX BIOS ROMs, which belong to their owners and cannot be redistributed here — same for `yrw801.rom`, Yamaha's OPL4 wavetable. You must supply them yourself, from an MSX you own or wherever you're licensed to.
+The release ships the bitstream and the firmwares, but **not the pack**. The pack contains MSX BIOS ROMs, which belong to their owners and cannot be redistributed here — same for `yrw801.rom`, Yamaha's OPL4 wavetable. You must supply them yourself, from an MSX you own or wherever you're licensed to.
 
 To build the pack there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from your own ROMs, Nextor included.
 
 Without the OPL4 ROM the core works just the same; you simply won't have MoonSound.
 
-After that, insert a microSD with your ROMs and disk images and you're done — the boot menu comes up on its own.
+### Two BIOSes — pick the one you want
+
+The pack decides what the machine does when you switch it on. There are **two**, and they are interchangeable: reflash the pack at `0x400000` and you have swapped behaviour. Same core, same `.fs`.
+
+| Pack | What happens on power-up | Touches the SD card |
+|---|---|---|
+| **`pack_bios-MSX_msximus.bin`** | Logo, and straight into the MSX. `S` = settings, `W` = WiFi. | **No** |
+| **`pack_bios-Menu_msximus.bin`** | The same, plus an SD browser and a ROM/DSK launcher. | Read-only |
+
+**bios-MSX** is a plain MSX: it never writes to your card, so the card is entirely Nextor's business. **bios-Menu** adds the browser and the launcher on top; mounting a `.dsk` rewrites sectors of a file that already exists, but it never creates directory entries or allocates clusters.
+
+If you are not sure, start with **bios-MSX**. Swapping later costs one flash of a single file.
+
+After that, insert a microSD with your ROMs and disk images and you're done.
+
+## The status panel — F12 (optional)
+
+The Console 60K carries a second chip you have probably never used: a **BL616** microcontroller, wired to the FPGA from the factory. Give it a firmware and it will paint a status panel straight over the MSX picture.
+
+Press **F12** and the MSX freezes and the panel comes up. Press it again and the game carries on exactly where it was. It is **read-only** — there is no menu, no cursor, nothing to break. It reports what the core says about itself:
+
+```
+ ,----------------------------.
+ |       MSXimus  V3.1        |
+ `----------------------------'
+
+   CPU      3.58 MHz  normal
+   Card     SDHC  st 1
+   Fan      OFF
+   Keyboard CAPS ON
+   WiFi     0 lost  0 empty
+ `----------------------------'
+    F12 to go back to the MSX
+```
+
+This costs you nothing in hardware: **no wires, no soldering, no module**. The link between the two chips (a 2 Mbps serial line) was already routed on the board; it was just never used.
+
+> Because the BL616 takes F12 for itself, that key never reaches the MSX. The **turbo toggle is F11**.
+
+### Flashing the BL616
+
+Two images, and they **coexist** — the Sipeed factory one stays where it is:
+
+| File | Address |
+|---|---|
+| `bl616_fpga_partner_60kConsole.bin` (Sipeed's, shipped in the release) | **`0x0`** |
+| `bl616_v3.1.bin` | **`0x40000`** |
+
+1. **Hold the BOOT button down while you plug in the USB.** That puts the chip in ISP mode.
+2. A **new COM port** appears — that one is the BL616. (Listing the ports before and after plugging it in is the easy way to tell which.)
+3. Open **BLDevCube**, pick **BL616**, and write each of the two files at its address above.
+4. Unplug, plug back in, and power-cycle the board.
+
+ISP mode lives in the chip's ROM, not in its flash, so it works no matter what you have written. **It is the reverse gear that never fails** — you cannot brick the board this way.
+
+If you would rather not flash it at all, don't: the MSX works exactly the same, you simply won't have the F12 panel.
 
 ## Wiring the ESP32-C6 (WiFi)
 
@@ -101,11 +180,19 @@ And this is the module side:
 - TX and RX are **crossed**, as usual. The UART runs at 859 372 baud.
 - ⚠️ If a second SDRAM module is ever fitted on J10, the ESP has to move elsewhere.
 
-The module's firmware and its full technical inventory live in [`esp32_c6/`](esp32_c6/); flash `firmware_esp32c6_unapi_merged.bin` from the release to the C6 through its own USB-C:
+### Flashing the C6
+
+The module's firmware and its full technical inventory live in [`esp32_c6/`](esp32_c6/). Take `firmware_esp32c6_unapi_merged.bin` from the release and write it to the C6 through **its own USB-C**. You do **not** need the Arduino IDE, and you do not need to compile anything — the release ships a single merged binary.
+
+**The easy way — from the browser, nothing installed.** Open [**esptool-js**](https://espressif.github.io/esptool-js/), Espressif's own web flasher, in Chrome or Edge. Connect, pick the file, set the offset to `0x0`, and click Program. No drivers, no Python, no IDE.
+
+**The command-line way**, if you already have it:
 
 ```
 esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_unapi_merged.bin
 ```
+
+> There is no drag-and-drop route like the Raspberry Pi Pico's `.uf2`: the ESP32 has no mass-storage bootloader in ROM, so a file you copy onto a drive is not an option on any ESP32. The web flasher above is as close as it gets — one page, two clicks, nothing to install.
 
 ## Status
 
@@ -118,22 +205,22 @@ docs/            Plans, audits, logo, screenshots
 fpga/            top.v, build.tcl
   v9968/         The V9968 VDP (+ ORIGEN.txt: provenance and local patches)
   video720/      HDMI bridge and scaler
-  src/           Own RTL (VRAM shim, DDR3 backend, audio, USB…)
+  src/           Own RTL (VRAM shim, DDR3 backend, audio, USB, S1990…)
+    iosys/       The BL616 link and the on-screen panel
   constraints/   Console 60K pinout and constraints
 tools/           Testbenches and validation utilities
 ```
 
-## What's new in v2.1
+## What's new in v3.1
 
-v2.1 brings the V9968 fully up to date and rounds off the audio and the picture:
+- **Rebuilt off the withdrawn silicon** — the whole core now runs without the GW5AT-60B's SSRAM. This is the headline of the version and the reason for the number; the [why](#why-v31-and-not-v22) is at the top.
+- **A status panel on F12** — the BL616 already on the board paints the machine's real state over the picture, with the MSX frozen underneath. No wires, no module, no extra hardware.
+- **It introduces itself as a turboR** — the S1990 identification registers are in (`E4h`–`E7h`), and `CHGCPU` really does move the turbo. No R800: same Z80, telling the truth about what it is.
+- **MSX mouse from a USB mouse** — plug a **wired** USB mouse into the board and MSX software sees an MSX mouse. (A wireless receiver will not do: it presents itself as a composite device.)
+- **Two BIOSes to choose from** — a plain MSX that never touches your card, or the same plus an SD browser and launcher. One file, swapped in one flash.
+- **Turbo on F11** — F12 now belongs to the panel.
 
-- **The V9968, at its latest** — the core now carries HRA!'s most recent published revision of the VDP: the new R#20/R#21 register map (V9958-compatible out of reset), per-sprite palette sets in sprite mode 2 (EPAL) and the command-end interrupt.
-- **Remastered audio** — a new gain structure calibrated against real hardware and openMSX: DC blocking on the PSGs, revised per-chip balance, a soft-knee limiter, and a **master volume you set from the MSX itself** (`OUT &H44,n`, 0–7), saved to flash. The MoonSound/OPL4 plays at its reference level.
-- **MSX-Audio with 256 KB** — the Y8950's sample RAM grows from 32 to 256 KB, the maximum the real chip can address.
-- **A picture closer to a CRT** — the border is visible on all four sides, every pixel comes out uniform (exact integer scaling) and the centering has been fine-tuned.
-- **Full 2 MB ASCII16 megaROMs** — Aleste 2 and friends, complete.
-- **Rock-solid memory** — the SDRAM refreshes autonomously and the V9968's CPU port honours /WAIT: solid behaviour under any load, from cold boot to the heaviest demo.
-- **ESP32-C6 firmware in the repo** — the WiFi module's firmware now lives in `esp32_c6/`, with the J10 pinout documented.
+Everything from v2.1 is still here: the V9968 at HRA!'s latest revision, the remastered audio, the 256 KB MSX-Audio, the CRT-style picture and the full 2 MB ASCII16 megaROMs.
 
 ## The V9968
 
