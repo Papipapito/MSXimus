@@ -29,6 +29,11 @@
 `define ENABLE_USB_KBD      // F3 (_39): teclado por USB-A DIRECTO al fabric (usb_hid_host, sin hub)
 `define ENABLE_SCC          // F3 (_40): SCC de vuelta — scc_wave2v Verilog puro (el VHDL scc_wave_mul era BARRIDO por la sintesis GW5A)
 `define ENABLE_TURBO       // P1: turbo WSX 5.37 de vuelta con la receta v1.9 (turbo_eff sin glitch + boot-turbo solo en frio)
+// ¡OJO! ENABLE_V9968_VDP y ENABLE_VRAM_DDR3 se ven comentados AQUI y aun
+// asi ESTAN ACTIVOS en las entregas: tools/lanzar_campana.ps1 los descomenta
+// en el CLON antes de sintetizar (y aborta si no lo consigue). O sea que
+// leer este fichero a secas te dice lo que NO lleva el bitstream. Para saber
+// que hay de verdad en un .fs, mira el script de campana, no estas lineas.
 //`define ENABLE_V9968_VDP   // F1 V9968: VDP de HRA! (fpga/v9968, tag+eco) + shim VRAM a SDRAM compartida (puerto wv2) + puente 800px (msx2hdmi_v9968). Sustituye v9958_top ENTERO. Activar en el build _117
 //`define ENABLE_VRAM_DDR3   // _128X EXPERIMENTO: la VRAM del V9968 en la DDR3 del SOM (v9968_ddr3_backend; requiere ENABLE_V9968_VDP y USE_VRAM_DDR3=1 en build.tcl). ADVERTENCIA: DDR3 analogicamente marginal en esta placa (saga _94-_103)
 //`define TURBO_SIN_GUARDA_SDRAM  // 🧪 EXPERIMENTO 26/08 — **PROBADO Y DESCARTADO**: sin la guarda el MSX SE CUELGA al poner el turbo (placa, 26/08). La guarda NO estaba obsoleta pese a que la VRAM se mudo a la DDR3: lo que la justifica no es la CONTENCION del VDP sino la LATENCIA de la SDRAM (y su refresco), que a 5,37 no cabe en un T-estado de 186 ns. Se deja el define por si algun dia se acelera el controlador. Coste medido de la guarda: 18% (4,41 de 5,37).
@@ -5479,6 +5484,14 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     // _121diag: E22 (el CH340 de COM11) pasa a llevar la telemetria del
     // SHIM (dbg_uart ASCII 115200) — la del motor wave (_111) cede el pin
     // en las builds V9968 de diagnostico; usb_uart_tx no llega al PC.
+    // DECISION 26/08 (v3.1, Albert): este pin se QUEDA encendido en la release.
+    // No es un resto de diagnostico olvidado: el README lo anuncia como
+    // caracteristica ("telemetria por puerto serie para diagnostico") y es el
+    // unico canal para diagnosticar la placa de alguien a distancia. Sale por
+    // E22 y TAMBIEN por la UART del USB-C (usb_uart_tx, mas abajo).
+    // Todo lo demas de los dos PMOD esta apagado (a 1: activo-bajo).
+    // Candidato a caer en la V4, que se recompila igualmente: cuesta el modulo
+    // dbg_uart mas los acumuladores del vumetro, y el CLS va al 76%.
     assign dbg_pmod1[4] = usb_uart_tx_int;
 `else
     assign dbg_pmod1[4] = opl4_dbg_tx;   // _111: telemetria del motor wave
