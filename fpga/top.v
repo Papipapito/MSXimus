@@ -926,8 +926,37 @@ always @(posedge clk_54m or negedge bus_reset_n) begin
         ppi_port_c <= 8'h00;
     else if (ppi_portc_req_w)
         ppi_port_c <= cpu_dout;
-    else if (ppi_ctrl_req_w && cpu_dout[7] == 1'b0)
-        ppi_port_c[cpu_dout[3:1]] <= cpu_dout[0];
+    else if (ab_fin && ab_dat[7] == 1'b0)
+        ppi_port_c[ab_dat[3:1]] <= ab_dat[0];
+end
+
+// 🚨 EL BIT SET/RESET SE APLICA UNA VEZ, AL TERMINAR LA ESCRITURA.
+//
+// La primera version lo hacia por NIVEL (`if (ppi_ctrl_req_w) ...`), igual que
+// la escritura de AAh. Para AAh eso es inofensivo: escribe el byte ENTERO en
+// cada flanco y gana el ultimo, que es el estable. Pero aqui el dato elige
+// QUE BIT se toca, asi que un valor intermedio inestable escribe un bit AL AZAR
+// -- incluyendo los bits 0..3, que son la SELECCION DE FILA DEL TECLADO.
+//
+// La pista estaba delante y la desprecie: la sonda del 26/08 veia pasar valores
+// como 0xD0 y 0xF7, con el bit 7 a uno, o sea comandos de MODO del 8255 que
+// ninguna BIOS manda a ese ritmo. Eran datos a medio formar. Con el uso normal
+// no se notaba porque la BIOS reescribe constantemente; con INDEV.COM, que
+// sondea el hardware a conciencia, la maquina se colgaba.
+//
+// Ahora se sigue el dato mientras dura la escritura y se aplica UNA sola vez,
+// en el flanco de subida de la peticion, con el ultimo valor -- que es el que el
+// Z80 mantiene hasta el final del ciclo.
+reg       ab_req_d = 1'b0;
+reg [7:0] ab_dat   = 8'd0;
+wire      ab_fin   = ab_req_d & ~ppi_ctrl_req_w;
+always @(posedge clk_54m or negedge bus_reset_n) begin
+    if (!bus_reset_n) begin
+        ab_req_d <= 1'b0; ab_dat <= 8'd0;
+    end else begin
+        ab_req_d <= ppi_ctrl_req_w;
+        if (ppi_ctrl_req_w) ab_dat <= cpu_dout;
+    end
 end
 
 // SONDA (26/08): ¿escribe la BIOS en ABh, y con que? Sin esto solo se puede
