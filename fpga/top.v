@@ -877,6 +877,44 @@ wire [7:0] psg_joy_data = (!psg_reg15_port2) ? joy0_msx
 wire ppi_portb_req_r = (bus_addr[7:0] == 8'hA9 && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0) ? 1 : 0;
 wire ppi_portc_req_w = (bus_addr[7:0] == 8'hAA && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0);
 
+// 🚨 PUERTO ABh — REGISTRO DE CONTROL DEL 8255. Faltaba, y por eso el LED de
+// CAPS no funcionaba NUNCA (descubierto el 26/08 al no verse en el OSD).
+//
+// El MSX no enciende el CAPS escribiendo el puerto C entero por AAh: la rutina
+// CHGCAP de la BIOS hace `OUT (0ABh),A` con el comando de BIT SET/RESET del
+// 8255. Sin decodificar ABh esa escritura se perdia y ppi_port_c[6] se quedaba
+// como estuviera. Como su unico consumidor era la tira WS2812 (que no siempre
+// esta conectada), el fallo llevaba ahi sin que nadie lo viera.
+//
+// Formato del comando (bit 7 = 0 lo distingue del comando de MODO, que no nos
+// afecta porque el modo del PPI del MSX es fijo):
+//     bit 7   = 0   -> bit set/reset
+//     bits 3:1      -> que bit del puerto C
+//     bit 0         -> 1 = ponerlo, 0 = quitarlo
+// Con esto funcionan de golpe los tres usos reales del MSX: LED de CAPS (bit 6),
+// click de tecla (bit 7) y motor del casete (bit 4).
+wire ppi_ctrl_req_w = (bus_addr[7:0] == 8'hAB && bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0);
+
+// 🚨 LECTURA DEL PUERTO C (AAh) — FALTABA, Y ERA LA CAUSA DE RAIZ.
+//
+// El 8255 en modo 0 con el puerto C de salida deja RELEER el latch, y la BIOS
+// del MSX cuenta con ello: para cambiar de fila de teclado hace
+//     IN A,(0AAh) / AND 0F0h / OR fila / OUT (0AAh),A
+// o sea LEE, conserva los bits altos (CAPS, click, motor) y devuelve el byte.
+//
+// Sin camino de lectura, ese IN devolvia FF del bus flotante -> la BIOS se
+// quedaba con F0 -> y escribia F0|fila, BORRANDO los tres bits altos en CADA
+// barrido del teclado (~60 veces por segundo).
+//
+// Medido en placa el 26/08 con la sonda del OSD: `ab6 225` (la BIOS SI escribia
+// el bit del CAPS por ABh, 225 veces) y `PC FA` (= F0|fila 10) -- el valor
+// exacto que predice esta explicacion.
+//
+// Esto es tambien la causa REAL del bug del motor de casete del MSXnano, que
+// alli se parcheo con un registro aparte (`cas_motor_on`): no era solo que
+// faltara decodificar ABh, es que ademas le borraban el bit.
+wire ppi_portc_req_r = (bus_addr[7:0] == 8'hAA && bus_iorq_n == 0 && bus_m1_n == 1 && bus_rd_n == 0);
+
 wire [3:0] keyboard_addr;
 reg [7:0] keyboard_data;
 wire [1:12] function_keys;
@@ -887,7 +925,13 @@ always @(posedge clk_54m or negedge bus_reset_n) begin
         ppi_port_c <= 8'h00;
     else if (ppi_portc_req_w)
         ppi_port_c <= cpu_dout;
+    else if (ppi_ctrl_req_w && cpu_dout[7] == 1'b0)
+        ppi_port_c[cpu_dout[3:1]] <= cpu_dout[0];
 end
+
+// SONDA (26/08): ¿escribe la BIOS en ABh, y con que? Sin esto solo se puede
+// adivinar. Se manda en el estado del OSD reaprovechando los dos bytes que
+// eran del termometro (retirado por inutil).
 assign keyboard_addr = ppi_port_c[3:0];
 
     // FPGA/bitstream version readable on I/O port 0x2F. The boot menu reads it and
@@ -1011,6 +1055,7 @@ assign keyboard_addr = ppi_port_c[3:0];
                      ( s1990_req == 1 ) ? s1990_dout :   // E4h-E7h: S1990 del turboR
                 `endif
                      ( rtc_req_r == 1 ) ? rtc_dout :
+                     ( ppi_portc_req_r == 1 ) ? ppi_port_c :   // AAh: releer el latch del puerto C
                      ( ppi_req_r == 1 ) ? ppi_port_a :
                      ( slot0_req_r == 1 ) ? 8'hff :
                      ( slotx_req_r == 1 ) ? 8'hff :
@@ -5654,6 +5699,9 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     assign iosys_status = {
         {3'b000, kana_on, caps_on, fan_en_ctrl, sd_hay, turbo_eff},
         {2'b00, sd_card_type_w, sd_card_stat_w},
+        // Termometro: se MANDA pero el OSD no lo pinta -- es el contador de un
+        // oscilador de anillo, sube cuando el chip se enfria y no esta calibrado.
+        // Se deja en el paquete por si algun dia se calibra.
         fan_dbg_cnt[19:4],
         wifi_ovf_cnt,
         wifi_unr_cnt

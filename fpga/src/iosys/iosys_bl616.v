@@ -76,7 +76,14 @@ localparam [8*STR_LEN-1:0] CONF_STR = "Tangcores;-;O12,OSD key,Right+Select,Sele
 localparam CLK_FREQ = FREQ;
 localparam BAUD_RATE = 2_000_000;
 
-reg overlay_reg = 1;
+// 🚨 MSXimus: NACE APAGADO (el original arranca a 1).
+// TangCore lo deja encendido para ensenar su menu de cores nada mas arrancar.
+// Aqui la maquina tiene que arrancar como un MSX y punto: lo que se viera entre
+// que la FPGA se configura y el MCU dice "apagalo" es una ventana de basura --
+// y su duracion depende de lo que tarde en arrancar el MCU, que cambia segun se
+// alimente del PC o de una fuente (observado en placa el 26/08).
+// Ademas, con la congelacion atada al overlay, encendido = Z80 parado.
+reg overlay_reg = 0;
 assign overlay = overlay_reg;
 
 reg [7:0] rom_loading_reg = LOADING_STATE;
