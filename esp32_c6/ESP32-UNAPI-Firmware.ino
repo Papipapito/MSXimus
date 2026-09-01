@@ -2315,6 +2315,10 @@ void received_data_parser () {
            case SSH_KEY_GEN:
            case SSH_KEY_EXPORT:
            case SSH_KEY_IMPORT:
+           case CUSTOM_F_CACHE_GET:
+           case CUSTOM_F_CACHE_STAT:
+           case CUSTOM_F_CACHE_PART:
+           case CUSTOM_F_CACHE_PURGE:
            case SSH_KEY_INFO:
               btState = RX_PARSER_WAIT_DATA_SIZE;
              btCmdInternalStep = 0;
@@ -2398,6 +2402,44 @@ proccesscmd:
         case CUSTOM_F_TSX_FIND:
           tsxCmdFind(btCommandData, uiCmdDataLen);
         break;
+
+        // ---- Cache de descargas en FFat (ver Cache.ino) ----
+        // El File-Hunter bajaba en FLUJO y el MSX no podia seguir el ritmo: se para
+        // a escribir sectores y a buscar clusters, y la descarga moria a los 64/192
+        // KB de forma VARIABLE. Ahora el ESP baja a su ritmo a un fichero y el MSX
+        // PIDE los trozos cuando puede: sin prisa, no hay nada que desbordar.
+        case CUSTOM_F_CACHE_GET:
+          // {tipo(1=rom,2=dsk), indice, texto buscado} -- la URL la monta el ESP
+          if (uiCmdDataLen >= 3) {
+            btCommandData[uiCmdDataLen] = 0;
+            SendQuickResponse(btCommand, cacheStartFH(btCommandData[0], btCommandData[1],
+                                                      (const char *)btCommandData + 2));
+          } else SendQuickResponse(btCommand, UNAPI_ERR_INV_PARAM);
+          break;
+        case CUSTOM_F_CACHE_STAT:
+          {
+            unsigned int n = 0;
+            byte rr = cacheStat(btCommandData, &n);
+            SendResponse(btCommand, rr, n, btCommandData);
+          }
+          break;
+        case CUSTOM_F_CACHE_PART:
+          if (uiCmdDataLen == 6) {
+            uint32_t off = (uint32_t)btCommandData[0]
+                         | ((uint32_t)btCommandData[1] << 8)
+                         | ((uint32_t)btCommandData[2] << 16)
+                         | ((uint32_t)btCommandData[3] << 24);
+            uint16_t rl  = (uint16_t)btCommandData[4]
+                         | ((uint16_t)btCommandData[5] << 8);
+            unsigned int n = 0;
+            byte rr = cacheRead(off, rl, btCommandData, &n);
+            SendResponse(btCommand, rr, n, btCommandData);
+          } else SendQuickResponse(btCommand, UNAPI_ERR_INV_PARAM);
+          break;
+        case CUSTOM_F_CACHE_PURGE:
+          cacheFree();
+          SendQuickResponse(btCommand, UNAPI_ERR_OK);
+          break;
         case CUSTOM_F_FILE_BOARD:
           if (strcmp(FIRMWARETYPE,(const char*)btCommandData) == 0) {
             bRS232UpdateAllowed = true;
@@ -3898,6 +3940,7 @@ void loop() {
   unsigned int uiI;
 
   displayTask();                // <-- refresca la pantalla (self-throttled 1/s, Display.ino)
+  cacheTask();                  // <-- bombea la descarga a cache (Cache.ino)
 
   if (bDisableRadioPending) {
     bDisableRadioPending = false;

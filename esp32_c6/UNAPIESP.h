@@ -116,6 +116,15 @@ enum CustomFunctions {
   CUSTOM_F_TSX_UPLOAD = 'X',    // {size u32 LE} subida desde el MSX (SD offline)
   CUSTOM_F_TSX_UPBLOCK = 'x',   // {chunk} anexa; al completar convierte+reproduce
   CUSTOM_F_TSX_FIND = 'J'       // {texto} busca en el catalogo y reproduce el
+  // --- Cache de descargas en la FFat del C6 (MSXimus, 31/08/2026) ---
+  // LETRAS, como el resto de ordenes propias: el MSX habla con el ESP por los
+  // puertos 6/7 de la FPGA (igual que la cinta web), SIN pasar por el driver
+  // UNAPI de ducasp, que es una ROM de terceros dentro del pack.
+  // Verificadas libres: F, f, P, p no las usa nadie.
+  ,CUSTOM_F_CACHE_GET  = 'F'    // {url ASCIIZ} arranca la descarga a fichero
+  ,CUSTOM_F_CACHE_STAT = 'f'    // {} -> {estado,err,bajados u32,total u32}
+  ,CUSTOM_F_CACHE_PART = 'P'    // {off u32, len u16} -> len bytes del fichero
+  ,CUSTOM_F_CACHE_PURGE= 'p'    // {} borra la cache
                                 // 1er match; resp: [loadcmd u8][nombreZ ASCII]
 };
 

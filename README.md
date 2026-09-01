@@ -113,6 +113,8 @@ If you are not sure, start with **bios-MSX**. Swapping later costs one flash of 
 
 After that, insert a microSD with your ROMs and disk images and you're done.
 
+> **About microSD cards:** use a **name-brand, Class 10** card (Samsung, SanDisk, Kingston...), formatted **FAT16**. Cheap no-name cards read fine but reject or lose sector writes under sustained bursts — we measured it on the bench: a no-name card kept failing writes even when paced, while a Samsung EVO+ was flawless with the exact same code and geometry. If downloads or saves act up, suspect the card first.
+
 ## The status panel — F12 (optional)
 
 The Console 60K carries a second chip you have probably never used: a **BL616** microcontroller, wired to the FPGA from the factory. Give it a firmware and it will paint a status panel straight over the MSX picture.

@@ -192,11 +192,29 @@ void displayTask()
         }
     }
 
-    // ---------- Barra TURBO, repinta solo si cambia ----------
+    // ---------- Barra TURBO / auto-test de cache ----------
+    // Mientras el auto-test esta vivo esta banda la ocupa el, y al terminar el
+    // turbo se repinta solo (last_turbo=-1 le obliga a verse "cambiado").
     static uint32_t t_turbo = 0;
     static int8_t   last_turbo = -1;
     if (now - t_turbo >= 400) {
         t_turbo = now;
+#if CACHE_SELFTEST
+        static char last_ct[24] = "";
+        if (cacheTestActive()) {
+            char ln[24];
+            cacheTestStatus(ln, sizeof(ln));
+            if (strcmp(ln, last_ct) != 0) {
+                strncpy(last_ct, ln, sizeof(last_ct) - 1);
+                last_ct[sizeof(last_ct) - 1] = 0;
+                last_turbo = -1;
+                gfx->fillRect(6, 114, 228, 32, COL_BLACK);
+                gfx->setTextColor(COL_CYAN);
+                gfx->setTextSize(2); gfx->setCursor(12, 122); gfx->print(ln);
+            }
+        } else
+#endif
+        {
         int8_t turbo = digitalRead(TURBO_PIN) ? 1 : 0;
         if (turbo != last_turbo) {
             last_turbo = turbo;
@@ -209,6 +227,7 @@ void displayTask()
                 gfx->setTextColor(COL_DGREEN);
                 gfx->setTextSize(2); gfx->setCursor(16, 122); gfx->print("Normal 3.58MHz");
             }
+        }
         }
     }
 
