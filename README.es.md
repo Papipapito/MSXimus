@@ -67,7 +67,7 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
 | 1 | `MSXimus_v3.1.fs` | **`0x000000`** | Sí — es el core |
-| 2 | Pack de BIOS (`pack_bios-*_msximus.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
+| 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.rom` | **`0x500000`** | No — solo para MoonSound/OPL4 |
 
 Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **ESP32-C6** (WiFi) y el del **BL616** (el panel de F12). Cada una tiene su sección más abajo.
@@ -92,24 +92,28 @@ Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **E
 
 ### Sobre el pack de BIOS
 
-La release trae **todo lo necesario**: el core, los **dos** packs de BIOS, la `yrw801.rom` del OPL4 y los firmwares. Descargas, grabas y arranca.
+La release trae **todo lo necesario**: el core, el pack de BIOS, la `yrw801.rom` del OPL4 y los firmwares. Descargas, grabas y arranca.
+
+Hay **dos versiones del mismo pack**, y solo cambia el kernel de disco que llevan dentro:
+
+| Pack | Nextor |
+|---|---|
+| `pack_bios_msximus.bin` | **2.1.4** — la estable, la que quieres |
+| `pack_bios_msximus_nextor3.bin` | **3.0 beta 1** — para probar la beta |
 
 Si prefieres montarte el pack con tus propias ROMs, está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con ellas, Nextor incluido.
 
 Sin la `yrw801.rom` el core funciona igual; simplemente no tendrás MoonSound.
 
-### Dos BIOS — elige la que quieras
+### Una sola BIOS, y el menú es un ajuste
 
-El pack decide qué hace la máquina al encenderla. Hay **dos**, y son intercambiables: regrabas el pack en `0x400000` y ya has cambiado de comportamiento. El mismo core, el mismo `.fs`.
+Hasta la v3.1 había **dos** packs y tenías que decidir cuál grabar. Ahora hay **uno**, y aquella elección es una casilla en Ajustes.
 
-| Pack | Qué pasa al encender | Toca la SD |
-|---|---|---|
-| **`pack_bios-MSX_msximus.bin`** | Sale el logo y arranca el MSX. `S` = ajustes, `W` = WiFi. | **No** |
-| **`pack_bios-Menu_msximus.bin`** | Lo mismo, más un navegador de la SD y un lanzador de ROM/DSK. | Solo lectura |
+Al encender, la máquina **arranca el MSX directamente**. Si quieres el navegador de la SD: pulsa **S** al arrancar, marca **«Menu al arrancar»** y `Save & Restart`. Para volver a la salida directa, lo desmarcas. La elección se guarda en la flash de la placa, así que sobrevive al apagón.
 
-**bios-MSX** es un MSX a secas: no escribe nunca en tu tarjeta, así que la tarjeta es asunto exclusivo de Nextor. **bios-Menu** añade encima el navegador y el lanzador; montar un `.dsk` reescribe sectores de un fichero **que ya existe**, pero no crea entradas de directorio ni asigna clústeres.
+Con el menú encendido tienes el navegador de la tarjeta, el lanzador de ROM y DSK y —si has puesto el WiFi— la tecla **F** para buscar y descargar ROMs y discos directamente a la microSD, sin PC.
 
-Si no lo tienes claro, empieza por **bios-MSX**. Cambiar después cuesta una grabación de un solo fichero.
+> Montar un `.dsk` reescribe sectores de un fichero **que ya existe**: no crea entradas de directorio ni asigna clústeres.
 
 Después, mete una microSD con tus ROMs y discos y listo.
 
@@ -184,14 +188,14 @@ Y así queda del lado del módulo:
 
 ### Grabar el C6
 
-El firmware del módulo y su inventario técnico completo viven en su propio repositorio, [**ESP32-for-FPGA**](https://github.com/Papipapito/ESP32-for-FPGA) — el mismo binario sirve al MSXimus y al MSXnano, así que ya no se guarda una copia aquí. Coge el `firmware_esp32c6_unapi_merged.bin` de la release y grábalo en el C6 por **su propio USB-C**. **No** hace falta el IDE de Arduino, ni compilar nada: la release trae un único binario ya fusionado.
+El firmware del módulo y su inventario técnico completo viven en su propio repositorio, [**ESP32-for-FPGA**](https://github.com/Papipapito/ESP32-for-FPGA) — el mismo binario sirve al MSXimus y al MSXnano, así que ya no se guarda una copia aquí. Coge el `firmware_esp32c6_v3.2_merged.bin` de la release y grábalo en el C6 por **su propio USB-C**. **No** hace falta el IDE de Arduino, ni compilar nada: la release trae un único binario ya fusionado.
 
 **Lo fácil — desde el navegador, sin instalar nada.** Abre [**esptool-js**](https://espressif.github.io/esptool-js/), el grabador web del propio Espressif, en Chrome o Edge. Conectas, eliges el fichero, pones la dirección `0x0` y le das a Program. Sin drivers, sin Python, sin IDE.
 
 **Por línea de órdenes**, si ya lo tienes:
 
 ```
-esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_unapi_merged.bin
+esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_v3.2_merged.bin
 ```
 
 > No hay una vía de arrastrar y soltar como el `.uf2` de la Raspberry Pi Pico: el ESP32 no lleva bootloader de almacenamiento masivo en ROM, así que copiar un fichero a una unidad no es posible en **ningún** ESP32. El grabador web de arriba es lo más cerca que se puede estar: una página, dos clics y nada instalado.
@@ -213,13 +217,22 @@ fpga/            top.v, build.tcl
 tools/           Testbenches y utilidades de validación
 ```
 
+## Lo nuevo de la v3.2
+
+El core **no cambia**: es el mismo `.fs` de la v3.1. Lo que cambia es lo que hay encima.
+
+- **Una sola BIOS** — se acabó elegir pack. El navegador de la SD es ahora una casilla en Ajustes: `S` al arrancar, «Menu al arrancar», y ya. Se guarda en la flash.
+- **Descargas desde el menú** — con WiFi, la tecla `F` busca y baja ROMs y discos a la microSD sin pasar por el PC.
+- **Logo de arranque en la pantalla del C6** — el logotipo MSX armándose desde los dos lados, como en un MSX2 de verdad.
+- **El firmware del C6 vive en su propio repositorio**, [ESP32-for-FPGA](https://github.com/Papipapito/ESP32-for-FPGA), y es el mismo binario para el MSXimus y el MSXnano.
+
 ## Lo nuevo de la v3.1
 
 - **Reconstruido fuera del silicio retirado** — el core entero funciona ya sin el SSRAM del GW5AT-60B. Es el titular de la versión y la razón del número; el [por qué](#por-qué-v31-y-no-v22) está arriba del todo.
 - **Panel de estado en F12** — el BL616 que la placa ya lleva pinta el estado real de la máquina sobre la imagen, con el MSX congelado debajo. Ni cables, ni módulo, ni hardware extra.
 - **Se presenta como un turboR** — están los registros de identificación del S1990 (`E4h`–`E7h`), y `CHGCPU` mueve el turbo de verdad. Sin R800: el mismo Z80, diciendo la verdad sobre lo que es.
 - **Ratón MSX con un ratón USB** — enchufa un ratón USB **con cable** a la placa y el software MSX ve un ratón MSX. (Un receptor inalámbrico no vale: se presenta como dispositivo compuesto.)
-- **Dos BIOS a elegir** — un MSX a secas que no toca tu tarjeta, o el mismo más navegador y lanzador de la SD. Un fichero, y se cambia en una grabación.
+- **Dos BIOS a elegir** — un MSX a secas, o el mismo más navegador y lanzador de la SD. *(Unificadas en una sola en la v3.2.)*
 - **El turbo, en F11** — la F12 es ahora del panel.
 
 Todo lo de la v2.1 sigue aquí: el V9968 en la última revisión de HRA!, el audio remasterizado, el MSX-Audio de 256 KB, la imagen estilo CRT y las megaROMs ASCII16 de 2 MB completas.
