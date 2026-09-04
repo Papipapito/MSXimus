@@ -184,7 +184,7 @@ Y así queda del lado del módulo:
 
 ### Grabar el C6
 
-El firmware del módulo y su inventario técnico completo están en [`esp32_c6/`](esp32_c6/). Coge el `firmware_esp32c6_unapi_merged.bin` de la release y grábalo en el C6 por **su propio USB-C**. **No** hace falta el IDE de Arduino, ni compilar nada: la release trae un único binario ya fusionado.
+El firmware del módulo y su inventario técnico completo viven en su propio repositorio, [**ESP32-for-FPGA**](https://github.com/Papipapito/ESP32-for-FPGA) — el mismo binario sirve al MSXimus y al MSXnano, así que ya no se guarda una copia aquí. Coge el `firmware_esp32c6_unapi_merged.bin` de la release y grábalo en el C6 por **su propio USB-C**. **No** hace falta el IDE de Arduino, ni compilar nada: la release trae un único binario ya fusionado.
 
 **Lo fácil — desde el navegador, sin instalar nada.** Abre [**esptool-js**](https://espressif.github.io/esptool-js/), el grabador web del propio Espressif, en Chrome o Edge. Conectas, eliges el fichero, pones la dirección `0x0` y le das a Program. Sin drivers, sin Python, sin IDE.
 

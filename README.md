@@ -184,7 +184,7 @@ And this is the module side:
 
 ### Flashing the C6
 
-The module's firmware and its full technical inventory live in [`esp32_c6/`](esp32_c6/). Take `firmware_esp32c6_unapi_merged.bin` from the release and write it to the C6 through **its own USB-C**. You do **not** need the Arduino IDE, and you do not need to compile anything — the release ships a single merged binary.
+The module's firmware and its full technical inventory live in their own repository, [**ESP32-for-FPGA**](https://github.com/Papipapito/ESP32-for-FPGA) — the same binary serves the MSXimus and the MSXnano, so no copy is kept here any more. Take `firmware_esp32c6_unapi_merged.bin` from the release and write it to the C6 through **its own USB-C**. You do **not** need the Arduino IDE, and you do not need to compile anything — the release ships a single merged binary.
 
 **The easy way — from the browser, nothing installed.** Open [**esptool-js**](https://espressif.github.io/esptool-js/), Espressif's own web flasher, in Chrome or Edge. Connect, pick the file, set the offset to `0x0`, and click Program. No drivers, no Python, no IDE.
 
