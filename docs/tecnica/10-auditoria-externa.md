@@ -178,4 +178,6 @@ Fase 1, opcional y sin prisa: cola opcional en `desmontar_pack.py` (P3, 3 línea
 
 Lo que no se hace: CI con los packs (BP2), hook anti `.bin` (BP4), reescribir `build.sh` para bash 3.2 (B4), y las firmas de commits (BP1, S3), que son decisión de Albert.
 
+**Fase 0 aplicada el 21/09** (commit 3cf25d8 de `bios-msxnano-msximus`): los cinco pasos de la tabla, con el `insertar_en_pack.py` probado sobre los dos packs canónicos (cero bytes cambiados) y la descripción del repo actualizada. La fase 1 sigue pendiente.
+
 Los ocho ficheros vacíos de la raíz del repositorio (EXTRA-1 del verificador) eran restos de redirecciones de esta misma sesión y ya están borrados.
