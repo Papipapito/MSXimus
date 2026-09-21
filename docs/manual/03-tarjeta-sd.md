@@ -22,7 +22,7 @@ El tamaño da igual: el controlador admite SD v1, SD v2 y SDHC, y el menú de pr
 
 Una tarjeta de 2 GB o menos se formatea en FAT16 desde cualquier sistema. Con tarjetas mayores hay que crear una partición de hasta 2 GB en FAT16 con una herramienta de particiones, o, más fácil, dejar que lo haga Nextor desde el propio MSX con su utilidad de particiones. El menú admite **varias particiones** y la tecla **TAB** cambia de una a otra, así que una tarjeta grande puede llevar una FAT16 para el menú y otras para MSX-DOS.
 
-Nombres largos: el navegador los **muestra**, pero todo lo que el menú **escribe** va en formato 8.3. Un fichero que crea el menú, como una descarga o un guardado, se verá con nombre corto en el PC.
+Nombres largos: el navegador los **muestra**, pero todo lo que el menú **escribe** va en formato 8.3. Un fichero que crea el menú, como una descarga o un guardado, se verá con nombre corto en el PC. Y al revés: si desde MSX-DOS renombras o borras un fichero que tenía nombre largo, Nextor solo toca el nombre corto y deja atrás las entradas del largo; el menú (desde el pack del 21 de septiembre) las descarta, como hace Windows, y muestra el nombre corto nuevo.
 
 ## 3. Qué poner y dónde
 
