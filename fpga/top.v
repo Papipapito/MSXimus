@@ -1651,7 +1651,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     wire        dma_active;
     wire        dma_rfsh_ok;
     wire        dma_ram_req;
-    wire [22:0] dma_ram_addr;
+    wire [23:0] dma_ram_addr;       // 24/09/2026: 24 bits (bit 23 = fila 11 de la SDRAM, megaram de 8 MB)
     wire [7:0]  dma_ram_din;
     // (reg turbo_eff adelantado junto al FSM de waits, P1-iter.2)
     always @ (posedge clk_54m) begin
@@ -2698,7 +2698,7 @@ wire [11:0] usb_joy_snes;
 
     reg [15:0] VrmDbi2;
     reg [7:0] megaram_dout;
-    wire [22:0] ram_addr;
+    wire [23:0] ram_addr;           // 24/09/2026: 24 bits; bit 23 = fila 11 de la SDRAM (memory.v)
     wire ram_read;
     wire ram_write;
     wire ram_req;
@@ -2739,6 +2739,11 @@ wire [11:0] usb_joy_snes;
     // mitad baja sigue en el banco C: todo lo de <=2 MB cae en las mismas
     // direcciones fisicas que antes. Sin sumador: A21 elige {~A21, A21}.
 
+    // 24/09/2026 (ASCII16-X, porte de la Zynq): ram_addr de 24 bits. Todo lo de abajo lleva el bit 23 a 0
+    // (los 8 MB de siempre). La megaram crece a 8 MB y sus 4 MB ALTOS (megaram_addr[22] = 1) van a
+    // {1, 0, A21, A20-A0}: bancos A y B con el bit 23 = fila 11 de la SDRAM (filas 2048-4095, libres).
+    // Sin sumador: {A22, ~A22 & ~A21, A21} reproduce el {~A21, A21} de siempre cuando A22 = 0.
+
     reg cpu_run_r = 1'b0;   // V3.7: ver .cpu_run() de mem1
     always @(posedge clk_54m)
         cpu_run_r <= bus_reset_n & reset3_n & flash_idle & esp_boot_ok & ~iosys_frz & ~dma_rfsh_ok;
@@ -2747,29 +2752,29 @@ wire [11:0] usb_joy_snes;
     // del arranque y la DMA de la SD. El mux de arriba sigue siendo de dos ramas:
     // la eleccion flash/DMA va por debajo, sobre registros, fuera del cono de la CPU.
     wire        stream_active = ~flash_idle | dma_frz;
-    wire [22:0] stream_addr   = (~flash_idle) ? rom_addr[22:0] : dma_ram_addr;
+    wire [23:0] stream_addr   = (~flash_idle) ? { 1'b0, rom_addr[22:0] } : dma_ram_addr;
     wire [7:0]  stream_dout   = (~flash_idle) ? rom_dout : dma_ram_din;
     wire        stream_write  = (~flash_idle) ? rom_write : dma_ram_req;
     assign ram_addr = (stream_active) ? stream_addr :
                 `ifdef ENABLE_MAPPER
-                        (mapper_req == 1) ? { 2'b00, mapper_addr[20:0] } :  //bank A (2 MB)
+                        (mapper_req == 1) ? { 3'b000, mapper_addr[20:0] } :  //bank A (2 MB)
                 `endif
-                        (bios_req == 1 ) ? { 8'b11101100, bus_addr[14:0] } : //bank D
-                        (subrom_logo_req == 1 ) ? { 8'b11101101, bus_addr[14:0] } : //bank D
+                        (bios_req == 1 ) ? { 9'b011101100, bus_addr[14:0] } : //bank D
+                        (subrom_logo_req == 1 ) ? { 9'b011101101, bus_addr[14:0] } : //bank D
                 `ifdef ENABLE_SDCARD
-                        (megarom_req == 1 ) ? { 6'b111010, megarom_addr[16:0] } : //bank D
+                        (megarom_req == 1 ) ? { 7'b0111010, megarom_addr[16:0] } : //bank D
                 `endif
-                        (megaram_req == 1 ) ? { ~megaram_addr[21], megaram_addr[21], megaram_addr[20:0] } :  //bank C (A21=0) / bank B (A21=1)
-                        (gm2_mem_req == 1 ) ? { 2'b01, gm2_addr[20:0] } :  //bank B: V3.5f Game Master 2 (segs 480-496 de la megaram, A21=1)
-                        (menu2_req == 1 ) ? { 8'b11101110, 1'b0, bus_addr[13:0] } : //bank D: 2a pagina del menu (pack 0x70000, V3.5)
-                        (kanji_data_ram_req == 1 ) ? { 5'b11100, kanji_data_ram_addr[17:0] } : //bank D
+                        (megaram_req == 1 ) ? { megaram_addr[22], ~megaram_addr[22] & ~megaram_addr[21], megaram_addr[21], megaram_addr[20:0] } :  //bank C (A21=0) / bank B (A21=1) / 24/09: A22=1 -> fila 11
+                        (gm2_mem_req == 1 ) ? { 3'b001, gm2_addr[20:0] } :  //bank B: V3.5f Game Master 2 (segs 480-496 de la megaram, A21=1)
+                        (menu2_req == 1 ) ? { 9'b011101110, 1'b0, bus_addr[13:0] } : //bank D: 2a pagina del menu (pack 0x70000, V3.5)
+                        (kanji_data_ram_req == 1 ) ? { 6'b011100, kanji_data_ram_addr[17:0] } : //bank D
                 `ifdef ENABLE_WIFI
-                        (wifi_req == 1 ) ? { 9'b111011110, bus_addr[13:0] } : //bank D
+                        (wifi_req == 1 ) ? { 10'b0111011110, bus_addr[13:0] } : //bank D
                 `endif
                         // logo SIEMPRE (v3.0): estaba atrapado en ENABLE_WIFI y sin WiFi
                         // se perdia la pantalla de marca del menu
-                        (logo_req == 1 ) ? { 9'b111011111, bus_addr[13:0] } : //bank D (pack 0x7C000)
-                        23'h7fffff; 
+                        (logo_req == 1 ) ? { 10'b0111011111, bus_addr[13:0] } : //bank D (pack 0x7C000)
+                        24'h7fffff; 
     
     // P1-fix (_64): muxes de habilitacion APLANADOS. Las cascadas ternarias
     // (~10 niveles) devolvian LO MISMO en todas las ramas -> OR plano
@@ -4113,7 +4118,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [14:0] scc2_wav;
     wire megaram_req;
     wire megaram_wrt;
-    wire [21:0] megaram_addr;   // V3.5: 4 MB
+    wire [22:0] megaram_addr;   // V3.5: 4 MB; 24/09/2026: 8 MB (ASCII16-X)
     wire megaram_enabled;
 
     always @ (posedge clk_54m) begin
@@ -4546,7 +4551,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire scc2_req;
     wire [14:0] scc2_wav;
     wire megaram_req;
-    wire [21:0] megaram_addr;   // V3.5: 4 MB
+    wire [22:0] megaram_addr;   // V3.5: 4 MB; 24/09/2026: 8 MB (ASCII16-X)
     wire megaram_enabled;
     wire [15:0] audio_sample;
     wire [15:0] audio_sample_r;
@@ -4630,7 +4635,13 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire config_enable_16_9;
     reg config_reset_ff;
     reg config_flash_write_ff;
-    reg config_update;
+    // 23/09/2026 (informe de la Zynq, PLAN F.10): un config_update POR REGISTRO. Antes habia uno solo y
+    // cualquier OUT al #41 o al #42 confirmaba LOS DOS temporales; como los temporales arrancan a 0 y ni
+    // config_init (flash) ni el D4/0Fh (ocm_update) los tocan, un #42 suelto dejaba config1 = 0 (megaram
+    // fuera al momento, mapper fuera en el siguiente reset y, con el bit 6, grabado en la flash) y un #41
+    // suelto, config2 = 0. El menu (#41 y luego #42) queda igual.
+    reg config1_update;
+    reg config2_update;
     wire config_enable_scanlines;
     wire [1:0] config_mapper_slot;
     wire [1:0] config_megaram_slot;
@@ -4660,9 +4671,14 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     always @ (posedge clk_27m) begin
         config_reset_ff <= 0;
         config_flash_write_ff <= 0;
-        config_update <= 0;
+        config1_update <= 0;
+        config2_update <= 0;
         if (bus_reset_n == 0) begin
-            config6_ff <= 8'h00;        // V3.5f: #46 es VOLATIL (NEO, mitad alta, GM2 armado):
+            config6_ff <= config6_ff & 8'h07;   // V3.5f: #46 es VOLATIL (NEO, mitad alta, GM2 armado):
+                                        // 24/09/2026 (de la Zynq): salvo los bits 0-2 (NEO / Plain 0000h /
+                                        // ASCII16-X): tras un reset la BIOS relanza la ROM cargada y sin
+                                        // ellos iba con el mapper basico (kokoro.rom acababa en el BASIC).
+                                        // Se borran el GM2 (bit6) y los cuartos del cargador (bits 4-5).
         end                             // a cero en cada reset, o el escaneo de slots de la
         if (clk_enable_3m6_27 == 1 ) begin  // BIOS se toparia con el "AB" del GM2 en el slot 1
             if (config0_req == 1 ) begin
@@ -4670,7 +4686,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             end
 
             if (config1_req == 1 ) begin
-                config_update <= 1;
+                config1_update <= 1;
                 config1_temp_ff <= cpu_dout;
             end
             if (config3_req == 1 ) begin
@@ -4680,7 +4696,7 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                 config6_ff <= cpu_dout;
             end
             if (config2_req == 1 ) begin
-                config_update <= 1;
+                config2_update <= 1;
                 config2_temp_ff <= cpu_dout[5:0];
                 if ( cpu_dout[6] == 1) begin
                     config_flash_write_ff <= 1;
@@ -4762,10 +4778,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
             snd_gain_ff <= cpu_dout[2:0];       // _161: ganancia de audio 0..7
         end
 `endif
-        if (config_update == 1) begin
-            config1_ff <= config1_temp_ff;
-            config2_ff <= config2_temp_ff;
-        end
+        if (config1_update == 1) config1_ff <= config1_temp_ff;     // cada puerto confirma SOLO el suyo
+        if (config2_update == 1) config2_ff <= config2_temp_ff;
         if (ocm_update == 1) begin
             config1_ff[7:6] <= 2'b10;
             config1_ff[1] <= 1;
@@ -5354,7 +5368,7 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     wire       sdio_ack;
     wire [7:0] sdio_count;
     wire [5:0] sdio_idx;          // V3.6c: 6 bits
-    wire [22:0] sdio_dma_addr;    // V3.6: destino de la DMA (OUT #4F,80h + 3 bytes)
+    wire [23:0] sdio_dma_addr;    // V3.6: destino de la DMA (OUT #4F,80h + 3 bytes); 24/09/2026: 81h = bit 23
     wire        sdio_dma_log;     // V3.6c: modo logico (bit7 del byte alto)
     wire [15:0] dma_cnt_scc, dma_cnt_kon, dma_cnt_a8, dma_cnt_a16;   // V3.6c: patrones de mapper
     wire        dma_buf_rd, dma_ack;

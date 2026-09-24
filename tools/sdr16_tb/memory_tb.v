@@ -44,7 +44,7 @@ module memory_tb;
     reg  [7:0]  ram_din  = 0;
     reg         ram_req  = 0;
     reg         ram_write = 0;
-    reg  [22:0] ram_addr = 0;
+    reg  [23:0] ram_addr = 0;       // 24/09/2026: 24 bits (bit 23 = fila 11)
     reg  [7:0]  vram_din = 0;
     reg         vram_write = 0;
     reg  [16:0] vram_addr = 0;
@@ -167,7 +167,7 @@ module memory_tb;
     endtask
 
     // -------- acceso CPU (protocolo de top.v: req -> busy sube -> busy baja) --------
-    task cpu_op(input wr, input [22:0] a, input [7:0] wd, output [7:0] rd);
+    task cpu_op(input wr, input [23:0] a, input [7:0] wd, output [7:0] rd);
     begin
         @(negedge clk54);
         ram_addr  = a;
@@ -183,12 +183,12 @@ module memory_tb;
     end
     endtask
 
-    task cpu_write(input [22:0] a, input [7:0] d);
+    task cpu_write(input [23:0] a, input [7:0] d);
         reg [7:0] dummy;
         begin cpu_op(1'b1, a, d, dummy); end
     endtask
 
-    task cpu_read_check(input [22:0] a, input [7:0] exp, input [255:0] msg);
+    task cpu_read_check(input [23:0] a, input [7:0] exp, input [255:0] msg);
         reg [7:0] r;
         begin cpu_op(1'b0, a, 8'h00, r); check8(r, exp, msg); end
     endtask
@@ -840,6 +840,48 @@ module memory_tb;
                 $display("FAIL TZ-b: el autonomo disparo %0d veces con el Z80 VIVO (debe ser 0)", refZ1 - refZ0);
             end
             $display("TZ tormenta Z80: 2000 escrituras | refrescos autonomos durante la tormenta: +%0d", refZ1 - refZ0);
+        end
+
+        // ---- T11 (24/09/2026): bit 23 de la direccion de CPU -> FILA 11 del W9825 ----
+        // La megaram de 8 MB pone sus 4 MB altos en {1, 0, A21, ...}: mismos bancos A/B y columnas que
+        // los 8 MB de siempre, pero en las filas 2048-4095 (libres: CPU 0-2047, wave 4096+). Se escriben
+        // pares (a, a | 800000h) con datos distintos en los 4 bancos y en filas bajas y altas, mas trafico
+        // de wave en medio, y se releen: nada se pisa. Ademas se mira en el MODELO que la copia alta vive
+        // en la fila con el bit 11 a 1 (y la baja, con el bit 11 a 0).
+        begin : t11
+            integer ti, tbad;
+            reg [23:0] ta;
+            reg [7:0]  tr;
+            reg [15:0] tw;
+            tbad = 0;
+            for (ti = 0; ti < 64; ti = ti + 1) begin
+                ta = { 1'b0, ti[1:0], ti[5:2], 5'h00, ti[3:0], 8'h00 } ^ { 4'h0, ti[7:0], 12'h000 };
+                ta[23] = 1'b0;
+                cpu_write(ta,               8'h11 ^ ti[7:0]);
+                cpu_write(ta | 24'h800000,  8'hEE ^ ti[7:0]);
+                if (ti % 8 == 0) wv_write(22'h180000 + ti[21:0], 8'h5A ^ ti[7:0]);
+            end
+            for (ti = 0; ti < 64; ti = ti + 1) begin
+                ta = { 1'b0, ti[1:0], ti[5:2], 5'h00, ti[3:0], 8'h00 } ^ { 4'h0, ti[7:0], 12'h000 };
+                ta[23] = 1'b0;
+                cpu_op(1'b0, ta, 8'h00, tr);
+                check8(tr, 8'h11 ^ ti[7:0], "T11 copia baja (bit 23 = 0) pisada");
+                cpu_op(1'b0, ta | 24'h800000, 8'h00, tr);
+                check8(tr, 8'hEE ^ ti[7:0], "T11 copia alta (bit 23 = 1) pisada");
+                if (ti % 8 == 0) begin
+                    wv_op(1'b0, 22'h180000 + ti[21:0], 8'h00, tw);
+                    check8(ti[0] ? tw[15:8] : tw[7:0], 8'h5A ^ ti[7:0], "T11 wave pisada por la CPU alta");
+                end
+                // en el modelo: la copia alta en la fila {0,1,A12..A2}, la baja en {0,0,A12..A2}
+                if (sdram.mem[{ ta[22:21], 2'b01, ta[12:2], ta[20:13], ta[1] }][ta[0] ? 15 : 7 -: 8] !== (8'hEE ^ ti[7:0]) ||
+                    sdram.mem[{ ta[22:21], 2'b00, ta[12:2], ta[20:13], ta[1] }][ta[0] ? 15 : 7 -: 8] !== (8'h11 ^ ti[7:0]))
+                    tbad = tbad + 1;
+            end
+            if (tbad != 0) begin
+                errors = errors + 1;
+                $display("FAIL T11: %0d pares NO estan en las filas esperadas (bit 11 de fila)", tbad);
+            end
+            $display("T11 bit 23 -> fila 11: 64 pares en los 4 bancos + 8 de wave, sin pisarse (%0d fuera de fila)", tbad);
         end
 
         if (errors == 0)

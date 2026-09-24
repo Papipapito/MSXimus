@@ -63,7 +63,7 @@ module sdc_ioport (
     output reg        buf_ack,
     output reg  [7:0] count,
     output reg  [5:0] info_idx,     // V3.6c: 6 bits (32-39 = contadores de patrones)
-    output reg [22:0] dma_addr,     // V3.6: destino de la DMA de lectura (fisico o logico)
+    output reg [23:0] dma_addr,     // V3.6: destino de la DMA de lectura (fisico o logico); 23/09/2026: 24 bits
     output reg        dma_log       // V3.6c: 1 = dma_addr[15:0] es una direccion Z80 (modo logico)
 );
 
@@ -130,7 +130,7 @@ module sdc_ioport (
             data_val  <= 8'd0;
             w4f_d     <= 1'b0;
             dma_idx   <= 2'd3;
-            dma_addr  <= 23'd0;
+            dma_addr  <= 24'd0;
             dma_log   <= 1'b0;
         end else begin
             // --- orden (#47): pulso de un ciclo al empezar el OUT, con su dato ---
@@ -161,8 +161,10 @@ module sdc_ioport (
             w4f_d <= w4f;
             if (w4f && !w4f_d) begin
                 // V3.6c: 80h solo ARMA estando desarmado; armado, 80h es un byte mas
-                // (el alto con bit7 = modo logico y segmento 0)
-                if (dma_idx == 2'd3) begin if (din_r == 8'h80) dma_idx <= 2'd0; end
+                // (el alto con bit7 = modo logico y segmento 0).
+                // 23/09/2026: 81h tambien arma y pone el bit 23 del destino fisico (los 4 MB
+                // altos de la megaram de 8 MB); 80h lo deja a 0, como siempre.
+                if (dma_idx == 2'd3) begin if (din_r[7:1] == 7'b1000000) begin dma_idx <= 2'd0; dma_addr[23] <= din_r[0]; end end
                 else if (dma_idx == 2'd0) begin dma_addr[7:0]   <= din_r;      dma_idx <= 2'd1; end
                 else if (dma_idx == 2'd1) begin dma_addr[15:8]  <= din_r;      dma_idx <= 2'd2; end
                 else if (dma_idx == 2'd2) begin dma_addr[22:16] <= din_r[6:0]; dma_log <= din_r[7]; dma_idx <= 2'd3; end

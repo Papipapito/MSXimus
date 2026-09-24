@@ -26,6 +26,7 @@
 //
 //   V3.6c: DOS MODOS DE DESTINO y CONTADORES DE PATRONES.
 //     * Fisico (byte 2 bit7 = 0): 23 bits de RAM, lineal. Lo usa el menu (megaram).
+//       23/09/2026: 24 bits; el bit 23 lo pone el byte que arma (81h en vez de 80h).
 //     * LOGICO (byte 2 bit7 = 1): bits 15:0 = direccion Z80; el core la traduce
 //       con los registros del mapper (FC-FF, que son de solo escritura para el Z80)
 //       -> fisica = {00, mapper_reg[pagina][6:0], offset[13:0]} en el banco A. Al
@@ -49,7 +50,7 @@ module sd_dma (
     input  wire        clk,            // clk_54m
     input  wire        rstn,           // bus_reset_n
     input  wire        start,          // pulso (dominio 27 MHz, 2 ciclos aqui): orden con DMA
-    input  wire [22:0] dest,           // destino (sdc_ioport, estable): fisico 23 bits o logico [15:0]
+    input  wire [23:0] dest,           // destino (sdc_ioport, estable): fisico 24 bits (23/09/2026) o logico [15:0]
     input  wire        logical,        // V3.6c: 1 = dest es una direccion Z80 (traducir con el mapper)
     input  wire [7:0]  mreg0,          // V3.6c: registros del mapper (FC-FF), paginas 0..3
     input  wire [7:0]  mreg1,
@@ -69,7 +70,7 @@ module sd_dma (
     output reg         buf_rd,         // rden_b
     output reg         ack,            // buf_ack hacia sd_reader (>= 4 ciclos)
     output reg         ram_req,        // = ram_write del camino stream
-    output wire [22:0] ram_addr,       // direccion FISICA de la escritura en curso
+    output wire [23:0] ram_addr,       // direccion FISICA de la escritura en curso (24 bits desde el 23/09/2026)
     output reg  [7:0]  ram_din,
     output reg  [7:0]  blocks,         // bloques copiados en la ultima orden (depuracion)
     output wire        rfsh_ok,        // CPU congelada Y sin escritura en vuelo: el refresco
@@ -98,7 +99,7 @@ module sd_dma (
     reg        have_blk = 1'b0;   // se recibio un bloque (rbusy alto tras la orden)
     reg        rbusy_d = 1'b0;
     reg        last_done = 1'b0;  // el bloque final (RDONE) ya se copio
-    reg [22:0] paddr = 23'd0;     // destino fisico en curso
+    reg [23:0] paddr = 24'd0;     // destino fisico en curso
     reg [15:0] laddr = 16'd0;     // destino logico en curso (modo logico)
     reg        is_log = 1'b0;     // la orden en curso es logica
     reg        counting = 1'b0;   // la orden en curso cuenta patrones
@@ -117,7 +118,7 @@ module sd_dma (
     wire [7:0] msel = (laddr[15:14] == 2'b00) ? mreg0 :
                       (laddr[15:14] == 2'b01) ? mreg1 :
                       (laddr[15:14] == 2'b10) ? mreg2 : mreg3;
-    assign ram_addr = is_log ? { 2'b00, msel[6:0], laddr[13:0] } : paddr;
+    assign ram_addr = is_log ? { 3'b000, msel[6:0], laddr[13:0] } : paddr;
 
     // ---- clasificacion del patron "32 lo hi" (misma tabla que classify_addr) ----
     wire        pat   = (w2 == 8'h32);
@@ -138,7 +139,7 @@ module sd_dma (
             buf_rd   <= 1'b0;
             ack      <= 1'b0;
             ram_req  <= 1'b0;
-            paddr    <= 23'd0;
+            paddr    <= 24'd0;
             laddr    <= 16'd0;
             is_log   <= 1'b0;
             counting <= 1'b0;
@@ -268,7 +269,7 @@ module sd_dma (
 
                 S_WR2: begin
                     if (!ram_busy) begin
-                        paddr <= paddr + 23'd1;
+                        paddr <= paddr + 24'd1;
                         laddr <= laddr + 16'd1;
                         if (buf_addr == 9'd511) begin
                             buf_rd <= 1'b0;

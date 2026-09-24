@@ -49,7 +49,7 @@ module memory_ctrl #(
 	input wire [7:0] ram_din,
     input wire ram_req,
     input wire ram_write,
-	input wire [22:0] ram_addr,
+	input wire [23:0] ram_addr,     // 24/09/2026: bit 23 = fila 11 (4 MB altos de la megaram de 8 MB)
 	input wire [7:0] vram_din,
 	input wire vram_write,
 	input wire [16:0] vram_addr,
@@ -137,7 +137,7 @@ module memory_ctrl #(
     wire [15:0] dq_in = IO_sdram_dq;
 
 
-    reg [22:0] sdram_addr;
+    reg [23:0] sdram_addr;
     wire sdram_read;
     reg sdram_write;
     wire sdram_dout;
@@ -176,7 +176,7 @@ module memory_ctrl #(
                 end
                 3'd1 : begin
                     enable_sdram <= 1;
-                    sdram_addr <= ram_addr[22:0] ;
+                    sdram_addr <= ram_addr[23:0] ;
                     sdram_write <= ram_write;
                     sdram_seq <= 3'd2;
                 end
@@ -576,7 +576,10 @@ module memory_ctrl #(
                             SdrBa  <= pre_ba;
                         end
                         else begin
-                            SdrAdr <= { 2'b00, sdram_addr[12:2] };   //-- cpu read/write (fila = mismos bits que el original)
+                            //-- 24/09/2026: el bit 23 de la direccion va a la FILA 11 (filas 2048-4095,
+                            //-- libres: la CPU usaba 0-2047 y la familia wave 4096+): 8 MB mas para la CPU,
+                            //-- que se lleva la megaram de 8 MB (ASCII16-X). Con el bit 23 a 0, lo de siempre.
+                            SdrAdr <= { 1'b0, sdram_addr[23], sdram_addr[12:2] };   //-- cpu read/write
                             SdrBa  <= sdram_addr[22:21];                         //-- bank A+B+C+D
                         end
                     end

@@ -14,13 +14,20 @@ module megaram_scc(
                                     // modo "valor==0x10"; 0 = SRAM apagada (defecto)
     input wire [7:0] map_ext,       // puerto #46 (volatil, V3.5). bit0 = NEO: con
                                     // map_sel=ASCII8 -> NEO-8, con ASCII16 -> NEO-16.
+                                    // bit1 = LIN0 (21/09/2026): ROM plana LINEAL EN 0000h
+                                    // (megaram_addr = bus_addr, pag.0 incluida): los demos
+                                    // V9990 de Edd Biddulph llevan "AB" en +4000h y su ISR
+                                    // en 0038h; el programa se pone en la pag.0 con OUT (A8h).
+                                    // bit2 = ASCII16-X (23/09/2026, con map_sel=ASCII16): ver abajo.
                                     // bit4 = mitad ALTA (A21=1) de la megaram para los
                                     // modos de registro de 8 bits: lo usa el CARGADOR del
                                     // menu (modo SCC) para llenar los 4 MB; en juego va a 0.
+                                    // bit5 = A22 (23/09/2026): con el bit4, el cuarto de 2 MB
+                                    // de los 8 MB en el que escribe el cargador; en juego a 0.
 
     output wire megaram_req,
     output wire megaram_wrt,
-    output wire [21:0] megaram_addr,    // V3.5: 4 MB (era [20:0] = 2 MB)
+    output wire [22:0] megaram_addr,    // 23/09/2026: 8 MB (V3.5: [21:0] = 4 MB; antes [20:0] = 2 MB)
 
     output wire scc_sound_disable,
     output wire scc_mode_plus,      // SCC-I mode reg (BFFE) bit5: 1 = SCC+ layout
@@ -45,6 +52,16 @@ module megaram_scc(
     // C (0x400000, donde siempre estuvo) y la alta va a 0x200000-0x3FFFFF, que el
     // mapper dejo libre al recortarse a 2 MB. Todo lo que hoy funciona con <=2 MB
     // cae en las MISMAS direcciones fisicas que antes.
+    //
+    // 23/09/2026 (MSXimus Z) — ASCII16-X y 8 MB. https://www.grauw.nl/projects/ascii-x/ascii16-x/
+    // Dos paginas de 16K: la 1 en 4000-7FFF (espejo C000-FFFF) y la 2 en 8000-BFFF (espejo
+    // 0000-3FFF), es decir, A14 elige la pagina. Registros en TODA direccion XX1P xxxx xxxx xxxx
+    // (A13=1, A12 = pagina: 2000/6000/A000/E000 -> 1, 3000/7000/B000/F000 -> 2): el banco es de 12
+    // bits, los 8 bajos del DATO y los 4 altos de A11-A8. Aqui se guardan 9 (512 bancos = 8 MB, el
+    // cartucho XL); los bits 11-9 se ignoran (dan la vuelta, como en el XL). A 0 en el reset. Es
+    // ROM: la FlashROM del XL (borrado y programacion) no se emula, las escrituras fuera de los
+    // registros no hacen nada. megaram_addr pasa a 23 bits; el bit 22 lo pone el ASCII16-X o, en
+    // los modos de 8 bits, el bit5 del #46 (el cargador, como el bit4 con A21).
     // ------------------------------------------------------------------------
 
     assign scc_sound_disable = megaram_mode_b[4];
@@ -68,8 +85,14 @@ module megaram_scc(
     reg ff_neo8;
     reg ff_neo16;
     reg ff_hi;
+    reg ff_lin0;    //21/09: lineal en 0000h (bit1 del #46)
+    reg ff_x;       //23/09: ASCII16-X (bit2 del #46 con map_sel = ASCII16)
+    reg ff_a22;     //23/09: A22 del cargador (bit5 del #46)
     always @( posedge clk_27m ) begin
         ff_scc_mode <= ( map_sel == 2'b10 ) ? 1'b1 : 1'b0;
+        ff_lin0     <= map_ext[1];
+        ff_x        <= ( map_ext[2] == 1 && map_sel == 2'b11 ) ? 1'b1 : 1'b0;
+        ff_a22      <= map_ext[5];
         ff_neo8     <= ( map_ext[0] == 1 && map_sel == 2'b01 ) ? 1'b1 : 1'b0;
         ff_neo16    <= ( map_ext[0] == 1 && map_sel == 2'b11 ) ? 1'b1 : 1'b0;
         ff_hi       <= map_ext[4];
@@ -85,7 +108,9 @@ module megaram_scc(
     //SCC address decoder
     wire megaram_sel_wave;
     reg megaram_sel_memory;
-    assign megaram_sel_wave = ( bus_addr[8] == 0 && megaram_mode_b[4] == 0 && (megaram_scc_a == 1 || megaram_scc_b == 1) ) ? 1 : 0;
+    //21/09: bajo LIN0 la imagen es ROM pura en 0000h-BFFFh: sin ventana de wave (una imagen que
+    //sondee el SCC con reg2=3Fh veria la wave RAM en 9800h-98FFh de su propia ROM). ff_lin0 es FF.
+    assign megaram_sel_wave = ( ff_lin0 == 0 && bus_addr[8] == 0 && megaram_mode_b[4] == 0 && (megaram_scc_a == 1 || megaram_scc_b == 1) ) ? 1 : 0;
     //escritura SRAM: en A8 donde este mapeada salvo 6000-7FFF (ahi mandan los
     //regs de banco); en A16 solo en 8000-BFFF (fiel a Hydlide2/A-Train)
     wire sram_wr_ok;
@@ -118,7 +143,7 @@ module megaram_scc(
     //registrado por la misma razon que ff_scc_mode: fuera del cono de megaram_req
     reg ff_sram_mode;
     always @( posedge clk_27m ) begin
-        ff_sram_mode <= ( map_sel[0] == 1 && map_ext[0] == 0 && sram_cfg != 8'h00 ) ? 1'b1 : 1'b0;
+        ff_sram_mode <= ( map_sel[0] == 1 && map_ext[0] == 0 && map_ext[2] == 0 && sram_cfg != 8'h00 ) ? 1'b1 : 1'b0;
     end
     assign sram_mode = ff_sram_mode;
     assign sram_hit = ( sram_mode == 1 && (
@@ -157,11 +182,16 @@ module megaram_scc(
                        (bus_addr[15:14] == 2'd1) ? neo_reg1 :
                                                    neo_reg2;
 
-    assign megaram_addr =  (map_linear == 1) ? { 6'b000000, bus_addr } :
-                          (sram_hit == 1)    ? { 1'b0, sram_addr } :
-                          (ff_neo8 == 1)     ? { neo8_sel[8:0], bus_addr[12:0] } :
-                          (ff_neo16 == 1)    ? { neo16_sel[7:0], bus_addr[13:0] } :
-                                               { std_addr[21] | ff_hi, std_addr[20:0] };
+    //ASCII16-X: A14=1 -> pagina 1 (4000-7FFF y C000-FFFF), A14=0 -> pagina 2 (8000-BFFF y 0000-3FFF)
+    wire [8:0] x_sel;
+    assign x_sel = (bus_addr[14] == 1) ? x_reg1 : x_reg2;
+
+    assign megaram_addr =  (map_linear == 1 || ff_lin0 == 1) ? { 7'b0000000, bus_addr } :
+                          (sram_hit == 1)    ? { 2'b00, sram_addr } :
+                          (ff_x == 1)        ? { x_sel, bus_addr[13:0] } :
+                          (ff_neo8 == 1)     ? { 1'b0, neo8_sel[8:0], bus_addr[12:0] } :
+                          (ff_neo16 == 1)    ? { 1'b0, neo16_sel[7:0], bus_addr[13:0] } :
+                                               { ff_a22, std_addr[21] | ff_hi, std_addr[20:0] };
 
     reg [8:0] megaram_reg0;
     reg [8:0] megaram_reg1;
@@ -182,6 +212,9 @@ module megaram_scc(
     reg [11:0] neo_reg3;
     reg [11:0] neo_reg4;
     reg [11:0] neo_reg5;
+    //ASCII16-X: banco de cada pagina, 9 de los 12 bits (8 MB)
+    reg [8:0] x_reg1;
+    reg [8:0] x_reg2;
 
     always @( posedge clk_27m ) begin
         if (bus_reset_n == 0) begin
@@ -202,9 +235,19 @@ module megaram_scc(
             neo_reg3        <= 12'h000;
             neo_reg4        <= 12'h000;
             neo_reg5        <= 12'h000;
+            x_reg1          <= 9'h000;
+            x_reg2          <= 9'h000;
         end
         else if (scc_wrt == 1) begin
-            if (map_ext[0] == 1 && map_sel[0] == 1) begin
+            if (ff_x == 1) begin
+                //ASCII16-X (23/09): registro en toda direccion con A13=1, A12 = pagina,
+                //banco = {A8, dato} (A11-A9 se ignoran: 8 MB). Sin registros de modo ni SRAM.
+                if (bus_addr[13] == 1) begin
+                    if (bus_addr[12] == 0) x_reg1 <= { bus_addr[8], cpu_dout };
+                    else                   x_reg2 <= { bus_addr[8], cpu_dout };
+                end
+            end
+            else if (map_ext[0] == 1 && map_sel[0] == 1) begin
                 //NEO-8 / NEO-16 (V3.5). Registros SOLO en 5000h-7FFFh (donde los
                 //situa la especificacion; openMSX no comprueba la pagina, pero
                 //ningun software escribe los bancos fuera de ahi). Direccion par
