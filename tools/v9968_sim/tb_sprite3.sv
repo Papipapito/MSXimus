@@ -133,14 +133,18 @@ always @(posedge clk) begin
 end
 
 // ---- bus + helpers ----
+// (25/09: asignaciones BLOQUEANTES tras el flanco +1ns — con '<=' dentro de
+// una task llamada desde initial, Verilator --timing no publicaba el ciclo de
+// bus: ese era el "cero trafico / frame en negro" del run_sprite3.sh. Icarus
+// se comporta igual con las dos formas.)
 task bus_wr(input [2:0] a, input [7:0] d);
 begin
-    @(posedge clk);
-    bus_address <= a; bus_wdata <= d;
-    bus_ioreq <= 1; bus_write <= 1; bus_valid <= 1;
+    @(posedge clk); #1;
+    bus_address = a; bus_wdata = d;
+    bus_ioreq = 1; bus_write = 1; bus_valid = 1;
     @(posedge clk);
     while (!bus_ready) @(posedge clk);
-    bus_ioreq <= 0; bus_write <= 0; bus_valid <= 0;
+    #1; bus_ioreq = 0; bus_write = 0; bus_valid = 0;
     repeat (18) @(posedge clk);
 end
 endtask

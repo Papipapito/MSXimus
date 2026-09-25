@@ -106,6 +106,9 @@ localparam C_SPRITE  = 3'd2;
 // _165b: faltaban las otras dos etiquetas del arbitro (vdp_vram_interface.v:115-118).
 localparam C_CPU     = 3'd3;
 localparam C_COMMAND = 3'd4;
+localparam C_REFILL  = 3'd7;   // _187: clase MUDA de las relecturas write-allocate (el
+                               // router del interface no la entrega a nadie; no es
+                               // C_BG ni C_SPRITE ni C_COMMAND)
 
 // ============================================================================
 // VENTANA DE PREFETCH de pantalla (v4: EN BSRAM — leccion _119: los conos
@@ -227,6 +230,13 @@ reg        wrk_p1;
 reg [15:0] wrk_addr1;
 reg [31:0] wrk_data1;
 reg [3:0]  wrk_mask1;                    // DQM (0 = escribir byte)
+reg [2:0]  wrk_cls1;                     // _187: clase del escritor (CPU/COMANDO)
+reg [15:0] last_bgmiss;                  // _188: ultima palabra de bg fallida
+reg [7:0]  miss_age;                     // _188: ciclos desde ese miss (satura a 255)
+reg        vb_rep2;                      // _188: el miss en la etapa VB era repetido
+wire       bg_rep = (spr_addr1 == last_bgmiss) && (miss_age != 8'hFF);   // _188
+reg        rf_p;                         // _187: refill decidido (registrado, T+2)
+reg [15:0] rf_addr;
 // _176: refill de escrituras no-residentes (write-allocate diferido)
 
 // OBL en dos fases (v4): obl_pend lanza la lectura BSRAM de la ventana
@@ -1055,6 +1065,8 @@ always @(posedge clk_vdp or negedge rst_n) begin
         vb_p2 <= 1'b0; vb_hit2 <= 1'b0; c_vbhit <= 0;
         spr_p1 <= 0; spr_addr1 <= 0; spr_tag1 <= 0;
         wrk_p1 <= 0; wrk_addr1 <= 0; wrk_data1 <= 0; wrk_mask1 <= 4'hF;
+        wrk_cls1 <= 0; rf_p <= 0; rf_addr <= 0;        // _187
+        last_bgmiss <= 16'hFFFF; miss_age <= 8'hFF; vb_rep2 <= 0;   // _188
         obl_pend <= 0; obl_chk <= 0; obl_do <= 0; obl_w <= 0;
         bg_prev0 <= 0; bg_prev1 <= 0; stride <= 0; obl_walked <= 0;
         // _163 v2: reset de las ranuras de frontera. ⚠️ Esto NO puede ir bajo
@@ -1090,6 +1102,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
         spr_p1 <= 1'b0;
         wrk_p1 <= 1'b0;
         vb_p2  <= 1'b0;                  // _150: etapa 2 del lookup
+        if (miss_age != 8'hFF) miss_age <= miss_age + 8'd1;   // _188
         pww_en <= 1'b0;
         pwq_v  <= pw_v[pw_ridx];
         pwqB_v <= pw_v[w_idx(obl_w)];    // _126: valid del espejo OBL
@@ -1440,6 +1453,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 vb_p2    <= 1'b1;
                 vb_addr2 <= spr_addr1;
                 vb_tag2  <= spr_tag1;
+                vb_rep2  <= bg_rep && (spr_tag1[4:2] == C_BG);   // _188
                 if (spr_tag1[4:2] == C_BG) begin
                     // bg: cuenta el miss y arranca el stream OBL (bitmap).
                     // _122: siembra COMPLETA de la cadena +2 — el +1 va
@@ -1450,6 +1464,30 @@ always @(posedge clk_vdp or negedge rst_n) begin
 `endif
                     bg_miss <= bg_miss + 8'd1;
                     c_miss  <= c_miss + 32'd1;
+                    last_bgmiss <= spr_addr1;
+                    miss_age    <= 8'd0;
+                    // _188 MISS REPETIDO de la MISMA palabra (tb_t2drop, 25/09):
+                    // en los modos de PATRONES (texto, SC1-4) la palabra del
+                    // glifo se relee en CADA celda; si falla, cada relectura
+                    // vuelve a fallar y cada fallo resembraba +1 y OBL en pfq
+                    // (prioridad maxima, y el +1 SIN mirar si ya estaba en la
+                    // ventana) => pfq nunca se vaciaba y la lectura de demanda
+                    // (+0, por rq) NO SE LANZABA EN TODA LA LINEA (rq a 13, ni
+                    // un solo lanzamiento kind=1): la linea entera salia con
+                    // el slot ajeno. En bitmap el stream avanza y la misma
+                    // palabra no vuelve a fallar seguida, asi que la ventana
+                    // <3us (miss_age) deja ese camino INTACTO (la linea 0 tras
+                    // el vblank, _127, no entra: su repeticion es de un cuadro).
+                    // CURA: el miss repetido siembra la PROPIA palabra (+0) por
+                    // pfq — llega en ~0.5us y las celdas siguientes aciertan en
+                    // la ventana — y NO re-arma +1/OBL (ya se sembraron en el
+                    // primer miss). La etapa VB tampoco lo encola en rq (el
+                    // primer miss ya lo hizo: ese es el fill de la sc-cache).
+                    if (bg_rep) begin
+                        pfB_pend <= 1'b1;
+                        pfB_wr   <= spr_addr1;         // +0: la palabra que falta
+                    end
+                    else begin
                     pfB_pend <= 1'b1;            // semilla +1 (registrada; si
                     pfB_wr   <= spr_addr1 + 16'd1; // habia OBL retenido cede:
                                                  // el miss resiembra la cadena)
@@ -1460,6 +1498,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // linea 0 tras cada vblank (cadena rota) no se
                     // recuperaba: quiet 232 -> 4852.
                     obl_w     <= spr_addr1 + obl_la;   // _147: lookahead profundo
+                    end
                     // _124: DEGRADACION ELEGANTE — el aparcamiento cura el
                     // fill posterior pero NO el guion del PRIMER miss (el
                     // consumidor muestrea a 8 ciclos fijos, pillara lo que
@@ -1496,7 +1535,12 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 // solo que un ciclo mas tarde y con los registros de la etapa
                 // 2). bg/sprite encolan con reserva (drop tolerable, se
                 // autocuran); CPU/COMANDO encolan SIEMPRE.
-                if (vb_tag2[4:2] == C_BG || vb_tag2[4:2] == C_SPRITE) begin
+                if (vb_rep2) begin
+                    // _188: miss repetido de bg — la palabra ya viaja por pfq
+                    // (+0) y el primer miss ya encolo su lectura en rq: no se
+                    // duplica (evita 13 relecturas iguales por glifo nuevo).
+                end
+                else if (vb_tag2[4:2] == C_BG || vb_tag2[4:2] == C_SPRITE) begin
                     if (rq_room_soft) begin
                         rq[rq_wp] <= {vb_tag2, vb_addr2};
                         rq_wp <= rq_wp + 4'd1;
@@ -1565,6 +1609,50 @@ always @(posedge clk_vdp or negedge rst_n) begin
             c_park <= c_park + 16'd1;
         end
 
+        // ---------- _187 WRITE-ALLOCATE DIFERIDO de las escrituras de CPU ----
+        // CAUSA RAIZ de las rayas de arranque (menu / carga de ROM; 25/09,
+        // tb_t2drop): el write-check solo ACTUALIZA palabras ya residentes. Una
+        // palabra escrita por la CPU sin tag-match (la fuente que carga SCREEN 0,
+        // los patrones/nombres que vuelca una ROM) queda NO RESIDENTE hasta que
+        // el display la pide por primera vez => miss FRIO en la linea 0/4 de
+        // cada glifo nuevo; la degradacion elegante sirve un slot ajeno durante
+        // el contrato de 8 ciclos y, como el miss se repite celda a celda, la
+        // LINEA ENTERA sale mal en su primer cuadro (26 pares seguidos con el
+        // patron de 'B' = 41414141 en el banco). En pantalla estatica todo es
+        // residente: por eso solo se ve al cargar un modo.
+        // CURA: tras un write-check de CPU sin tag-match en la sc-cache se
+        // encola una RELECTURA con clase MUDA (C_REFILL). rq va por DEBAJO de
+        // wq => devuelve el dato POST-escritura (coherente por construccion;
+        // pf_dirty sigue guardando el fill si llega otra escritura en vuelo).
+        // DIFERENCIAS con el _176 expulsado (y por que esta vez es seguro):
+        //   * SOLO clase CPU (wrk_cls1): el motor de comandos NUNCA dispara
+        //     refills — era su LRMM/LMMM por pixel lo que inundaba la sc-cache
+        //     y desalojaba SAT/SPT (la tormenta de spMISS de la _176).
+        //   * SOLO la region IDENTIDAD de c_idx13 (palabras < 0x2000 = bytes
+        //     < 0x8000, donde viven las tablas de SC0-4): ahi indice == palabra,
+        //     asi que un refill JAMAS desaloja otra palabra (solo se instala a
+        //     si mismo). Fuera de ella (paginas bitmap altas) no se toca nada.
+        //   * clase 3'd7: NO es C_COMMAND => entra por SC_FILL_POLICY=1 (aqui
+        //     SI queremos el fill); NO es C_BG => la ventana no se toca;
+        //     fill_sp=0 => el VB tampoco; el router del interface la ignora.
+        //   * DESCARTABLE: solo con rq_used<=4 (bajo el umbral de vram_stall,
+        //     6) y cediendo ante el drenaje de bgp y la etapa VB (los dos van
+        //     antes en el texto y tienen prioridad; un refill perdido = quedarse
+        //     como hoy: el miss se autocura tarde).
+        //   * ritmo acotado por el Z80 (1 byte por OUT, >=1us): una lectura de
+        //     backend (~0.4us) por escritura, imposible saturar.
+        // La decision va REGISTRADA (rf_p) para no colgar logica nueva del cono
+        // DO(sc_tag)->wrk_hit (leccion _121b): el compare solo llega al D de un FF.
+        rf_p <= 1'b0;
+        if (wrk_p1 && !wrk_hit && wrk_cls1 == C_CPU && wrk_addr1[15:13] == 3'b000) begin
+            rf_p    <= 1'b1;
+            rf_addr <= wrk_addr1;
+        end
+        if (rf_p && bgp_empty && !vb_p2 && (rq_used <= 4'd4)) begin
+            rq[rq_wp] <= {C_REFILL, 2'b00, rf_addr};
+            rq_wp <= rq_wp + 4'd1;
+        end
+
         // ---------- push UNIFICADO de pfq (_123b): hasta 2 por ciclo, TODO
         // desde registros (obl_do/obl_w_d y pfB_pend/pfB_wr) — sin la familia
         // pw_mem DO -> pfq. Antes obl_do y la semilla del miss podian escribir
@@ -1617,6 +1705,7 @@ always @(posedge clk_vdp or negedge rst_n) begin
                 wrk_addr1 <= vram_address;
                 wrk_data1 <= vram_wdata;
                 wrk_mask1 <= vram_wdata_mask;
+                wrk_cls1  <= vram_tag[4:2];       // _187: quien escribe
             end
             else begin
                 // sprite / CPU / comando: lookup en la CACHE (v3c: la CPU
@@ -1675,12 +1764,25 @@ always @(posedge clk_vdp or negedge rst_n) begin
                     // display, como en el mundo pre-_179.)
                 end
                 else begin
+                    // _189: la respuesta TARDIA solo para quien la ESPERA (CPU
+                    // y comando). bg y sprite muestrean a FASE FIJA (8 ciclos /
+                    // sub_phase 14) y el backend (>=26 ciclos) llega SIEMPRE
+                    // tarde: entregarla igualmente PISABA el registro de datos
+                    // del interface (ff_screen_mode_vram_rdata) en mitad del
+                    // fetch SIGUIENTE => una celda con el dato del miss
+                    // anterior (tb_t2drop NOWR: 'patron=41' = la palabra de
+                    // NOMBRES de la lectura de demanda de 0x006; 1 celda mala
+                    // por cuadro, ~17% de los misses). Los fills de ventana y
+                    // sc-cache de abajo siguen igual: eso es lo util del miss.
+                    // C_REFILL (_187) tampoco tiene consumidor.
+                    if (cur_tag[4:2] == C_CPU || cur_tag[4:2] == C_COMMAND) begin
                     late_v    <= 1'b1;
                     late_tag  <= cur_tag;
                     // la RESPUESTA al consumidor va SIN fusionar: la lectura
                     // se lanzo con wq vacia (rq va por debajo de wq), asi que
                     // una escritura llegada despues es POSTERIOR a este read.
                     late_data <= {w_hi, w_lo};
+                    end
                     // y de paso a la ventana si es bg
                     // (_140: cede pww al write-through-update, !wu_hit)
                     // (era V3: el `|| cur_tag == 5'b00001` era la puerta del

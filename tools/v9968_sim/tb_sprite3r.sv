@@ -85,14 +85,15 @@ always @(posedge clk) begin
 end
 
 // ---- bus + helpers (identicos a tb_sprite3) ----
+// (25/09: bloqueantes tras el flanco +1ns, ver nota en tb_sprite3.sv — Verilator)
 task bus_wr(input [2:0] a, input [7:0] d);
 begin
-    @(posedge clk);
-    bus_address <= a; bus_wdata <= d;
-    bus_ioreq <= 1; bus_write <= 1; bus_valid <= 1;
+    @(posedge clk); #1;
+    bus_address = a; bus_wdata = d;
+    bus_ioreq = 1; bus_write = 1; bus_valid = 1;
     @(posedge clk);
     while (!bus_ready) @(posedge clk);
-    bus_ioreq <= 0; bus_write <= 0; bus_valid <= 0;
+    #1; bus_ioreq = 0; bus_write = 0; bus_valid = 0;
     repeat (18) @(posedge clk);
 end
 endtask
