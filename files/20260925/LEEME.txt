@@ -1,0 +1,44 @@
+MSXimus 60K - 25/09/2026 - LAS RAYAS DE ARRANQUE DEL V9968 (menu y carga de ROM) - porte del arreglo de la Zynq
+===============================================================================================================
+
+SIN PROBAR EN PLACA (en la Zynq si: Albert lo dio por perfecto el 25/09). Rama port-zynq-2409 de MSX_up_v3
+(commit 37cb6db, sobre ad37e24 = la entrega del 24/09 que ya arranca con el dado 4421). Campana pz60r, 5 dados,
+3 pasan el gate. Menu y packs: LOS MISMOS del 24/09 (files/20260924/, rama port-a16x-2409 9641d1e).
+
+QUE TRAE
+--------
+  * Todo lo del 24/09 (ASCII16-X + megaram de 8 MB, Plain 0000h, reset con mapper, ajustes #41/#42).
+  * El arreglo de las rayas: la raya de una linea que bajaba por la pantalla al salir el menu o al cargar una ROM
+    (y nunca despues) salia del shim que sirve la VRAM del V9968 desde la DDR3 (fpga/src/v9968_vram_shim.v,
+    el mismo fichero en el 60K, el 138K y la Zynq). Tres fallos encadenados:
+      _187 lo que escribia la CPU NO entraba en la cache hasta que el display lo pedia por primera vez (la fuente
+           de SCREEN 0, los patrones y nombres que vuelca una ROM) => fallo "frio" en la primera linea de cada
+           letra nueva. Ahora una escritura de la CPU que no esta en la cache encola una relectura que la deja
+           residente (solo la CPU, nunca el motor de comandos; solo los primeros 32 KB, donde no desaloja nada).
+      _188 en texto la palabra de la letra se relee en cada celda: cada fallo volvia a sembrar el prefetch de las
+           siguientes con prioridad maxima y la lectura de la que faltaba no se lanzaba en toda la linea (la
+           LINEA ENTERA salia con datos ajenos). Ahora un fallo repetido pide esa palabra.
+      _189 la respuesta tardia del fondo se entregaba al VDP y pisaba el fetch siguiente: una celda mal por cuadro.
+           Ahora solo la CPU y el motor de comandos (que si esperan) reciben respuestas tardias.
+    Era de NUESTRA capa de cache, no del V9968 (el core de HRA! con una VRAM ideal da 0 errores).
+    En la Zynq, medido con la capturadora: menu tras reset 47 rayas -> 0; SCREEN 2 con texto 2 -> 0. Bancos:
+    tools/v9968_sim/tb_t2drop.sv (run_t2drop_vl.sh, Verilator, 30 s), sprites ru66 / SC8 / SC5 / CPU bulk
+    byte-identicos. Detalle: MSXimus_zynq/docs/tecnica/05-v9968.md.
+
+CANDIDATOS (probar en este orden; recuerda que ~1 de cada 2 dados calibra mal la DDR3 desde el cargador)
+  dado 4519  peor setup 0,92 ns  msximus_v3.7b_zport_rayas_dado4519.fs  (md5 3d1509725281) + _jtag.bin (34a2365d5c78)
+  dado 4547  peor setup 0,56 ns  msximus_v3.7b_zport_rayas_dado4547.fs  (md5 b0913d24572f) + _jtag.bin (f325fe323d53)
+  (el 4561 tambien pasa el gate pero con 0,44 ns, justo en el limite de entrega; no se empaqueta.
+   holds todos positivos; el "clk_54m no cierra" del informe es el aviso falso de siempre; CLS 97-98 %)
+
+PACKS DE BIOS: los del 24/09 (files/20260924/), sin cambios: castellano e ingles x Nextor 2.1.4 y Nextor 3.
+  !! DIRECCION DE LA FLASH: MSXimus 60K -> 0x400000 (0x04000 pisaria el bitstream).
+  pack_bios_msximus.bin 98cba15cc9de | _en 12093f3a2cbd | _nextor3 52109360cc47 | _en_nextor3 7ed04ce7dd8c
+
+QUE MIRAR EN PLACA: que al salir el menu ya no baje la raya, y al cargar una ROM tampoco. Si aparece algo
+raro en juegos con sprites (SC5+) o en texto, decirlo: el shim es comun a todo.
+
+VOLVER ATRAS: files/20260924/msximus_v3.7b_zport_dado4421.fs (el que ya arranca).
+
+138K: misma rama y mismo shim (MSXimus_138_port, commit 118d565); campana pz138r/pz138r2 en marcha el 25/09
+por la tarde. Sin placa, no se entrega.
