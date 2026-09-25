@@ -1,7 +1,7 @@
 MSXimus 60K - 25/09/2026 - LAS RAYAS DE ARRANQUE DEL V9968 (menu y carga de ROM) - porte del arreglo de la Zynq
 ===============================================================================================================
 
-SIN PROBAR EN PLACA (en la Zynq si: Albert lo dio por perfecto el 25/09). Rama port-zynq-2409 de MSX_up_v3
+PROBADO EN PLACA por Albert el 25/09 con el dado 4519: "va perfecto, sin rayas" (y en la Zynq, desde la QSPI, igual). Rama port-zynq-2409 de MSX_up_v3
 (commit 37cb6db, sobre ad37e24 = la entrega del 24/09 que ya arranca con el dado 4421). Campana pz60r, 5 dados,
 3 pasan el gate. Menu y packs: LOS MISMOS del 24/09 (files/20260924/, rama port-a16x-2409 9641d1e).
 
