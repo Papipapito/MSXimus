@@ -1,0 +1,48 @@
+MSXimus 60K - V3.7.1 (28/09/2026) - SOLO ARREGLOS DE BUGS, portados de la Zynq
+================================================================================
+
+Regla nueva (Albert, 27/09): el 60K y el 138K ya no reciben funciones nuevas, solo arreglos de bugs que entren sin
+sacrificar nada, y esos lotes suben el TERCER digito de la version: 3.7 -> 3.7.1 (este) -> 3.7.2...
+
+QUE TRAE (sobre el 4519 del 25/09, que es el que llevas)
+--------------------------------------------------------
+  1. Tres arreglos del V9968 de HRA (su upstream del 26-27/09; portados y verificados en la Zynq el 27/09):
+       - los sprites ya no salen recortados en el borde izquierdo de la zona activa (el logo MSX2+);
+       - R#26/R#27 (scroll horizontal) se toman en cada linea justo antes del primer pixel visible: un cambio de
+         scroll por interrupcion de linea entra en la linea siguiente y fondo y sprites cambian a la vez;
+       - la colision de sprites salta una sola vez por linea, como en openMSX.
+  2. HMMM/HMMV/YMMM/HMMC en SCREEN 2 con R#25 CMD=1 copiaban un byte si y otro no (lo encontro la sesion del
+     F1 Spirit V9968: pista y marcador rotos). Ahora avanzan byte a byte en todo modo que no sea SCREEN 5/6/7;
+     SCREEN 5-8 bit a bit como antes (60 casos). Avisado a HRA en su issue #10.
+  3. Version con tercer digito: el bitstream contesta 1 en el puerto 29h (FPGA_PATCH) y el menu nuevo imprime
+     "3.7.1" en Ajustes. Con un bitstream viejo el puerto da FFh y el menu imprime "3.7" a secas.
+  4. Menu (pack nuevo): la cinta virtual ya no se atasca en "Found:" tras buscar (F) o configurar la red (W)
+     (EXTBIO del ESP encadenado a si mismo: p1_boot_exit lo deja a C9 al salir del 1er pase); y una ROM de mas
+     de 4 MB sin firma sale como ASCII16-X (la V9968 TECH DEMO de renatus 0.7.5 arranca sin la tecla M).
+  NO trae (se quedan en la Zynq): geo3d, Ethernet/TLS, mando USB del companion, WAV/MP3, estereo por canales.
+
+FICHEROS
+--------
+  msximus_v3.7.1_dado4679.fs        (md5 3acd3068b0bf)  campana pf60b, GATE OK, PEOR SETUP +1,24 ns, 0 holds tolerados
+  msximus_v3.7.1_dado4679_jtag.bin  (md5 a1ce9ada7487)  = impl/pnr/project.bin del mismo dado
+  packs/  pack_bios_msximus.bin (2.1.4, md5 a8e8cc22a9e6) - pack_bios_msximus_en.bin (2f01e702081d)
+          pack_bios_msximus_nextor3.bin (5311cb60931b) - pack_bios_msximus_en_nextor3.bin (94f64090567e)
+          = repo bios-msxnano-msximus rama port-fixes-2809 (d8d64dd). MSXnano y goauld sin cambios.
+  Campanas: pf60a (4621-4649): 1/5, el 4649 con solo +0,13 ns y los peores caminos en lo que se habia tocado
+  (mux de cpu_din con el puerto 29h, OR de tres modos en w_nx_max) -> corregido sin cambiar la funcion
+  (ff_byte_mode registrado, 2Fh/29h en un solo termino del mux). pf60b (4651-4679): 2/5 (4657 +0,01 ns, no se
+  entrega; 4679 +1,24 ns), dos sin rutar (98 % de CLS).
+
+VERIFICACION EN ESTE ARBOL (tools/v9968_sim, WSL)
+--------------------------------------------------
+  g2cmd_check.py (tb_g2cmd): 60 casos SCREEN 5-8 bit a bit iguales al RTL de antes + SCREEN 2 con CMD OK.
+  run_spcol_vl.sh (tb_spcol, Fleet/DQ2): verde en los dos modos.   run_hscroll.sh (tb_hscroll_sprite): bit-exacto.
+
+QUE MIRAR EN PLACA
+------------------
+  Ajustes: "3.7.1". El logo MSX2+ sin el borde izquierdo recortado. Juegos con scroll horizontal por linea y juegos
+  de muchos sprites (Fleet Commander, DQ2). La f1spirit_v9968.rom (autotest: ha de elegir HMMM). Una cinta TSX
+  buscada con F (sin atasco en Found:). La demo de renatus lanzada tal cual.
+
+VOLVER ATRAS: files/20260925/msximus_v3.7b_zport_rayas_dado4519.fs (+ packs del 24/09).
+Rama: MSX_up_v3 port-fixes-2809 (V3.5 avanzada por fast-forward). 138K: misma rama, sin build (sin placa ni margen).
