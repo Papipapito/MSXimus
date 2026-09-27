@@ -227,6 +227,7 @@ module vdp_command (
 	wire		[17:0]	w_address_d;
 	wire		[12:0]	w_next_nyb;
 	wire		[9:0]	w_next;
+	wire				w_byte_mode;				//	27/09: 1 pixel por byte (SCREEN 8, SCREEN 2 con CMD...)
 	wire		[11:0]	w_next_sx;
 	wire		[13:0]	w_next_sy;
 	wire		[9:0]	w_next_dx;
@@ -313,7 +314,13 @@ module vdp_command (
 	assign w_effective_mode		= reg_command_enable || ff_fg4 || (ff_screen_mode[c_g4] || ff_screen_mode[c_g5] || ff_screen_mode[c_g6] || ff_screen_mode[c_g7]);
 	assign w_bpp				= (ff_screen_mode[c_g6] || ff_screen_mode[c_g4]) ? c_bpp_4bit:
 	            				  (ff_screen_mode[c_g5]) ? c_bpp_2bit: c_bpp_8bit;
-	assign w_next				= (ff_screen_mode_clone[c_g7] || ff_command[3:2] != 2'b11) ? 10'd1:
+	//	27/09/2026 (MSXimus, aviso de la sesion del F1 Spirit V9968): los comandos rapidos (HMMV/HMMM/YMMM/HMMC,
+	//	ff_command[3:2] == 2'b11) avanzan un BYTE por paso: 1 pixel en los modos byte (SCREEN 8 y, con R#25 CMD=1,
+	//	SCREEN 2 y el resto de modos no bitmap, que w_address_*_pre direcciona como SCREEN 8), 2 en SCREEN 5/7 y 4 en
+	//	SCREEN 6. Antes se preguntaba "es SCREEN 8" y SCREEN 2 caia en el paso de 2 con direccion de 1 pixel/byte:
+	//	copiaba un byte si y otro no (tb_g2cmd / g2cmd_check.py). SCREEN 5-8 quedan bit a bit como estaban.
+	assign w_byte_mode			= !(ff_screen_mode_clone[c_g4] || ff_screen_mode_clone[c_g5] || ff_screen_mode_clone[c_g6]);
+	assign w_next				= (w_byte_mode || ff_command[3:2] != 2'b11) ? 10'd1:
 	             				  (ff_screen_mode_clone[c_g5]) ? 10'd4: 10'd2;
 	assign w_512pixel			= (ff_screen_mode_clone[c_g5] || ff_screen_mode_clone[c_g6]);
 
@@ -862,7 +869,8 @@ module vdp_command (
 	end
 
 	assign w_ny			= { 1'b0, ff_ny } + 12'd1;
-	assign w_nx_max		= (ff_screen_mode[c_g7] || ff_command[3:2] != 2'b11) ? reg_nx:
+	//	27/09: NX se redondea al byte solo en SCREEN 5/6/7 (ver w_next); en los modos byte NX va tal cual
+	assign w_nx_max		= (!(ff_screen_mode[c_g4] || ff_screen_mode[c_g5] || ff_screen_mode[c_g6]) || ff_command[3:2] != 2'b11) ? reg_nx:
 	             		  (ff_screen_mode[c_g5]) ? { reg_nx[10:2], 2'd0 }: { reg_nx[10:1], 1'd0 };
 	assign w_nx_end		= (ff_nx == w_nx_max && ff_command != c_ymmm);
 	assign w_ny_end		= (ff_ny == reg_ny) | w_ny[11] | (w_ny[10] & ~reg_vram256k_mode);

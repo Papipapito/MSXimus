@@ -147,18 +147,39 @@ module vdp_timing_control_ssg (
 	reg					ff_vsync;
 	reg					ff_clear_line_interrupt;
 	wire		[2:0]	w_horizontal_offset_l_next;		//	MSXimus _162: proximo valor del latch de R#27[2:0]
+	wire				w_hscroll_latch_pre;			//	MSXimus 27/09 (upstream 9917548): X corregida = -1, subfase E
+	reg					ff_hscroll_latch;				//	... registrada: pulso en la subfase F = el instante de HRA
 
 	assign w_half_line_shift	= ff_field & (reg_interlace_mode | reg_flat_interlace_mode);
 
 	// --------------------------------------------------------------------
 	//	Latch horizontal scroll register
 	// --------------------------------------------------------------------
+	//	MSXimus 27/09/2026 = upstream 9917548 (HRA, issue #5 de V9968_Cartridge): R#26/R#27 se toman en CADA linea
+	//	justo antes del primer pixel visible — cuando la X corregida por el R#27 VIVO vale -1 en su ultima subfase —
+	//	en vez de al final de la linea (ff_v_count[0] && w_h_count_end). Asi un cambio de scroll hecho en la
+	//	interrupcion de linea entra en la siguiente linea visible, como en el V9958 (HSYNC), y fondo y sprites
+	//	cambian a la vez. Diferencia con el upstream: la condicion se evalua UN ciclo antes (subfase E) y se
+	//	registra, para no alargar el camino ff_half_count -> resta -> comparacion -> resta del _120/_162 (que ya fue
+	//	el peor de la matriz); el pulso cae en la subfase F, el mismo instante que en HRA.
+	assign w_hscroll_latch_pre	= ( (w_screen_pos_x[13:4] - { 7'd0, reg_horizontal_offset_l }) == 10'h3FF ) &&
+								  ( w_screen_pos_x[3:0] == 4'hE );
+
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_hscroll_latch <= 1'b0;
+		end
+		else begin
+			ff_hscroll_latch <= w_hscroll_latch_pre;
+		end
+	end
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_horizontal_offset_l <= 3'd0;
 			ff_horizontal_offset_h <= 6'd0;
 		end
-		else if( ff_v_count[0] && w_h_count_end ) begin
+		else if( ff_hscroll_latch ) begin
 			ff_horizontal_offset_l <= reg_horizontal_offset_l;
 			ff_horizontal_offset_h <= reg_horizontal_offset_h;
 		end
@@ -182,8 +203,9 @@ module vdp_timing_control_ssg (
 	//	reset esta aserto (1 ciclo de divergencia frente al upstream); con la
 	//	rama explicita a 0 la equivalencia es bit-exacta TAMBIEN en el reset,
 	//	que es justo lo que este parche viene a poder afirmar sin mentir.
+	//	27/09: la condicion de captura es ff_hscroll_latch, la MISMA del latch de arriba (sigue siendo bit-exacto).
 	assign w_horizontal_offset_l_next	= ( !reset_n ) ? 3'd0 :
-	                                      ( ff_v_count[0] && w_h_count_end ) ? reg_horizontal_offset_l: ff_horizontal_offset_l;
+	                                      ( ff_hscroll_latch ) ? reg_horizontal_offset_l: ff_horizontal_offset_l;
 
 	// --------------------------------------------------------------------
 	//	Horizontal Counter

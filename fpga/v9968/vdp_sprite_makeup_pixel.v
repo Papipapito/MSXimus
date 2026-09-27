@@ -199,6 +199,8 @@ module vdp_sprite_makeup_pixel (
 	reg			[10:0]	ff_pixel_color_d4;
 	reg			[10:0]	ff_pixel_color_d5;
 	reg					ff_sprite_collision;
+	reg					ff_collision_seen_this_line;
+	wire					w_collision_hit;
 	reg			[8:0]	ff_sprite_collision_x;
 	reg			[9:0]	ff_sprite_collision_y;
 	reg					ff_sprite_en1;
@@ -1005,6 +1007,21 @@ module vdp_sprite_makeup_pixel (
 		end
 	end
 
+	//	MSXimus 27/09/2026 = upstream 9917548 (HRA): la colision salta UNA vez por linea; tras leer S#0 no
+	//	vuelve a saltar en esa misma linea (modelo por linea de openMSX; banco tb_collision_once_per_line de HRA).
+	assign w_collision_hit = w_sub_phase != 4'd1 && ff_pre_pixel_color_en && ff_color_en &&
+		!ff_color_ic && !ff_color_cc &&
+		(ff_pre_pixel_color[3:0] != 4'd0 || (!reg_sprite_mode3 && reg_color0_opaque));
+
+	always @( posedge clk ) begin
+		if( !reset_n || screen_pos_x == 14'h3FFF ) begin
+			ff_collision_seen_this_line <= 1'b0;
+		end
+		else if( w_collision_hit ) begin
+			ff_collision_seen_this_line <= 1'b1;
+		end
+	end
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
 			ff_sprite_collision		<= 1'b0;
@@ -1018,21 +1035,10 @@ module vdp_sprite_makeup_pixel (
 			ff_sprite_collision_x	<= 9'd0;
 			ff_sprite_collision_y	<= 10'd0;
 		end
-		else if( w_sub_phase == 4'd1 ) begin
-			//	hold
-		end
-		else begin
-			if( !ff_pre_pixel_color_en || !ff_color_en || ff_color_ic || ff_color_cc ) begin
-				//	hold
-			end
-			else if( !ff_sprite_collision ) begin
-				//	The dots of the sprite with the highest priority are already plotted.
-				if( ff_pre_pixel_color[3:0] != 4'd0 || (!reg_sprite_mode3 && reg_color0_opaque) ) begin
-					ff_sprite_collision		<= 1'b1;
-					ff_sprite_collision_x	<= screen_pos_x[11:4] + 9'd12;
-					ff_sprite_collision_y	<= { 2'd0, pixel_pos_y } + 10'd8;
-				end
-			end
+		else if( !ff_sprite_collision && !ff_collision_seen_this_line && w_collision_hit ) begin
+			ff_sprite_collision		<= 1'b1;
+			ff_sprite_collision_x	<= screen_pos_x[11:4] + 9'd12;
+			ff_sprite_collision_y	<= { 2'd0, pixel_pos_y } + 10'd8;
 		end
 	end
 
