@@ -1058,7 +1058,10 @@ assign keyboard_addr = ppi_port_c[3:0];
     // 3.7.1 = HRA x3 (sprites borde izq., R#26/27 por linea, colision 1/linea) + HMMM SCREEN 2 CMD=1 + menu EXTBIO/ASCII16-X.
     localparam [7:0] FPGA_PATCH   = 8'd1;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
-    wire pat_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h29);   // 3.7.x
+    // 2Fh y 29h en UN solo termino del mux de cpu_din (un escalon mas en esa cadena costo -0,1 ns en el 60K): las dos
+    // constantes se eligen por bus_addr[2] (2Fh = ...1111, 29h = ...1001) y la sintesis las pliega por bit.
+    wire verpat_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:3] == 5'b00101 && bus_addr[0] == 1'b1 && bus_addr[2] == bus_addr[1]);
+    wire [7:0] verpat_data = bus_addr[2] ? FPGA_VERSION : FPGA_PATCH;   // 3.7.x
 
     // Puerto 0x2E — DIAGNOSTICO DEL RATON. Desde BASIC: PRINT HEX$(INP(&H2E))
     //   bit7 = hay raton USB detectado (typ==2 en alguno de los USB-A)
@@ -1103,8 +1106,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     end
     always @ (posedge clk_54m) begin
         cpu_din <=
-                ( ver_req_r == 1 ) ? FPGA_VERSION :
-                ( pat_req_r == 1 ) ? FPGA_PATCH :
+                ( verpat_req_r == 1 ) ? verpat_data :
                 ( mdbg_req_r == 1 ) ? mouse_dbg :
                 ( udbg_req_r == 1 ) ? usb_dbg :
                 ( ddrc_req_r == 1 ) ? vddr_dbg_s2[23:16] :
