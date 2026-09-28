@@ -96,8 +96,14 @@ el decodificador esta viendo otros bytes de los esperados: pendiente capturar lo
 ================================================================================
 V3.7.3 (29/09/2026, madrugada) - HOST USB DEL FABRIC ROBUSTO: la causa real del mando HID que "hacia cosas raras"
 ================================================================================
-  (dado, md5 y margen: al final de la campana pf60f, dados 4817-4877; se anota aqui debajo)
-  QUE FLASHEAR: el .fs de la 3.7.3 + el MISMO pack de la 3.7.1/3.7.2 (packs/): Ajustes dira "3.7.3" (puerto 29h = 3).
+  msximus_v3.7.3_dado4831.fs        (md5 f03f2338465a)  campana pf60f, GATE OK, PEOR SETUP +0,87 ns, 0 holds tolerados
+  msximus_v3.7.3_dado4831_jtag.bin  (md5 34caf0d11626)  = impl/pnr/project.bin del mismo dado
+  QUE FLASHEAR: msximus_v3.7.3_dado4831.fs + el MISMO pack de la 3.7.1/3.7.2 (packs/pack_bios_msximus.bin, md5
+  192eedcbca0a, o su variante en / nextor3): Ajustes dira "3.7.3" (puerto 29h = 3).
+  Campana pf60f (4817, 4831, 4861, 4871, 4877), 00:05-01:00 del 29/09: 1/5. 4817 y 4861 sin rutar (200 y 171 redes,
+  98 % de CLS); 4871 -0,92 y 4877 -5,4 ns en u_v68shim/mem1 (los sospechosos de siempre, nada del USB: el host va a
+  12 MHz). El 4831: peor camino clk_54m->clk_108m mem1/enable_sdram -> SdrAdr (+0,87), clk_86 +1,24; "clk_54m fMax
+  FAIL" es el artefacto conocido (sin violacion de setup).
 
 POR QUE FALLABA (simulado, tools/usb_sim/tb_usb_hid_host.sv + usb_ls_dev_model.sv, un dispositivo low-speed modelado
 con latencia de respuesta configurable): el host de nand2mario alinea los bits de la respuesta con la instruccion
