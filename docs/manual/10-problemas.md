@@ -43,7 +43,7 @@ Por síntoma, qué mirar. Casi todo lo que hay aquí ha pasado de verdad durante
 |---|---|---|
 | El televisor no muestra imagen | Receptor que no acepta 720p60 con audio embebido | Probar otro cable o entrada; es una señal estándar |
 | Un juego a 50 Hz se ve con la geometría rara | El modo 50 Hz es el menos probado | Anotar cuál y reportarlo |
-| Sin MoonSound, o instrumentos que faltan | `yrw801.rom` no grabado en 0x500000 | Grabarlo |
+| Sin MoonSound, o instrumentos que faltan | `yrw801.bin` no grabado en 0x500000 | Grabarlo |
 | Todo suena bajo o distorsionado | Ganancia maestra tocada | Volver a 5 ([capítulo 08](08-audio.md)) |
 | VGMPlay se cuelga con OPL3 | Nextor 3 beta | Usar el pack con Nextor 2.1.4 |
 | El SCC no suena en un juego | El juego busca el SCC en otro slot | Ajustes, Slot 1 = 2o SCC |

@@ -1090,6 +1090,10 @@ assign keyboard_addr = ppi_port_c[3:0];
     // otra cosa" (que es lo que pasaba: los ratones sin subclass Boot se
     // clasificaban como gamepad).
     wire udbg_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2D);
+    // 28/09 (caza del mando HID 0810 en el 60K): puertos 20h-27h = los 8 bytes del ULTIMO informe del mando USB-A
+    // (dbg_hid_report del usb_hid_host con typ 3; en BASIC: FOR I=0 TO 7:PRINT HEX$(INP(&H20+I));" ";:NEXT).
+    // Quasi-estatico entre dominios (12 MHz -> 54): vale para mirar, no para jugar.
+    wire hidrep_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:3] == 5'b00100);
     wire [7:0] usb_dbg = {usb2_conerr, usb1_conerr, usb2_typ, usb1_typ, any_rep_cnt[1:0]};
     // V3.7b: puertos 2Ah-2Ch = DIAGNOSTICO DEL ARRANQUE DE LA DDR3 (la VRAM). Desde BASIC:
     //   ?INP(&H2C) AND 127  -> intentos de calibracion FALLIDOS (0 = a la primera)
@@ -1110,6 +1114,7 @@ assign keyboard_addr = ppi_port_c[3:0];
                 ( verpat_req_r == 1 ) ? verpat_data :
                 ( mdbg_req_r == 1 ) ? mouse_dbg :
                 ( udbg_req_r == 1 ) ? usb_dbg :
+                ( hidrep_req_r == 1 ) ? usb_pad_rep[{bus_addr[2:0], 3'b000} +: 8] :
                 ( ddrc_req_r == 1 ) ? vddr_dbg_s2[23:16] :
                 ( ddrb_req_r == 1 ) ? vddr_dbg_s2[15:8] :
                 ( ddra_req_r == 1 ) ? vddr_dbg_s2[7:0] :
@@ -6216,6 +6221,8 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .lock   (pll12_lock)
     );
     wire [1:0] usb1_typ, usb2_typ;
+    wire [63:0] usb1_rep, usb2_rep;           // 28/09: ultimo informe HID de cada host (depuracion, puertos 20h-27h)
+    wire [63:0] usb_pad_rep = (usb2_typ == 2'd3) ? usb2_rep : usb1_rep;
     wire       usb1_report, usb2_report;
     wire       usb1_conerr, usb2_conerr;
     // era V3: raton MSX sobre raton USB de PC (ver fpga/src/msx_mouse.v)
@@ -6235,7 +6242,7 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .game_snes (usb1_game), .game_l (), .game_r (), .game_u (), .game_d (),
         .game_a (), .game_b (), .game_x (), .game_y (), .game_sel (), .game_sta (),
         .game_lb (), .game_rb (),
-        .dbg_hid_report ()
+        .dbg_hid_report (usb1_rep)
     );
     usb_hid_host usb_host2 (
         .usbclk (clk_usb12), .usbrst_n (pll12_lock),
@@ -6247,7 +6254,7 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .game_snes (usb2_game), .game_l (), .game_r (), .game_u (), .game_d (),
         .game_a (), .game_b (), .game_x (), .game_y (), .game_sel (), .game_sta (),
         .game_lb (), .game_rb (),
-        .dbg_hid_report ()
+        .dbg_hid_report (usb2_rep)
     );
 
     // 16/09: mandos HID por USB-A -> puerto 1 del MSX. Solo cuenta el host que
@@ -6392,6 +6399,7 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     // Sin el companion no queda otra fuente: el teclado del MSX se apaga.
     assign keyboard = 128'd0;
     assign usb_joy_snes = 12'd0;    // sin host en el fabric no hay mando por USB-A
+    wire [63:0] usb_pad_rep = 64'd0;
 `endif
     // F1 (_73): el pad U15 (spi_irqn) se entrega a la UART del BL616 cuando el
     // WiFi onboard esta activo; el companion (ya sin SPI: jtagseln=0) pierde su

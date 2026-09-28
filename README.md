@@ -68,7 +68,7 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 |---|---|---|---|
 | 1 | `MSXimus_v3.7.fs` | **`0x000000`** | Yes — this is the core |
 | 2 | BIOS pack (`pack_bios_msximus*.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
-| 3 | `yrw801.rom` | **`0x500000`** | No — only for MoonSound/OPL4 |
+| 3 | `yrw801.bin` | **`0x500000`** | No — only for MoonSound/OPL4 (the wave ROM is shipped as `.bin`: Gowin's Programmer does not accept `.rom`; rename a `yrw801.rom` if that is what you have) |
 
 Two more pieces are **optional** and do not live in that flash: the **ESP32-C6** firmware (WiFi) and the **BL616** firmware (the F12 panel). Each has its own section below.
 
@@ -92,7 +92,7 @@ Two more pieces are **optional** and do not live in that flash: the **ESP32-C6**
 
 ### About the BIOS pack
 
-The release ships **everything you need**: the core, the BIOS pack, the OPL4's `yrw801.rom` and the firmwares. Download, flash, and it boots.
+The release ships **everything you need**: the core, the BIOS pack, the OPL4's `yrw801.bin` and the firmwares. Download, flash, and it boots.
 
 There are **two builds of the same pack**, differing only in the disk kernel inside:
 
@@ -103,7 +103,7 @@ There are **two builds of the same pack**, differing only in the disk kernel ins
 
 If you would rather build the pack from your own ROMs, there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from them, Nextor included.
 
-Without `yrw801.rom` the core works just the same; you simply won't have MoonSound.
+Without `yrw801.bin` the core works just the same; you simply won't have MoonSound.
 
 ### One BIOS, and the menu is a setting
 

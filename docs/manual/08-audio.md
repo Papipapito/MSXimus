@@ -14,7 +14,7 @@ Todo el sonido del MSXimus sale por el HDMI, mezclado dentro del core. Este cap�
 | **MSX-Audio** | El Y8950 del Music Module de Philips: FM de nueve voces más un canal ADPCM de muestras | Puertos C0-C1, con 32 KB de memoria de muestras. Las interrupciones del chip funcionan |
 | **MoonSound** | El OPL4 completo: FM de 18 voces (OPL3) y 24 voces de tabla de ondas con la ROM YRW801 de 2 MB | Puertos C4-C7 el FM, 7E-7F las ondas |
 
-La ROM de ondas del MoonSound, `yrw801.rom`, se graba en la flash a 0x500000 y el core la copia a la memoria al arrancar. Sin ella el OPL4 tiene FM pero no ondas; el software que use instrumentos de la ROM sonará incompleto.
+La ROM de ondas del MoonSound, `yrw801.bin`, se graba en la flash a 0x500000 y el core la copia a la memoria al arrancar. Sin ella el OPL4 tiene FM pero no ondas; el software que use instrumentos de la ROM sonará incompleto.
 
 Todo esto está a la vez y sin conflictos: un juego puede usar PSG y SCC, un reproductor puede tocar el MoonSound mientras el PSG hace los efectos.
 
