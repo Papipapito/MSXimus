@@ -1056,7 +1056,8 @@ assign keyboard_addr = ppi_port_c[3:0];
     // 27/09/2026 (regla de Albert): las lineas Tang solo reciben ARREGLOS y estos suben el tercer digito: 3.7.1, 3.7.2...
     // Puerto #29 (lectura) = FPGA_PATCH; el menu lo imprime tras "M.m" si vale 1..15 (un core sin el puerto devuelve FFh).
     // 3.7.1 = HRA x3 (sprites borde izq., R#26/27 por linea, colision 1/linea) + HMMM SCREEN 2 CMD=1 + menu EXTBIO/ASCII16-X.
-    localparam [7:0] FPGA_PATCH   = 8'd1;
+    // 3.7.2 = + mandos HID genericos (Report ID, hat, sticks) por los USB-A (usb_pad_rid.v).
+    localparam [7:0] FPGA_PATCH   = 8'd2;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
     // 2Fh y 29h en UN solo termino del mux de cpu_din (un escalon mas en esa cadena costo -0,1 ns en el 60K): las dos
     // constantes se eligen por bus_addr[2] (2Fh = ...1111, 29h = ...1001) y la sintesis las pliega por bit.

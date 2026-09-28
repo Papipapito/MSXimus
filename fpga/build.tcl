@@ -246,6 +246,7 @@ add_file video720/msx2hdmi.sv
 
 # ----- F3 (_39): teclado USB-A directo (usb_hid_host de nand2mario + decoder) -----
 add_file src/usb_direct/usb_hid_host.v
+add_file src/usb_direct/usb_pad_rid.v
 add_file src/usb_direct/pll_12.v
 add_file src/usb_direct/usb_kbd_decode.v
 

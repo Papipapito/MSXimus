@@ -49,7 +49,17 @@ wire [3:0] save_b;      // dat[b]
 wire connected;
 reg retry;              // retry because we did not detect a HID device
 
-assign game_snes = {game_rb, game_lb, game_x, game_a, game_r, game_l, game_d, game_u, game_sta, game_sel, game_y, game_b};
+// 28/09/2026 (V3.7.2): mandos HID GENERICOS con Report ID (p.ej. "USB Gamepad" 0810:0001: hat, sticks, 12 botones)
+// por un decodificador aparte (usb_pad_rid.v) que solo opina cuando el byte 0 del informe es 01h; en ese modo el
+// decodificador SNES de abajo calla sus bytes 1, 5 y 6 (el byte 1 es un eje del stick derecho y dejaba arriba/abajo
+// pegados). Los mandos SNES USB de siempre no pasan por el nuevo (byte 0 = eje X, nunca 01h).
+wire        pad_rid1;
+wire [11:0] pad_snes;
+usb_pad_rid u_pad_rid (
+    .clk(usbclk), .clr(conerr), .strobe(data_rdy && data_strobe && ~data_strobe_r && typ == 2'd3),
+    .idx(rcvct), .b(ukpdat), .rid1(pad_rid1), .snes(pad_snes)
+);
+assign game_snes = {game_rb, game_lb, game_x, game_a, game_r, game_l, game_d, game_u, game_sta, game_sel, game_y, game_b} | pad_snes;
 
 ukp ukp(
     .usbrst_n(usbrst_n & ~retry), .usbclk(usbclk),
@@ -120,7 +130,7 @@ always @(posedge usbclk) begin : process_in_data
                     if (ukpdat==8'h7f) {game_l, game_r} <= 2'b00;
                     if (ukpdat==8'hff) {game_l, game_r} <= 2'b01;
                 end
-                1: begin
+                1: if (!pad_rid1) begin        // 28/09: con Report ID el byte 1 es un eje del stick derecho: no es arriba/abajo
                     if (ukpdat==8'h00) {game_u, game_d} <= 2'b10;
                     if (ukpdat==8'h7f) {game_u, game_d} <= 2'b00;
                     if (ukpdat==8'hff) {game_u, game_d} <= 2'b01;
@@ -133,13 +143,13 @@ always @(posedge usbclk) begin : process_in_data
                 //     if (ukpdat[7:6]==2'b00) {game_u, game_d} <= 2'b10;
                 //     if (ukpdat[7:6]==2'b11) {game_u, game_d} <= 2'b01;
                 // end
-                5: if (valid) begin
+                5: if (valid && !pad_rid1) begin   // 28/09: con Report ID los botones los mapea usb_pad_rid (1 = A, 2 = B)
                     game_x <= ukpdat[4];
                     game_a <= ukpdat[5];
                     game_b <= ukpdat[6];
                     game_y <= ukpdat[7];
                 end
-                6: if (valid) begin
+                6: if (valid && !pad_rid1) begin
                     game_sel <= ukpdat[4];
                     game_sta <= ukpdat[5];
                     game_lb <= ukpdat[0];
