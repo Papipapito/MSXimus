@@ -79,3 +79,54 @@ cargar pack_bios_msximus.bin de packs/ (o su variante en/N3) junto con el .fs.
 HID 0810 en placa (Albert, 28/09): "la cruceta solo funciona hacia arriba cuando pulso derecha; el disparo si" ->
 el decodificador esta viendo otros bytes de los esperados: pendiente capturar los informes reales del mando en el PC
 (scratchpad hidread.ps1) y corregir usb_pad_rid.v (3.7.3).
+
+28/09 madrugada - BUILD DE DIAGNOSTICO DEL MANDO HID (mismo 3.7.2 + puertos 20h-27h)
+  msximus_v3.7.2diag_dado4793.fs        (md5 da6e0843124e)  campana pf60e, GATE OK, PEOR SETUP +0,62 ns, 0 holds tolerados
+  msximus_v3.7.2diag_dado4793_jtag.bin  = impl/pnr/project.bin del mismo dado
+  QUE FLASHEAR: solo ese .fs. El pack NO cambia (packs/ de la 3.7.2, md5 192eedcbca0a el castellano 2.1.4).
+  QUE HACE: los puertos 20h..27h devuelven los 8 bytes del ULTIMO informe HID recibido del host que tiene un mando
+  (typ 3), tal como los indexa el core (dat[0..7]). Sirve para ver que bytes llegan de verdad del 0810:0001.
+  PRUEBA (mando en el USB-B, teclado en el A), en BASIC:
+     10 FOR I=0 TO 7:PRINT HEX$(INP(&H20+I));" ";:NEXT:PRINT:GOTO 10
+  y anotar la fila en reposo y pulsando ARRIBA, DERECHA, ABAJO, IZQUIERDA, boton 1 y boton 2.
+  Esperado si el core alineara bien: reposo 01 80 80 7F 7F 0F 00 00; arriba 01 80 80 7F 00 0F 00 00 (o hat 00);
+  derecha ... 7F FF 7F ... (o hat 02); abajo ... 7F 7F FF ... (o hat 04); boton 1: byte 5 = 1F; boton 2: 2F.
+  Lo que se vio con la 3.7.2: "derecha -> arriba", "abajo -> disparo" en el USB-B; en el USB-A, nada.
+
+================================================================================
+V3.7.3 (29/09/2026, madrugada) - HOST USB DEL FABRIC ROBUSTO: la causa real del mando HID que "hacia cosas raras"
+================================================================================
+  (dado, md5 y margen: al final de la campana pf60f, dados 4817-4877; se anota aqui debajo)
+  QUE FLASHEAR: el .fs de la 3.7.3 + el MISMO pack de la 3.7.1/3.7.2 (packs/): Ajustes dira "3.7.3" (puerto 29h = 3).
+
+POR QUE FALLABA (simulado, tools/usb_sim/tb_usb_hid_host.sv + usb_ls_dev_model.sv, un dispositivo low-speed modelado
+con latencia de respuesta configurable): el host de nand2mario alinea los bits de la respuesta con la instruccion
+`start` del microcodigo, que espera el primer K y ahi pone bitadr = 0. Pero `start` se ejecuta ~2 tiempos de bit
+despues de soltar el bus (`hiz` -> `jmp rcvdt` -> `ldi 104` -> `start`), y la norma USB permite al dispositivo
+responder a partir de 2 tiempos de bit. Un dispositivo que contesta en menos de ~3,1 tiempos de bit (26 ciclos de
+12 MHz) ya tiene el SYNC empezado cuando `start` mira: el host se engancha al segundo o tercer K, todo queda corrido
+2 bits y el paquete es basura. Ademas `timing` (la fase de muestreo) se CONGELABA mientras `start` esperaba, asi que
+el primer bit se muestreaba en una fase cualquiera. Con el RTL de antes, el banco NI ENUMERA un dispositivo (mando o
+teclado) que responda en <= 22 ciclos (2,75 bits) y va bien a partir de 26 (3,25 bits): teclados y mandos SNES USB
+tardan mas y por eso siempre fueron; el "USB Gamepad" 0810:0001 tiene un SIE rapido y caia en la zona mala (o en el
+borde: por eso variaba entre pruebas y entre el USB-A y el USB-B).
+Y un segundo fallo, INDEPENDIENTE de la latencia: el ZLP DATA1 de la fase de estado de Set_Address/Set_Configuration
+estroba UN byte (00, el primero del CRC) y el decodificador SNES lo tomaba por "eje X = 00" -> IZQUIERDA PEGADA. Un
+mando SNES la suelta con el primer informe (7F); uno con Report ID (byte 0 = 01) no la suelta nunca. En el menu,
+izquierda pegada + derecha/abajo daba las combinaciones raras que veia Albert.
+
+QUE CAMBIA (fpga/src/usb_direct/usb_hid_host.v, solo el receptor; el microcodigo .hex no se toca):
+  - `timing` se resincroniza en cada flanco tambien durante `start`; `start` asume nivel J previo (dmis <= 1);
+  - fin del SYNC por la pareja KK (bits 6-7 de KJKJKJKK): bitadr salta a 8 aunque `start` haya pillado el SYNC
+    empezado. Con `start` a tiempo el resultado es identico al de antes.
+  - al terminar la enumeracion (flanco de `connected`) se limpian game_* y usb_pad_rid (adios izquierda pegada).
+  top.v: FPGA_PATCH = 3. usb_pad_rid.v sin cambios (banco tb_usb_pad_rid: TODO OK).
+BANCO (WSL, Icarus, ~1 min por caso): bash tools/usb_sim/run_hid_host.sh pad 2 3 4 5 6  (tambien snes / kbd).
+  Con el arreglo: mando 0810 OK con latencias de 16 a 52 ciclos (2,0 a 6,5 bits), con desfase de 21/42/63 ns respecto
+  al reloj del host y con el periodo de bit a -1,5 % / +1,5 %; mando SNES y teclado igual de bien. 22 casos, 0 fallos.
+  dat[] = 01 80 80 7F 7F 0F 00 00 en reposo; hat/stick/botones 1-2 -> derecha/abajo/A/B correctos; sin izquierda pegada.
+
+QUE MIRAR EN PLACA: Ajustes "3.7.3"; el 0810 en un USB-A: cruceta/stick en las 4 direcciones y botones 1/2 = A/B, en el
+menu y en BASIC (STICK(1)/STRIG(1)); nada pegado al enchufarlo. Teclado y raton USB como siempre; un mando SNES USB
+como siempre. Si se quiere confirmar la causa, la build de diagnostico (4793) con la 3.7.2 deberia mostrar bytes
+basura o cambiantes en los puertos 20h-27h con el mando 0810.

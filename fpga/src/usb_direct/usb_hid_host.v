@@ -56,7 +56,7 @@ reg retry;              // retry because we did not detect a HID device
 wire        pad_rid1;
 wire [11:0] pad_snes;
 usb_pad_rid u_pad_rid (
-    .clk(usbclk), .clr(conerr), .strobe(data_rdy && data_strobe && ~data_strobe_r && typ == 2'd3),
+    .clk(usbclk), .clr(conerr | enum_done), .strobe(data_rdy && data_strobe && ~data_strobe_r && typ == 2'd3),
     .idx(rcvct), .b(ukpdat), .rid1(pad_rid1), .snes(pad_snes)
 );
 assign game_snes = {game_rb, game_lb, game_x, game_a, game_r, game_l, game_d, game_u, game_sta, game_sel, game_y, game_b} | pad_snes;
@@ -67,6 +67,11 @@ ukp ukp(
     .ukprdy(data_rdy), .ukpstb(data_strobe), .ukpdat(ukpdat), .save(save), .save_r(save_r), .save_b(save_b),
     .connected(connected), .conerr(conerr));
 
+// 28/09/2026 (V3.7.3): flanco de subida de `connected` = enumeracion terminada (el `toggle` del microcodigo). Hasta ahi
+// llegan los ZLP DATA1 de la fase de estado de Set_Address/Set_Configuration, que estroban UN byte (00, el primero del
+// CRC) y el decodificador de mandos lo tomaba por "eje X = 00" -> IZQUIERDA pegada (un mando con Report ID nunca
+// manda el 7F que la soltaria). Al terminar la enumeracion se limpia todo lo del mando; despues solo llegan informes.
+wire enum_done = connected & ~connected_r;
 reg  [3:0] rcvct;		// counter for recv data
 reg  data_strobe_r, data_rdy_r;	// delayed data_strobe and data_rdy
 reg  [7:0] dat[8];		// data in last response
@@ -164,7 +169,7 @@ always @(posedge usbclk) begin : process_in_data
     end
     if(~data_rdy && data_rdy_r && typ != 0)    // falling edge of ukp data ready
         report <= 1;
-    if (conerr) begin                          // clear everything on connection error
+    if (conerr || enum_done) begin             // clear everything on connection error (28/09: y al acabar de enumerar)
         game_l <= 0; game_r <= 0; game_u <= 0; game_d <= 0;
         game_a <= 0; game_b <= 0; game_x <= 0; game_y <= 0;
         game_sel <= 0; game_sta <= 0;
@@ -360,18 +365,27 @@ module ukp(
             end
             // start instruction
             dmid <= dmi;
-            if (inst_ready & state == S_OPCODE & inst == 4'b0010) begin // op=start 
-                bitadr <= 0; nak <= 1; nrzrxct <= 0;
-            end else 
-                if(ug==0 && dmi!=dmid) timing <= 1;
-                else                   timing <= timing + 1;
+            // 28/09/2026 (V3.7.3): `timing` se resincroniza en cada flanco TAMBIEN mientras se espera en `start`.
+            // Antes el else-if lo congelaba durante la espera y el primer bit del SYNC se muestreaba en la fase que
+            // tocara. Y `start` asume nivel J previo (dmis <= 1) para que la deteccion del fin del SYNC de abajo no se
+            // dispare con el primer bit.
+            if (inst_ready & state == S_OPCODE & inst == 4'b0010) begin // op=start
+                bitadr <= 0; nak <= 1; nrzrxct <= 0; dmis <= 1;
+            end
+            if(ug==0 && dmi!=dmid) timing <= 1;
+            else                   timing <= timing + 1;
             // IN instruction
             if (sample) begin
                 if (bitadr == 8) nak <= dmi;
                 if(nrzrxct!=6) begin
                     data[6:0] <= data[7:1]; 
                     data[7] <= dmis ~^ dmi;		    // ~^/^~ is XNOR, testing bit equality
-                    bitadr <= bitadr + 1; nrzon <= 0;
+                    // 28/09/2026 (V3.7.3): fin del SYNC (KJKJKJKK) = dos muestras K seguidas -> el siguiente bit es
+                    // el bit 0 del PID: bitadr = 8. Asi da igual si `start` pillo el SYNC ya empezado (un dispositivo
+                    // que responde en 2-3 tiempos de bit lo hace: el microcodigo tarda ~2 bits desde `hiz` hasta
+                    // `start`). Con `start` a tiempo, bitadr ya valia 7 aqui y el resultado es el mismo de antes.
+                    bitadr <= (bitadr < 7'd8 && ~dmis && ~dmi) ? 7'd8 : bitadr + 7'd1;
+                    nrzon <= 0;
                 end else nrzon <= 1;
                 dmis <= dmi;
                 if(dmis ~^ dmi) nrzrxct <= nrzrxct + 1;
