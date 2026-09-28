@@ -71,3 +71,11 @@ Campanas: pf60c (4691-4729): 2/5 GATE OK pero +0,044 y +0,006 ns (no); pf60d (47
 QUE MIRAR EN PLACA: Ajustes "3.7.2"; el mando 0810 en un USB-A: cruceta y stick izquierdo mueven, boton 1 = disparo A,
 boton 2 = B; un mando SNES USB de los de antes: igual que siempre; teclado y raton USB como siempre.
 VOLVER ATRAS: msximus_v3.7.1_dado4679.fs (mismo pack).
+
+28/09 noche — PACKS ACTUALIZADOS (packs/, bios rama port-fixes-2809 = main): en Ajustes, ESC vuelve al navegador SIN
+guardar (los ajustes solo se escriben en Save & Restart) y hay leyenda de teclas en la fila 22. Albert probo el 4759
+con el pack de antes y Ajustes decia "3.7": el tercer digito lo imprime EL MENU NUEVO (lee el puerto 29h); hay que
+cargar pack_bios_msximus.bin de packs/ (o su variante en/N3) junto con el .fs.
+HID 0810 en placa (Albert, 28/09): "la cruceta solo funciona hacia arriba cuando pulso derecha; el disparo si" ->
+el decodificador esta viendo otros bytes de los esperados: pendiente capturar los informes reales del mando en el PC
+(scratchpad hidread.ps1) y corregir usb_pad_rid.v (3.7.3).
