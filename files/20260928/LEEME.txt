@@ -46,3 +46,28 @@ QUE MIRAR EN PLACA
 
 VOLVER ATRAS: files/20260925/msximus_v3.7b_zport_rayas_dado4519.fs (+ packs del 24/09).
 Rama: MSX_up_v3 port-fixes-2809 (V3.5 avanzada por fast-forward). 138K: misma rama, sin build (sin placa ni margen).
+
+================================================================================
+V3.7.2 (28/09/2026, noche) - MANDOS HID GENERICOS POR LOS USB-A (solo arreglos, sobre la 3.7.1)
+================================================================================
+  msximus_v3.7.2_dado4759.fs        (md5 7651149bd872)  campana pf60d, GATE OK, PEOR SETUP +1,11 ns, 0 holds tolerados
+  msximus_v3.7.2_dado4759_jtag.bin  (md5 9cde10183682)
+  Packs: LOS MISMOS de la 3.7.1 (packs/): el menu imprime "3.7.2" porque el puerto 29h ahora da 2.
+
+QUE ARREGLA: un mando USB generico (p.ej. "USB Gamepad" 0810:0001, el que valido Albert en la Zynq) enumeraba en
+los USB-A, respondian los botones y NO SE MOVIA. El usb_hid_host de nand2mario no lee el descriptor HID: solo entiende
+el informe de los mandos "SNES USB" (ejes 00/7F/FF en los bytes 0-1, botones en 5-6); el generico manda
+[Report ID 01h][Rz][Z][X][Y][hat + botones 1-4][botones 5-12], asi que la cruceta (hat) y el stick izquierdo (bytes
+3-4) se ignoraban y el eje Rz del byte 1 dejaba arriba/abajo pegados.
+QUE HAY: fpga/src/usb_direct/usb_pad_rid.v, un decodificador en paralelo que solo opina cuando el byte 0 es 01h:
+cruceta = hat (0..7) O stick izquierdo con umbrales (< 40h / > C0h: valen los sticks analogicos); botones 1/2/3/4 =
+A/B/X/Y (disparo A = boton 1, B = boton 2, como en la Zynq), 5/6 = L/R, 9/10 = SELECT/START. En ese modo el core
+calla sus bytes 1, 5 y 6. Los mandos SNES USB de siempre NO pasan por el nuevo (byte 0 = eje X, nunca 01h) y van igual.
+Coste: 23 LUT y 13 FF. Banco: tools/usb_sim/tb_usb_pad_rid.sv (29 casos = los informes medidos al 0810 en la Zynq
++ un informe SNES ignorado), TODO OK. Los mandos XInput (Xbox y dongles que lo imitan) siguen necesitando el BL616.
+Campanas: pf60c (4691-4729): 2/5 GATE OK pero +0,044 y +0,006 ns (no); pf60d (4733-4787): 2/5, 4751 +0,015 (no) y
+4759 +1,11 (este). Los caminos peores fueron siempre del V9968/CPU (98 % de CLS), nunca del decodificador.
+
+QUE MIRAR EN PLACA: Ajustes "3.7.2"; el mando 0810 en un USB-A: cruceta y stick izquierdo mueven, boton 1 = disparo A,
+boton 2 = B; un mando SNES USB de los de antes: igual que siempre; teclado y raton USB como siempre.
+VOLVER ATRAS: msximus_v3.7.1_dado4679.fs (mismo pack).
