@@ -1,0 +1,51 @@
+MSXimus 60K - V3.7.4 (29/09/2026) - sobre la V3.7.3 - SIN PROBAR EN PLACA
+==========================================================================
+
+QUE TRAE
+--------
+  1. Core: el mux de lectura de la CPU (cpu_din) por GRUPOS en vez de una sola cadena de ~49
+     ternarios: 7 grupos que se resuelven en paralelo y luego en orden (~15 niveles). La
+     prioridad es EXACTAMENTE la de antes (idea de MSXHeroTN de terracide303; demostrado con
+     tools/cpudin_equiv/verify.py = yosys miter+SAT con los `define de la build, con
+     DISABLE_BOOT_MENU y con 5 combinaciones mas, y 200.000 vectores en Icarus).
+     Ajustes dira "3.7.4" (puerto 29h = 4).
+  2. Menu (packs nuevos): navegador ORDENADO (carpetas primero, alfabetico sin mayusculas),
+     SIN ficheros ocultos ni de sistema (System Volume Information, .Trashes, ._x.rom del Mac)
+     y aviso "+" en el contador (112/112+) si una carpeta tiene mas de las 112 entradas que
+     caben (antes 115 y sin aviso). Las listas del File-Hunter van en el orden del servidor.
+
+QUE FLASHEAR
+------------
+  Bitstream:  msximus_v3.7.4_dado4919.fs        (md5 6dae4491adc1)
+              msximus_v3.7.4_dado4919_jtag.bin  (md5 51d15fa7520c)  = impl/pnr/project.bin
+  0x400000    UNO de los packs de packs/ (con el .fs: el "3.7.4" lo imprime el menu nuevo):
+              pack_bios_msximus.bin             castellano, Nextor 2.1.4  (md5 1cd25119db90)
+              pack_bios_msximus_en.bin          ingles,     Nextor 2.1.4  (md5 a113d4aedaad)
+              pack_bios_msximus_nextor3.bin     castellano, Nextor 3 beta (md5 fc8c3ef87d67)
+              pack_bios_msximus_en_nextor3.bin  ingles,     Nextor 3 beta (md5 eac4c0565645)
+  La YRW801 (0x500000) no cambia.
+
+CAMPANA pf60g (4889, 4903, 4909, 4919, 4931): 1/5
+-------------------------------------------------
+  4919  GATE OK, PEOR SETUP +0,51 ns, 0 holds tolerados, CLS 98 %  <- este
+  4889  -0,611 cpu1/WR_n -> mapper_reg1 (cruce 54->27)
+  4909  -0,992 cpu1/IORQ_n -> config3 (54->27) y -0,10 en u_command (clk_86)
+  4931  -0,461 cpu1/IORQ_n -> config2_temp (54->27)
+  4903  sin bitstream (sin rutar al 98 % de CLS)
+  Ningun camino de cpu_din entre los peores. Los rechazos son ESCRITURAS de la CPU a
+  registros de configuracion del dominio de 27 MHz: si otra campana sufre, ese es el
+  siguiente cruce a registrar (igual que se hizo con cpu_run).
+
+QUE MIRAR EN PLACA
+------------------
+  Ajustes "3.7.4". La SD en el navegador: carpetas primero, orden alfabetico, sin System
+  Volume Information ni ._loquesea; una carpeta con mas de 112 ficheros acaba en "+".
+  Juegos de siempre (lectura de la CPU = todo: BIOS, mapper, SD, SCC, OPL4, puertos de
+  diagnostico 20h-2Fh), ROM y DSK, File-Hunter, mando/teclado/raton USB (lo de la 3.7.3).
+
+VOLVER ATRAS: files/20260928/msximus_v3.7.3_dado4831.fs (packs de files/20260928/packs).
+Rama: MSX_up_v3_port port-fixes-2809 (8e29cbc + 2d26ae8). Menu: bios-msxnano-msximus main ee18b2c.
+
+138K (MSXimus_138_port, misma rama, c8d5f53): campana pf138g (4933, 4937, 4943) 0/3 -- el
+V9968 a 88,5 MHz (clk_86) y el cruce CPU->SDRAM 54->108, las mismas familias que las campanas
+anteriores del 138K; nada del mux. Sin placa ni margen: NO se entrega (como siempre).
