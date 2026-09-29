@@ -1061,6 +1061,8 @@ assign keyboard_addr = ppi_port_c[3:0];
     // 3.7.4 = + mux de lectura de la CPU (cpu_din) por grupos (timing) y navegador ordenado sin ocultos (menu).
     // 3.7.5 = + mando USB-A: un ZLP ya no deja IZQUIERDA clavada (el eje X del byte 0 se decide con el 2o byte; con
     //         Report ID el decodificador SNES suelta sus direcciones). En el menu devolvia 18 atras toda seleccion >= 18.
+    //         Y (timing) las escrituras a los puertos de config #40-#46 y al mapper FC-FF con una etapa de registro,
+    //         como el #44 de la V3.7: su cruce 54->27 era el peor camino de casi todos los dados rechazados.
     localparam [7:0] FPGA_PATCH   = 8'd5;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
     // 2Fh y 29h en UN solo termino del mux de cpu_din (un escalon mas en esa cadena costo -0,1 ns en el 60K): las dos
@@ -2595,6 +2597,18 @@ wire [11:0] usb_joy_snes;
     assign mapper_write = mapper_req & ~bus_wr_n;
     assign mapper_reg_write = ( (bus_iorq_n == 0 && bus_m1_n == 1 && bus_wr_n == 0) && (bus_addr [7:2] == 6'b111111) )?1:0;
 
+    // V3.7.5 (29/09): el OUT a FC-FF pasa por UNA etapa de registro (peticion, direccion y dato capturados juntos),
+    // como el #44 de la V3.7: WR_n del T80 -> mapper_reg_write -> CE de mapper_reg* es un cruce 54 -> 27 de 9,26 ns y
+    // salio a -0,611 ns en el dado 4889. El OUT dura ~20 ciclos de 27 MHz y la siguiente busqueda de la CPU llega
+    // cientos de ns despues: un ciclo de 37 ns de retraso no cambia nada.
+    reg       mreg_wr_r = 1'b0;
+    reg [1:0] mreg_a_r  = 2'd0;
+    reg [7:0] mreg_d_r  = 8'd0;
+    always @(posedge clk_27m) begin
+        mreg_wr_r <= mapper_reg_write;
+        mreg_a_r  <= bus_addr[1:0];
+        mreg_d_r  <= cpu_dout[7:0];
+    end
     always @(posedge clk_27m or negedge bus_reset_n) begin
         if (bus_reset_n == 0) begin
             mapper_reg0	<= 8'b00000011;
@@ -2602,12 +2616,12 @@ wire [11:0] usb_joy_snes;
             mapper_reg2	<= 8'b00000001;
             mapper_reg3	<= 8'b00000000;
         end
-        else if (mapper_reg_write == 1) begin
-            case (bus_addr[1:0])
-                2'b00: mapper_reg0 <= cpu_dout[7:0];
-                2'b01: mapper_reg1 <= cpu_dout[7:0];
-                2'b10: mapper_reg2 <= cpu_dout[7:0];
-                2'b11: mapper_reg3 <= cpu_dout[7:0];
+        else if (mreg_wr_r == 1) begin
+            case (mreg_a_r)
+                2'b00: mapper_reg0 <= mreg_d_r;
+                2'b01: mapper_reg1 <= mreg_d_r;
+                2'b10: mapper_reg2 <= mreg_d_r;
+                2'b11: mapper_reg3 <= mreg_d_r;
             endcase
         end
     end
@@ -4594,6 +4608,24 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     wire [7:0] config_dout;
     wire config_req;
 
+    // V3.7.5 (29/09): etapa de registro de las ESCRITURAS a los puertos de config (#40-#43, #45, #46), la misma que
+    // el #44 lleva desde la V3.7 (cfg4_req_r/cfg4_dout_r): IORQ_n/WR_n del T80 -> configN_req -> CE de los config*_ff
+    // es un cruce 54 -> 27 de 9,26 ns y fue el peor camino de casi todos los dados rechazados de pf60g/h/i/j
+    // (-0,02..-1,7 ns). El OUT dura ~20 ciclos de 27 MHz y el par (peticion, dato) se captura junto y coherente en
+    // cada ciclo: llegar un ciclo tarde no cambia nada.
+    reg       cfg0_req_r = 1'b0, cfg1_req_r = 1'b0, cfg2_req_r = 1'b0, cfg3_req_r = 1'b0;
+    reg       cfg5_req_r = 1'b0, cfg6_req_r = 1'b0;
+    reg [7:0] cfg_dout_r = 8'd0;
+    always @ (posedge clk_27m) begin
+        cfg0_req_r <= config0_req;
+        cfg1_req_r <= config1_req;
+        cfg2_req_r <= config2_req;
+        cfg3_req_r <= config3_req;
+        cfg5_req_r <= config5_req;
+        cfg6_req_r <= config6_req;
+        cfg_dout_r <= cpu_dout;
+    end
+
     always @ (posedge clk_27m) begin
         config_reset_ff <= 0;
         config_flash_write_ff <= 0;
@@ -4607,27 +4639,27 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
                                         // Se borran el GM2 (bit6) y los cuartos del cargador (bits 4-5).
         end                             // a cero en cada reset, o el escaneo de slots de la
         if (clk_enable_3m6_27 == 1 ) begin  // BIOS se toparia con el "AB" del GM2 en el slot 1
-            if (config0_req == 1 ) begin
-                config0_ff <= ~cpu_dout;
+            if (cfg0_req_r == 1 ) begin
+                config0_ff <= ~cfg_dout_r;
             end
 
-            if (config1_req == 1 ) begin
+            if (cfg1_req_r == 1 ) begin
                 config1_update <= 1;
-                config1_temp_ff <= cpu_dout;
+                config1_temp_ff <= cfg_dout_r;
             end
-            if (config3_req == 1 ) begin
-                config3_ff <= cpu_dout;
+            if (cfg3_req_r == 1 ) begin
+                config3_ff <= cfg_dout_r;
             end
-            if (config6_req == 1 ) begin
-                config6_ff <= cpu_dout;
+            if (cfg6_req_r == 1 ) begin
+                config6_ff <= cfg_dout_r;
             end
-            if (config2_req == 1 ) begin
+            if (cfg2_req_r == 1 ) begin
                 config2_update <= 1;
-                config2_temp_ff <= cpu_dout[5:0];
-                if ( cpu_dout[6] == 1) begin
+                config2_temp_ff <= cfg_dout_r[5:0];
+                if ( cfg_dout_r[6] == 1) begin
                     config_flash_write_ff <= 1;
                 end
-                if ( cpu_dout[7] == 1) begin
+                if ( cfg_dout_r[7] == 1) begin
                     config_reset_ff <= 1;
                 end
             end
@@ -4682,8 +4714,8 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         // escritura del puerto #45 (menu): mismo bloque que la carga init para un
         // unico driver; config5_req dura todo el ciclo OUT (re-latch inocuo) y no
         // puede coincidir con config_init (el CPU arranca tras el stream de flash)
-        if (config5_req == 1 ) begin
-            config_turbo_boot_ff <= cpu_dout[0];
+        if (cfg5_req_r == 1 ) begin              // V3.7.5: con la etapa de registro (ver cfg0_req_r)
+            config_turbo_boot_ff <= cfg_dout_r[0];
         end
 `ifdef ENABLE_MIXER
         // V3.7: la escritura del #44 va con UNA ETAPA de registro (cfg4_req_r/cfg4_dout_r,
