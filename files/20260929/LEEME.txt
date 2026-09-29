@@ -64,3 +64,20 @@ anteriores del 138K; nada del mux. Sin placa ni margen: NO se entrega (como siem
     tools/usb_sim/tb_usb_hid_host.sv con caso ZLP: antes FALLA (snes=040), con el arreglo OK.
   Mientras tanto la izquierda fantasma tambien la veria un JUEGO; desenchufar y volver a enchufar el
   mando la suelta (hasta el siguiente ZLP).
+
+================================================================================
+V3.7.5 (29/09 noche) - EL ARREGLO DEL MANDO EN EL CORE - SIN PROBAR EN PLACA
+================================================================================
+  Albert confirmo la causa con la 3.7.4: mando conectado y quieto -> PRINT STICK(1) = 7 (izquierda).
+  msximus_v3.7.5_dado5003.fs        (md5 feaf696858b5)  campana pf60i, GATE OK, PEOR SETUP +0,534 ns, 0 holds tolerados
+  msximus_v3.7.5_dado5003_jtag.bin  (md5 1e4b30f992bc)
+  0x400000: packs/pack_bios_msximus.bin (md5 7e00b72b31a5, el de la tarde: joystick sin auto-repetir izq/der).
+  Que trae sobre la 3.7.4: usb_hid_host decide el eje X del byte 0 al llegar el SEGUNDO byte (un ZLP, que llega
+  como un solo byte 00, ya no es "izquierda") y con Report ID suelta las direcciones del decodificador SNES.
+  Ajustes: "3.7.5". QUE MIRAR: con el mando conectado y quieto, PRINT STICK(1) = 0; el mando mueve en las cuatro
+  direcciones; un juego no ve la izquierda fantasma; el navegador baja de la 18 con scroll.
+  Campanas: pf60h (4951-4973) 1/5 gate pero +0,073 ns (no); pf60i (5003-5023): 5003 +0,534 (este), 5009 -0,49
+  y 5023 -0,55 en cpu1/IORQ_n -> config*_ff (el cruce 54->27 de las escrituras a los puertos de config, que se
+  repite desde la pf60g: candidato a registrar si vuelve a molestar), 5011 -2,4, 5021 -0,025 en u_sdio.
+  138K pf138h (4987-4999): 4987 gate +0,044 -> NO se entrega (sin placa ni margen).
+  VOLVER ATRAS: msximus_v3.7.4_dado4919.fs (con el mismo pack).
