@@ -1058,7 +1058,8 @@ assign keyboard_addr = ppi_port_c[3:0];
     // 3.7.1 = HRA x3 (sprites borde izq., R#26/27 por linea, colision 1/linea) + HMMM SCREEN 2 CMD=1 + menu EXTBIO/ASCII16-X.
     // 3.7.2 = + mandos HID genericos (Report ID, hat, sticks) por los USB-A (usb_pad_rid.v).
     // 3.7.3 = + host USB robusto ante mandos que responden rapido (alineacion al SYNC) y sin IZQUIERDA pegada tras enumerar.
-    localparam [7:0] FPGA_PATCH   = 8'd3;
+    // 3.7.4 = + mux de lectura de la CPU (cpu_din) por grupos (timing) y navegador ordenado sin ocultos (menu).
+    localparam [7:0] FPGA_PATCH   = 8'd4;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
     // 2Fh y 29h en UN solo termino del mux de cpu_din (un escalon mas en esa cadena costo -0,1 ns en el 60K): las dos
     // constantes se eligen por bus_addr[2] (2Fh = ...1111, 29h = ...1001) y la sintesis las pliega por bit.
@@ -1110,99 +1111,7 @@ assign keyboard_addr = ppi_port_c[3:0];
         vddr_dbg_s1 <= {vddr_rdy_s[1], vddr_att, vddr_calib10, vddr_boot100};
         vddr_dbg_s2 <= vddr_dbg_s1;
     end
-    always @ (posedge clk_54m) begin
-        cpu_din <=
-                ( verpat_req_r == 1 ) ? verpat_data :
-                ( mdbg_req_r == 1 ) ? mouse_dbg :
-                ( udbg_req_r == 1 ) ? usb_dbg :
-                ( hidrep_req_r == 1 ) ? usb_pad_rep[{bus_addr[2:0], 3'b000} +: 8] :
-                ( ddrc_req_r == 1 ) ? vddr_dbg_s2[23:16] :
-                ( ddrb_req_r == 1 ) ? vddr_dbg_s2[15:8] :
-                ( ddra_req_r == 1 ) ? vddr_dbg_s2[7:0] :
-                // 🚨 14/09: el reg. 15 TIENE que releerse (psgPB = lo ultimo escrito). Devolviendo FFh,
-                // la interrupcion de la BIOS (gatillos: `AND AFh OR 03h` puerto 1 / `AND DFh OR 4Ch`
-                // puerto 2, lee-modifica-escribe) conmutaba el pin 8 del puerto 2 CADA FRAME y el
-                // raton MSX (msx_mouse) perdia sus deltas en ciclos fantasma (PAD(17/18) = 0).
-                // Cazado en la Zynq con la telemetria de escrituras al reg. 15 (valores DF/AF/DF...).
-                ( psg_req_r == 1 ) ? ((psg_addr_latch == 4'd14) ? psg_joy_data :
-                                      (psg_addr_latch == 4'd15) ? psgPB : 8'hFF) :
-                `ifdef ENABLE_SOUND
-                     ( psg2_req_r == 1 ) ? psg2_dout :
-                `endif
-                ( ppi_portb_req_r == 1 ) ? keyboard_data :
-                `ifdef ENABLE_V9958
-                     ( vdp_csr_n == 0) ? vdp_dout :
-                `endif
-                `ifdef ENABLE_MAPPER
-                     ( mapper_read == 1) ? ram_dout :
-                `endif
-                `ifdef ENABLE_BIOS
-                     ( exp_slot0_req_r == 1) ? ~exp_slot0  :
-                     ( exp_slotx_req_r == 1) ? ~exp_slotx  :
-                     ( bios_req == 1) ? ram_dout :
-`ifdef DISABLE_BOOT_MENU
-                     // _127D: SIN MENU — se enmascara la firma "AB" del menu
-                     // (slot expandido, bytes 0x4000/0x4001): el slot-scan de
-                     // la BIOS no ve cartucho y el MSX arranca DIRECTO.
-                     // OJO: tambien salta el init encadenado de esa pagina
-                     // (FM-BIOS del pack) — build de prueba, no de uso diario.
-                     ( subrom_logo_req == 1 ) ? ((bus_addr[14:1] == 14'h2000) ? 8'h00 : ram_dout) :
-`else
-                     ( subrom_logo_req == 1 ) ? ram_dout :
-`endif
-                `endif
-                `ifdef ENABLE_SDCARD
-                     ( sd_busreq_w == 1) ? sd_cd_w :
-                     ( sram_busreq_w == 1) ? sram_cd_w :
-                     ( megarom_req == 1) ? ram_dout :
-                     //( slot3_req_r == 1) ? 8'hff :
-                 `endif
-                `ifdef ENABLE_SOUND
-                     ( megaram_req == 1 ) ? ram_dout:
-                     ( gm2_mem_req == 1 ) ? ram_dout:      // V3.5f: Game Master 2 en el slot 1
-                     ( scc_rd_r == 1 ) ? scc_dout:
-                     ( scc2x_rd_r == 1 ) ? scc2x_dout:
-                    `ifdef ENABLE_Y8950
-                     ( y8950_rd_r == 1 ) ? y8950_dout :   // C0/C1: status (IRQ/timer) del MSX-Audio
-                    `endif
-                    `ifdef ENABLE_OPL4FM
-                     ( opl4fm_rd_w == 1 ) ? opl4fm_dout :     // C4-C7: status/shadow del OPL3
-                     `ifdef ENABLE_OPL4_WAVE
-                     ( opl4pcm_rd_w == 1 ) ? opl4pcm_dout :   // 7E/7F: motor PCM real (_89)
-                     `else
-                     ( opl4wave_rd_w == 1 ) ? opl4wave_dout : // 7F: stub wave (device ID)
-                     `endif
-                    `endif
-                    `ifdef ENABLE_WAVE_DDR3
-                     ( wdbg_rd34_w == 1 ) ? wdbg_diag_ddr3 :  // 34h: diag DDR3 (_95)
-                     ( wdbg_rd35_w == 1 ) ? wdbg_diag_eng :   // 35h: diag motor (_95)
-                     ( wdbg_rd36_w == 1 ) ? wdbg_status :     // 36h: {err,ret,done,act,busy,rdy}
-                     ( wdbg_rd37_w == 1 ) ? wdbg_rdata :      // 37h: byte DDR3 prefetchado
-                    `endif
-                `endif
-                `ifdef ENABLE_CONFIG
-                     ( config_req == 1 && pana_sel == 1 ) ? pana_dout :
-                     ( config_req == 1 && config_ok == 1) ? config_dout :
-                     ( config_req == 1 && config_ok == 0) ? swio_dout :
-                `endif
-                     ( menu2_req == 1 ) ? ram_dout :
-                     ( kanji_data_req_r == 1 ) ? ram_dout :
-                `ifdef ENABLE_WIFI
-                     ( wifi_req == 1 ) ? ram_dout :
-                     ( f2_req_r == 1 ) ? f2_port :
-                     ( uart_req == 1 ) ? uart_dout :
-                `endif
-                     ( logo_req == 1 ) ? ram_dout :
-                `ifdef ENABLE_TURBOR_ID
-                     ( s1990_req == 1 ) ? s1990_dout :   // E4h-E7h: S1990 del turboR
-                `endif
-                     ( rtc_req_r == 1 ) ? rtc_dout :
-                     ( ppi_portc_req_r == 1 ) ? ppi_port_c :   // AAh: releer el latch del puerto C
-                     ( ppi_req_r == 1 ) ? ppi_port_a :
-                     ( slot0_req_r == 1 ) ? 8'hff :
-                     ( slotx_req_r == 1 ) ? 8'hff :
-                      8'hFF;   // STANDALONE: was bus_data (external MSX board). No bus -> FF.
-    end
+    // El mux de lectura de la CPU (cpu_din) esta al final del modulo, por grupos.
 
 
 //    wire ex_bus_rd_n_test;
@@ -6523,5 +6432,194 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
         .DO (keyboard_data),
         .FN (function_keys)
     );
+
+    // ---- cpu_din: el mux de lectura de la CPU, POR GRUPOS (V3.7.4, 29/09/2026) ----
+    // Era una sola cadena de ~48 ternarios (un mux en serie por fuente) y cpu_din
+    // es el final de caminos de clk_54m. Ahora las fuentes van en 7 grupos que se
+    // resuelven EN PARALELO (cada uno con su acierto y su valor) y luego los
+    // grupos entre si, en orden: profundidad = grupo mas largo + numero de grupos
+    // (~15) en vez del total.
+    // La PRIORIDAD es exactamente la de antes: cada grupo es un tramo seguido de
+    // la lista original, en su orden, y dentro se conserva el orden, asi que gana
+    // la primera condicion cierta, como antes. No se supone que las decodificaciones
+    // sean excluyentes. Solo se juntan condiciones VECINAS que dan el mismo valor y
+    // se quitan las dos ultimas (slot0/slotx), que daban 8'hFF = el defecto.
+    // Demostrado equivalente a la cadena vieja con yosys (miter + SAT) con los
+    // `define de esta build y con DISABLE_BOOT_MENU. Esta al final del modulo para
+    // que todo lo que lee este declarado antes (la cadena vieja leia senales
+    // declaradas miles de lineas mas abajo).
+    // Idea de MSXHeroTN (terracide303, commit e48a96f).
+    // diagnostico: version/parche, raton, USB, informe del mando y DDR3
+    wire g1_hit = (verpat_req_r == 1) | (mdbg_req_r == 1) | (udbg_req_r == 1) | (hidrep_req_r == 1)
+                | (ddrc_req_r == 1) | (ddrb_req_r == 1) | (ddra_req_r == 1);
+    wire [7:0] g1_val =
+                ( verpat_req_r == 1 ) ? verpat_data :
+                ( mdbg_req_r == 1 ) ? mouse_dbg :
+                ( udbg_req_r == 1 ) ? usb_dbg :
+                ( hidrep_req_r == 1 ) ? usb_pad_rep[{bus_addr[2:0], 3'b000} +: 8] :
+                ( ddrc_req_r == 1 ) ? vddr_dbg_s2[23:16] :
+                ( ddrb_req_r == 1 ) ? vddr_dbg_s2[15:8] :
+                ( ddra_req_r == 1 ) ? vddr_dbg_s2[7:0] :
+                8'hFF;
+    // PSG (el reg. 15 SE RELEE: ver psgPB), PSG2, PPI B y VDP
+    wire g2_hit = (psg_req_r == 1)
+                `ifdef ENABLE_SOUND
+                | (psg2_req_r == 1)
+                `endif
+                | (ppi_portb_req_r == 1)
+                `ifdef ENABLE_V9958
+                | (vdp_csr_n == 0)
+                `endif
+                ;
+    wire [7:0] g2_val =
+                // 14/09: el reg. 15 TIENE que releerse (psgPB = lo ultimo escrito); con FFh la
+                // interrupcion de la BIOS conmutaba el pin 8 del puerto 2 cada frame (raton MSX).
+                ( psg_req_r == 1 ) ? ((psg_addr_latch == 4'd14) ? psg_joy_data :
+                                      (psg_addr_latch == 4'd15) ? psgPB : 8'hFF) :
+                `ifdef ENABLE_SOUND
+                ( psg2_req_r == 1 ) ? psg2_dout :
+                `endif
+                ( ppi_portb_req_r == 1 ) ? keyboard_data :
+                `ifdef ENABLE_V9958
+                ( vdp_csr_n == 0 ) ? vdp_dout :
+                `endif
+                8'hFF;
+    // memoria: mapper, registros de slot expandido y BIOS/sub-ROM
+    wire g3_hit = 1'b0
+                `ifdef ENABLE_MAPPER
+                | (mapper_read == 1)
+                `endif
+                `ifdef ENABLE_BIOS
+                | (exp_slot0_req_r == 1) | (exp_slotx_req_r == 1) | (bios_req == 1) | (subrom_logo_req == 1)
+                `endif
+                ;
+    wire [7:0] g3_val =
+                `ifdef ENABLE_MAPPER
+                ( mapper_read == 1 ) ? ram_dout :
+                `endif
+                `ifdef ENABLE_BIOS
+                ( exp_slot0_req_r == 1 ) ? ~exp_slot0 :
+                ( exp_slotx_req_r == 1 ) ? ~exp_slotx :
+                ( bios_req == 1 ) ? ram_dout :
+`ifdef DISABLE_BOOT_MENU
+                // _127D: SIN MENU — se enmascara la firma "AB" del menu (slot expandido,
+                // bytes 0x4000/0x4001): el slot-scan de la BIOS no ve cartucho y el MSX
+                // arranca DIRECTO. Build de prueba, no de uso diario.
+                ( subrom_logo_req == 1 ) ? ((bus_addr[14:1] == 14'h2000) ? 8'h00 : ram_dout) :
+`else
+                ( subrom_logo_req == 1 ) ? ram_dout :
+`endif
+                `endif
+                8'hFF;
+    // SD, SRAM, megaROM/megaRAM, Game Master 2 y SCC
+    wire g4_hit = 1'b0
+                `ifdef ENABLE_SDCARD
+                | (sd_busreq_w == 1) | (sram_busreq_w == 1) | (megarom_req == 1)
+                `endif
+                `ifdef ENABLE_SOUND
+                | (megaram_req == 1) | (gm2_mem_req == 1) | (scc_rd_r == 1) | (scc2x_rd_r == 1)
+                `endif
+                ;
+    wire [7:0] g4_val =
+                `ifdef ENABLE_SDCARD
+                ( sd_busreq_w == 1 ) ? sd_cd_w :
+                ( sram_busreq_w == 1 ) ? sram_cd_w :
+                ( megarom_req == 1 ) ? ram_dout :
+                `endif
+                `ifdef ENABLE_SOUND
+                ( megaram_req == 1 || gm2_mem_req == 1 ) ? ram_dout :   // V3.5f: GM2 en el slot 1
+                ( scc_rd_r == 1 ) ? scc_dout :
+                ( scc2x_rd_r == 1 ) ? scc2x_dout :
+                `endif
+                8'hFF;
+    // chips de sonido con lectura: Y8950, OPL4 (FM y PCM/stub) y diagnostico de la DDR3 de ondas
+    wire g5_hit = 1'b0
+                `ifdef ENABLE_SOUND
+                `ifdef ENABLE_Y8950
+                | (y8950_rd_r == 1)
+                `endif
+                `ifdef ENABLE_OPL4FM
+                | (opl4fm_rd_w == 1)
+                `ifdef ENABLE_OPL4_WAVE
+                | (opl4pcm_rd_w == 1)
+                `else
+                | (opl4wave_rd_w == 1)
+                `endif
+                `endif
+                `ifdef ENABLE_WAVE_DDR3
+                | (wdbg_rd34_w == 1) | (wdbg_rd35_w == 1) | (wdbg_rd36_w == 1) | (wdbg_rd37_w == 1)
+                `endif
+                `endif
+                ;
+    wire [7:0] g5_val =
+                `ifdef ENABLE_SOUND
+                `ifdef ENABLE_Y8950
+                ( y8950_rd_r == 1 ) ? y8950_dout :       // C0/C1: status (IRQ/timer) del MSX-Audio
+                `endif
+                `ifdef ENABLE_OPL4FM
+                ( opl4fm_rd_w == 1 ) ? opl4fm_dout :     // C4-C7: status/shadow del OPL3
+                `ifdef ENABLE_OPL4_WAVE
+                ( opl4pcm_rd_w == 1 ) ? opl4pcm_dout :   // 7E/7F: motor PCM real (_89)
+                `else
+                ( opl4wave_rd_w == 1 ) ? opl4wave_dout : // 7F: stub wave (device ID)
+                `endif
+                `endif
+                `ifdef ENABLE_WAVE_DDR3
+                ( wdbg_rd34_w == 1 ) ? wdbg_diag_ddr3 :  // 34h: diag DDR3 (_95)
+                ( wdbg_rd35_w == 1 ) ? wdbg_diag_eng :   // 35h: diag motor (_95)
+                ( wdbg_rd36_w == 1 ) ? wdbg_status :     // 36h: {err,ret,done,act,busy,rdy}
+                ( wdbg_rd37_w == 1 ) ? wdbg_rdata :      // 37h: byte DDR3 prefetchado
+                `endif
+                `endif
+                8'hFF;
+    // configuracion (Panasonic, config, switched I/O), 2a mitad del menu y kanji
+    wire g6_hit = 1'b0
+                `ifdef ENABLE_CONFIG
+                | (config_req == 1 && pana_sel == 1) | (config_req == 1 && config_ok == 1)
+                | (config_req == 1 && config_ok == 0)
+                `endif
+                | (menu2_req == 1) | (kanji_data_req_r == 1);
+    wire [7:0] g6_val =
+                `ifdef ENABLE_CONFIG
+                ( config_req == 1 && pana_sel == 1 ) ? pana_dout :
+                ( config_req == 1 && config_ok == 1 ) ? config_dout :
+                ( config_req == 1 && config_ok == 0 ) ? swio_dout :
+                `endif
+                ( menu2_req == 1 || kanji_data_req_r == 1 ) ? ram_dout :
+                8'hFF;
+    // WiFi (ROM UNAPI, F2, UART), logo, S1990, RTC y PPI C/A
+    wire g7_hit = 1'b0
+                `ifdef ENABLE_WIFI
+                | (wifi_req == 1) | (f2_req_r == 1) | (uart_req == 1)
+                `endif
+                | (logo_req == 1)
+                `ifdef ENABLE_TURBOR_ID
+                | (s1990_req == 1)
+                `endif
+                | (rtc_req_r == 1) | (ppi_portc_req_r == 1) | (ppi_req_r == 1);
+    wire [7:0] g7_val =
+                `ifdef ENABLE_WIFI
+                ( wifi_req == 1 ) ? ram_dout :
+                ( f2_req_r == 1 ) ? f2_port :
+                ( uart_req == 1 ) ? uart_dout :
+                `endif
+                ( logo_req == 1 ) ? ram_dout :
+                `ifdef ENABLE_TURBOR_ID
+                ( s1990_req == 1 ) ? s1990_dout :        // E4h-E7h: S1990 del turboR
+                `endif
+                ( rtc_req_r == 1 ) ? rtc_dout :
+                ( ppi_portc_req_r == 1 ) ? ppi_port_c :  // AAh: releer el latch del puerto C
+                ( ppi_req_r == 1 ) ? ppi_port_a :
+                8'hFF;
+    always @ (posedge clk_54m) begin
+        cpu_din <= g1_hit ? g1_val :
+                   g2_hit ? g2_val :
+                   g3_hit ? g3_val :
+                   g4_hit ? g4_val :
+                   g5_hit ? g5_val :
+                   g6_hit ? g6_val :
+                   g7_hit ? g7_val :
+                   8'hFF;   // STANDALONE: was bus_data (external MSX board). No bus -> FF.
+    end
 
 endmodule
