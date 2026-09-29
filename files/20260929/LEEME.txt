@@ -19,10 +19,10 @@ QUE FLASHEAR
   Bitstream:  msximus_v3.7.4_dado4919.fs        (md5 6dae4491adc1)
               msximus_v3.7.4_dado4919_jtag.bin  (md5 51d15fa7520c)  = impl/pnr/project.bin
   0x400000    UNO de los packs de packs/ (con el .fs: el "3.7.4" lo imprime el menu nuevo):
-              pack_bios_msximus.bin             castellano, Nextor 2.1.4  (md5 1cd25119db90)
-              pack_bios_msximus_en.bin          ingles,     Nextor 2.1.4  (md5 a113d4aedaad)
-              pack_bios_msximus_nextor3.bin     castellano, Nextor 3 beta (md5 fc8c3ef87d67)
-              pack_bios_msximus_en_nextor3.bin  ingles,     Nextor 3 beta (md5 eac4c0565645)
+              pack_bios_msximus.bin             castellano, Nextor 2.1.4  (md5 7e00b72b31a5)
+              pack_bios_msximus_en.bin          ingles,     Nextor 2.1.4  (md5 4e96626a62cc)
+              pack_bios_msximus_nextor3.bin     castellano, Nextor 3 beta (md5 9e0f4f157a96)
+              pack_bios_msximus_en_nextor3.bin  ingles,     Nextor 3 beta (md5 c72697857f2b)
   La YRW801 (0x500000) no cambia.
 
 CAMPANA pf60g (4889, 4903, 4909, 4919, 4931): 1/5
@@ -49,3 +49,18 @@ Rama: MSX_up_v3_port port-fixes-2809 (8e29cbc + 2d26ae8). Menu: bios-msxnano-msx
 138K (MSXimus_138_port, misma rama, c8d5f53): campana pf138g (4933, 4937, 4943) 0/3 -- el
 V9968 a 88,5 MHz (clk_86) y el cruce CPU->SDRAM 54->108, las mismas familias que las campanas
 anteriores del 138K; nada del mux. Sin placa ni margen: NO se entrega (como siempre).
+
+================================================================================
+29/09 tarde - "al bajar a la ultima entrada visible salta arriba y no hace scroll" (video de Albert)
+================================================================================
+  NO era el scroll: con el mando USB conectado el puerto 1 daba IZQUIERDA permanente, y el menu la
+  auto-repetia cada 2 frames. IZQUIERDA = saltar 18 filas atras y solo actua con la seleccion >= 18:
+  al llegar a la 18 volvia a la 0 (y de la 20 a la 2). Reproducido en openMSX con el joystick clavado
+  a la izquierda (tools/test_navegador/browse_test.py --joy-left en el repo de la BIOS).
+  - PACKS NUEVOS (packs/, md5 arriba): el joystick solo auto-repite ARRIBA/ABAJO. Con ellos el menu va
+    bien YA con este mismo .fs 3.7.4, aunque el mando siga dando la izquierda fantasma.
+  - CAUSA (RTL, V3.7.5, campana pf60h en marcha): un ZLP del mando (DATA vacio) llegaba como UN byte 00
+    y el host lo tomaba por "eje X = 00" = IZQUIERDA; con Report ID (0810) nada la soltaba. Banco
+    tools/usb_sim/tb_usb_hid_host.sv con caso ZLP: antes FALLA (snes=040), con el arreglo OK.
+  Mientras tanto la izquierda fantasma tambien la veria un JUEGO; desenchufar y volver a enchufar el
+  mando la suelta (hasta el siguiente ZLP).
