@@ -131,11 +131,18 @@ always @(posedge usbclk) begin : process_in_data
                         // game_l <= 0; game_r <= 0; game_u <= 0; game_d <= 0;
                     end else
                         valid <= 0;
-                    if (ukpdat==8'h00) {game_l, game_r} <= 2'b10;
-                    if (ukpdat==8'h7f) {game_l, game_r} <= 2'b00;
-                    if (ukpdat==8'hff) {game_l, game_r} <= 2'b01;
                 end
-                1: if (!pad_rid1) begin        // 28/09: con Report ID el byte 1 es un eje del stick derecho: no es arriba/abajo
+                // 29/09/2026 (V3.7.5): el eje X del byte 0 se decide AQUI, con el segundo byte ya dentro (dat[0]). Un
+                // ZLP por EP1 llega como UN solo byte 00 (el primero del CRC) y ponia IZQUIERDA; con un mando con
+                // Report ID ningun informe la soltaba (nunca trae 7Fh en el byte 0) y en el menu cada seleccion
+                // >= 18 volvia 18 atras. Un ZLP no pasa de rcvct 0. Y con Report ID el byte 0 no es un eje: se
+                // sueltan las cuatro direcciones de este decodificador (las da usb_pad_rid).
+                1: if (pad_rid1)
+                    {game_l, game_r, game_u, game_d} <= 4'b0000;
+                else begin                     // 28/09: con Report ID el byte 1 es un eje del stick derecho: no es arriba/abajo
+                    if (dat[0]==8'h00) {game_l, game_r} <= 2'b10;
+                    if (dat[0]==8'h7f) {game_l, game_r} <= 2'b00;
+                    if (dat[0]==8'hff) {game_l, game_r} <= 2'b01;
                     if (ukpdat==8'h00) {game_u, game_d} <= 2'b10;
                     if (ukpdat==8'h7f) {game_u, game_d} <= 2'b00;
                     if (ukpdat==8'hff) {game_u, game_d} <= 2'b01;

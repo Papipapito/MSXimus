@@ -74,6 +74,21 @@ module tb_usb_hid_host;
         rsnes = {8'h00, b6, b5, 8'h80, 8'h80, 8'h80, y, x};
     endfunction
 
+    // 29/09 (60K, V3.7.4): el dispositivo contesta tres IN de EP1 con un ZLP (DATA vacio). El host lo estroba como
+    // UN byte 00 (el primero del CRC); con la decision del eje X en el byte 0 eso era IZQUIERDA, y con un mando con
+    // Report ID ningun informe posterior la soltaba (nunca trae 7Fh en el byte 0): en el menu, cada seleccion >= 18
+    // volvia 18 atras (IZQUIERDA del joystick = pagina anterior) y parecia que la lista no hacia scroll.
+    task automatic zlp_burst;
+        integer n0, t;
+        begin
+            rep_len = 4'd0; n0 = n_ep1; t = 0;
+            while (n_ep1 < n0 + 3 && t < 60_000_000) begin @(posedge clk); t = t + 1; end
+            repeat (200) @(posedge clk);
+            $display("     tras %0d ZLP: snes=%03x", n_ep1 - n0, snes);
+            rep_len = 4'd8;
+        end
+    endtask
+
     integer t0;
     initial begin
         if ($value$plusargs("LAT=%d", lat)) latc = lat * 8;
@@ -106,6 +121,8 @@ module tb_usb_hid_host;
             probe("snes abajo",      rsnes(8'h7F, 8'hFF, 8'h0F, 8'h00), DN);
             probe("snes boton A",    rsnes(8'h7F, 8'h7F, 8'h2F, 8'h00), A);
             probe("snes reposo 2",   rsnes(8'h7F, 8'h7F, 8'h0F, 8'h00), 12'h000);
+            zlp_burst;
+            probe("snes tras ZLP",   rsnes(8'h7F, 8'h7F, 8'h0F, 8'h00), 12'h000);
         end else begin
             if (typ != 2'd3) begin $display("FAIL typ=%0d", typ); fails = fails + 1; end
             probe("0810 reposo",         r0810(8'h80, 8'h80, 8'h7F, 8'h7F, 8'h0F, 8'h00), 12'h000);
@@ -116,6 +133,10 @@ module tb_usb_hid_host;
             probe("0810 boton 1",        r0810(8'h80, 8'h80, 8'h7F, 8'h7F, 8'h1F, 8'h00), A);
             probe("0810 boton 2",        r0810(8'h80, 8'h80, 8'h7F, 8'h7F, 8'h2F, 8'h00), B);
             probe("0810 reposo 2",       r0810(8'h80, 8'h80, 8'h7F, 8'h7F, 8'h0F, 8'h00), 12'h000);
+            zlp_burst;
+            probe("0810 tras ZLP",       r0810(8'h80, 8'h80, 8'h7F, 8'h7F, 8'h0F, 8'h00), 12'h000);
+            probe("0810 hat izq tras ZLP", r0810(8'h80, 8'h80, 8'h7F, 8'h7F, 8'h06, 8'h00), LF);
+            probe("0810 reposo 3",       r0810(8'h80, 8'h80, 8'h7F, 8'h7F, 8'h0F, 8'h00), 12'h000);
         end
         $display("%0s: %0s latencia %0d ciclos -> %0d fallos (informes=%0d, IN EP1=%0d, ACK=%0d)",
                  fails == 0 ? "RESULTADO OK" : "RESULTADO FAIL", devs, latc, fails, nrep, n_ep1, n_ack);

@@ -1059,7 +1059,9 @@ assign keyboard_addr = ppi_port_c[3:0];
     // 3.7.2 = + mandos HID genericos (Report ID, hat, sticks) por los USB-A (usb_pad_rid.v).
     // 3.7.3 = + host USB robusto ante mandos que responden rapido (alineacion al SYNC) y sin IZQUIERDA pegada tras enumerar.
     // 3.7.4 = + mux de lectura de la CPU (cpu_din) por grupos (timing) y navegador ordenado sin ocultos (menu).
-    localparam [7:0] FPGA_PATCH   = 8'd4;
+    // 3.7.5 = + mando USB-A: un ZLP ya no deja IZQUIERDA clavada (el eje X del byte 0 se decide con el 2o byte; con
+    //         Report ID el decodificador SNES suelta sus direcciones). En el menu devolvia 18 atras toda seleccion >= 18.
+    localparam [7:0] FPGA_PATCH   = 8'd5;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
     // 2Fh y 29h en UN solo termino del mux de cpu_din (un escalon mas en esa cadena costo -0,1 ns en el 60K): las dos
     // constantes se eligen por bus_addr[2] (2Fh = ...1111, 29h = ...1001) y la sintesis las pliega por bit.
