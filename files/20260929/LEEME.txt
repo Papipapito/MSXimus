@@ -69,7 +69,9 @@ anteriores del 138K; nada del mux. Sin placa ni margen: NO se entrega (como siem
 V3.7.5 (29/09 noche) - EL ARREGLO DEL MANDO EN EL CORE - SIN PROBAR EN PLACA
 ================================================================================
   Albert confirmo la causa con la 3.7.4: mando conectado y quieto -> PRINT STICK(1) = 7 (izquierda).
-  msximus_v3.7.5_dado5003.fs        (md5 feaf696858b5)  campana pf60i, GATE OK, PEOR SETUP +0,534 ns, 0 holds tolerados
+  msximus_v3.7.5_dado5003.fs        (md5 feaf696858b5)  *** RETIRADO: la DDR3 de la VRAM no calibra (negro;
+                                                        la maquina va, F11 pone turbo). Renombrado a _RETIRADO_no_calibra ***
+                                     campana pf60i, GATE OK, PEOR SETUP +0,534 ns, 0 holds tolerados
   msximus_v3.7.5_dado5003_jtag.bin  (md5 1e4b30f992bc)
   0x400000: packs/pack_bios_msximus.bin (md5 7e00b72b31a5, el de la tarde: joystick sin auto-repetir izq/der).
   Que trae sobre la 3.7.4: usb_hid_host decide el eje X del byte 0 al llegar el SEGUNDO byte (un ZLP, que llega
@@ -80,4 +82,32 @@ V3.7.5 (29/09 noche) - EL ARREGLO DEL MANDO EN EL CORE - SIN PROBAR EN PLACA
   y 5023 -0,55 en cpu1/IORQ_n -> config*_ff (el cruce 54->27 de las escrituras a los puertos de config, que se
   repite desde la pf60g: candidato a registrar si vuelve a molestar), 5011 -2,4, 5021 -0,025 en u_sdio.
   138K pf138h (4987-4999): 4987 gate +0,044 -> NO se entrega (sin placa ni margen).
+  VOLVER ATRAS: msximus_v3.7.4_dado4919.fs (con el mismo pack).
+
+================================================================================
+V3.7.5b (29-30/09) - TRES CANDIDATOS - PROBAR LOS TRES - SIN PROBAR EN PLACA
+================================================================================
+  Lo mismo que la 3.7.5 (mando sin IZQUIERDA fantasma) + TIMING: las escrituras a los puertos de config (#40-#43,
+  #45, #46) y al mapper (FC-FF) pasan por una etapa de registro en 27 MHz, como el #44 desde la V3.7. Su cruce
+  54 a 27 MHz era el peor camino de casi todos los dados rechazados: 15 dados de la 3.7.5 dieron UN solo candidato
+  (el 5003, que encima no calibraba la DDR3). Con esto la campana pf60k da 3 de 5 con margen.
+  Banco: tools/cfgreg_sim (20.000 OUT: registros iguales al codigo de antes; los pulsos de update/flash/reset
+  llegan igual, su numero puede variar en uno como ya pasaba y flash_rw ignora los que caen mientras escribe).
+  Ajustes sigue diciendo "3.7.5".
+
+  CANDIDATOS (todos GATE OK, 0 holds tolerados, CLS 98 %):
+    msximus_v3.7.5b_dado5107.fs  (md5 5b0b96311bd4)  _jtag.bin 441c0308b753   PEOR SETUP +0,985 ns
+    msximus_v3.7.5b_dado5099.fs  (md5 ad3fcf18c52a)  _jtag.bin bc025ebba960   PEOR SETUP +0,955 ns
+    msximus_v3.7.5b_dado5101.fs  (md5 6bb6954c13b0)  _jtag.bin 8dc10eda8314   PEOR SETUP +0,526 ns
+  0x400000: packs/pack_bios_msximus.bin (md5 7e00b72b31a5), el mismo de la tarde.
+
+  COMO PROBARLOS (por la loteria de calibracion de la DDR3: ~la mitad de los dados buenos no calibran):
+    Por orden 5107, 5099, 5101. Con el CARGADOR (no el USB del PC), apagar y encender 2 o 3 veces.
+    Imagen a la primera y en BASIC:  PRINT INP(&H2C) AND 127   -> 0 = la DDR3 calibro a la primera
+                                      PRINT STICK(1)            -> 0 con el mando conectado y quieto
+    El primero que cumpla las dos cosas es la V3.7.5. Si ninguno calibra: la siguiente palanca es la IP de la DDR3.
+
+  Campana pf60k (5087, 5099, 5101, 5107, 5113): 5087 -0,022 en cpu1/IStatus (otro camino), 5113 sin rutar.
+  138K pf138i (5119, 5147, 5153): 0/3, cruce CPU a SDRAM (cpu1/u0/DO), su problema de siempre: NO se entrega.
+  Ramas: MSX_up_v3_port port-fixes-2809 9ff2c3a, MSXimus_138_port 99c73fa.
   VOLVER ATRAS: msximus_v3.7.4_dado4919.fs (con el mismo pack).
