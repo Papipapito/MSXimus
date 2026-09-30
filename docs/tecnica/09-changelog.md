@@ -234,9 +234,8 @@ Core: dado 4001, c70eae6d, margen 0,771 ns (clk_54m→clk_108m, `u_sddma` → `m
 
 ## Pendiente
 
-- ~~Xevious Fardraut Saga: el marcador en blanco~~: arreglado con la generación C del V9968 (v3.7); Albert confirma el 30 de septiembre, con la 3.7.6, que va perfecto. El guardado de Manbow 2 (flash AMD en el cartucho) se descarta.
+- ~~Xevious Fardraut Saga: el marcador en blanco~~: arreglado con la generación C del V9968 (v3.7); Albert confirma el 30 de septiembre, con la 3.7.6, que va perfecto. El guardado de Manbow 2 (flash AMD en el cartucho) se descarta. Y la fase 3 de la SD (reloj de la tarjeta a 13,5 MHz) también: solo aceleraría la DMA, de 640 a ~1.000 KB/s teóricos, y en el 60K sería una función nueva con campaña al 98 % de CLS. Si algún día hiciera falta velocidad, la palanca es el bus de 4 bits: DAT1-DAT3 están cableados a la FPGA y hoy van fijos a 1.
 - ~~Validar un mando USB HID genérico en un USB-A~~: validado con la v3.7.5 el 30 de septiembre. El ratón sin INDEV quedó validado el 16 de septiembre con el 3593.
 - La línea 138K: ninguna campaña desde la v3.7 da margen (el V9968 a 88,5 MHz y el cruce CPU → SDRAM); necesita trabajo de timing propio, no más dados, y no hay placa para probarla.
 - Entender por qué el `cpu_run` registrado (v3.6d) deja la SDRAM sin arrancar, si es que es él: un segundo dado con y sin el registro lo cerraría.
-- Fase 3 de la SD: reloj de la tarjeta a 13,5 MHz, que exige rehacer el divisor y el muestreo.
 - Publicar la v3.6: carpeta de release, notas y créditos.
