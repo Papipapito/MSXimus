@@ -1,0 +1,29 @@
+MSXimus 60K - V3.7.6 (30/09/2026) - sobre la V3.7.5 - SIN PROBAR EN PLACA
+==========================================================================
+
+QUE FLASHEAR
+------------
+  Bitstream:  msximus_v3.7.6_dado5197.fs        (md5 0fb615fd925d)
+              msximus_v3.7.6_dado5197_jtag.bin  (md5 2deacdb387ac)  = impl/pnr/project.bin del mismo dado
+  Pack:       el MISMO de la 3.7.5 (files/20260929/packs/pack_bios_msximus.bin, md5 7e00b72b31a5, o su variante
+              en / nextor3). Si ya lo tienes cargado, no hace falta tocarlo. Ajustes dira "3.7.6" (puerto 29h = 6).
+
+QUE TRAE (solo arreglos: los tres del V9968 que HRA subio el 29/09, los mismos que la Zynq Z1.2.1)
+  1. El par de bytes a medias del puerto 99h se cancela con CUALQUIER lectura (98h-9Bh) y con una escritura a 98h,
+     como en el V9938/V9958 real (antes solo lo cancelaba la lectura de status). Fleet Commander II escribe un numero
+     impar de bytes en 99h y cuenta con ello. El 1er byte de la paleta comparte ese latch (como openMSX).
+  2. LMMM/HMMM/YMMM con DIY acaban cuando el ORIGEN llega a Y = 0 (antes solo miraban el destino).
+  3. El paso de pixel de los comandos se registra al escribir R#46: es el arreglo de HRA de nuestro aviso del HMMM en
+     SCREEN 2 (issue #10), con FG4 bien tratado; sustituye a nuestro ff_byte_mode de la 3.7.1.
+  Verificacion: los mismos bancos que en la Zynq (tb_port1_latch de HRA 12/12, g2cmd_check con 24 casos DIY y 60
+  SCREEN 5-8 bit a bit, run_cpuif_dbl, run_spcol_vl) sobre ficheros IDENTICOS a los de la Zynq, donde ademas se
+  probo en placa: la prueba del latch da "0 0 169" con el core de antes y "167 168 169" con este.
+  Prueba en BASIC (la misma): fpga/zynq/tools/mk_latch_img.py del repo de la Zynq genera el AUTOEXEC.BAS.
+
+CAMPANA pf60l (5167, 5171, 5179, 5189, 5197): 1/5
+  5197 GATE OK, peor setup +0,965 ns (clk_86, u_v68shim sc_tag -> sc_d*; clk_54m "fMax FAIL" = el artefacto conocido).
+  5167 -1,9 ns (cpu1 IStatus), 5171 -2,2 ns (uadpcmmem / u_v68shim), 5179 y 5189 sin rutar (98 % de CLS).
+  Recordatorio de la 3.7.5: el 5003 pasaba el gate y NO calibraba la DDR3 en placa. Si este no da imagen al primer
+  arranque, avisa y lanzo otra campana (siguientes primos: 5209, 5227, 5231, 5233, 5237).
+
+VOLVER ATRAS: files/20260929/msximus_v3.7.5_dado5099.fs (mismo pack).
