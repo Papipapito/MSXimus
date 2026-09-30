@@ -70,6 +70,8 @@ Un artefacto conocido: el informe dice que `clk_54m` no alcanza su frecuencia au
 - **Los muxes en cascada se aplanan.** Una cascada de diez ternarios que devuelven lo mismo en todas las ramas es un OR plano; el decodificador de slots se reescribió así.
 - **Los cruces 54 → 108 MHz** entre el bus y el controlador de memoria son los que más margen pierden; el último fue el término de refresco `cpu_run`, registrado en la 3.6d.
 - **La BSRAM está al 100 %.** Cualquier función nueva tiene que hacerse sin ella; la DMA de la SD se diseñó con ese límite.
+- **Cuando el peor camino se repite, se arregla el camino, no se tiran más dados.** En la v3.7.5 las escrituras de la CPU a los puertos de configuración y al mapper (`IORQ_n`/`WR_n` → `config*_ff`, `mapper_reg*`, un cruce de 54 a 27 MHz con 9,26 ns) fueron el peor camino de casi todos los rechazos: quince dados dieron un solo candidato con margen. Registrarlas una vez en 27 MHz, como el 44h desde la v3.7, dio tres de cinco en la campaña siguiente. El banco `tools/cfgreg_sim` compara la versión vieja y la nueva con 20.000 OUT.
+- **El mux de lectura de la CPU (`cpu_din`) en árbol** (v3.7.4): los ~49 ternarios en cadena van en siete grupos contiguos que se resuelven en paralelo y luego en orden. La prioridad es idéntica (se demuestra con `tools/cpudin_equiv/verify.py`: yosys con miter y SAT, más 200.000 vectores en Icarus). En el MSXnano, con seis dados, llevó el cierre de 3 de 6 a 6 de 6.
 - **Un core aislado no predice la build.** Un módulo que cierra temporización solo puede no cerrar dentro del top con el 98 % ocupado; lo que vale es la campaña.
 
 ## 6. Entregar
@@ -78,7 +80,7 @@ Cada entrega va a `files/<fecha>/`, fuera de git, y lleva:
 
 - El `.fs` y su `_jtag.bin`, siempre en pareja, con el dado en el nombre.
 - Un `LEEME_<versión>.txt` con qué cambia, los resultados de la campaña dado a dado con el peor camino de cada uno, los hashes, y qué probar en placa.
-- Si hay respaldo, el segundo dado con su nombre.
+- **Todos los candidatos con margen, no solo el mejor.** La calibración de la DDR3 de la VRAM es una lotería por dado: más o menos la mitad de los que pasan el gate no calibran y dan negro con la máquina funcionando por debajo (F11 cambia el turbo). En la v3.7.5 el 5003 pasó con 0,534 ns y dio negro; de los tres de la campaña siguiente, el 5099 calibró. Se prueban desde un cargador, apagando y encendiendo, con `PRINT INP(&H2C) AND 127`.
 
 El `_jtag.bin` sale del `.fs` con el conversor del proyecto y es lo que se flashea por el BL616. Al publicar en GitHub, la pareja se copia además a `mi_release/<versión>/`.
 

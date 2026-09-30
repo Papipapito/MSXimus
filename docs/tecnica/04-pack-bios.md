@@ -56,6 +56,10 @@ Los dos bancos de la página 2 llevan guardas (`ds #A000-$` y `ds #C000-$`) que 
 
 Un solo fuente sirve para las dos máquinas: `MSXIMUS=1` o `0` en `menu_main.asm`, y el resto son bloques `IF MSXIMUS`. El MSXnano se queda con el menú de 16 KB descomprimido en RAM; el MSXimus, con el de 32 KB.
 
+Desde el 24 de septiembre de 2026 cada máquina tiene **cuatro packs**: el menú en castellano o en inglés (`ENGLISH=1`, sufijo `_en`) por Nextor 2.1.4 o 3 (sufijo `_nextor3`). `tools/hacer_packs.py` los hace todos de una vez.
+
+El navegador ordena la carpeta desde la v3.7.4 (29 de septiembre): la tabla de entradas se llena en el orden de la FAT y se ordena un **índice de un byte por entrada**, `SORT_IDX` en E600h, alineado a página, por inserción binaria (carpetas primero, luego nombre sin mayúsculas). `ent_addr`, el único acceso del navegador a una entrada, lee a través del índice. Por eso la capacidad bajó de 115 a 112 entradas; el byte siguiente, `LIST_FULL`, vale `+` si no cabían todas. El filtro del escaneo descarta volumen, ocultos y sistema (máscara 0Eh del atributo). Los bancos de prueba, en un Z80 de openMSX, están en `tools/test_navegador/` del repo de la BIOS: `gen_test.py` (la ordenación), `scan_test.py` (un directorio FAT16 de punta a punta) y `browse_test.py` (el navegador con teclas reales y, con `--joy-left`, un joystick con la izquierda atascada).
+
 ## 4. Construir
 
 Todo desde WSL:

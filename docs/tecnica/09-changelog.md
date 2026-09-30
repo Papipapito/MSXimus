@@ -134,6 +134,44 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## v3.7.5 publicada (30 de septiembre, tag `v3.7.5`): dado 5099
+
+Validada en placa por Albert el 30 de septiembre: imagen desde el primer encendido (la DDR3 calibra), el navegador ordenado y un mando USB genérico sin la izquierda fantasma. Release en GitHub con `MSXimus_v3.7.5.fs` (ad3fcf18, `_jtag.bin` bc025ebb; campaña pf60k, peor setup 0,955 ns en el clk_108m, holds a cero), los cuatro packs del 29 de septiembre (2.1.4 7e00b72b, inglés 4e96626a, Nextor 3 9e0f4f15, inglés con Nextor 3 c7269785), la `yrw801.bin` y los firmwares del C6 y del BL616 de la v3.7, que no cambian. La rama pública `V3.7` avanza a este commit. Respaldo sin probar: 5107 (5b0b9631, 0,985 ns) y 5101 (6bb6954c, 0,526 ns). La línea 138K lleva los mismos cambios en su rama, pero ninguna campaña ha dado margen (pf138g, h, i: el V9968 a 88,5 MHz y el cruce CPU → SDRAM, sus familias de siempre) y no se publica.
+
+## v3.7.5 (29 de septiembre): la izquierda fantasma del mando y las escrituras de configuración
+
+- **La izquierda fantasma** (f935536). Albert, con la 3.7.4 y un vídeo: en el navegador, al bajar a la última entrada visible, la lista volvía arriba en vez de hacer scroll. No era el scroll: con el mando conectado, `PRINT STICK(1)` daba 7 con el mando quieto. El menú autorrepetía esa izquierda cada dos cuadros, y la izquierda del navegador salta 18 entradas atrás solo con la selección en la 18 o más: toda selección a partir de la 18 volvía 18 atrás (18 → 0, 20 → 2). La causa, en `usb_hid_host`: el decodificador de los mandos SNES decidía el eje X con el byte 0 nada más llegar, y un paquete vacío (ZLP) por EP1 se estroba como un solo byte 00, el primero del CRC: «eje X = 00», izquierda. Con un mando con Report ID (0810) ningún informe la soltaba, porque nunca trae 7Fh en el byte 0; la 3.7.3 solo limpiaba al acabar la enumeración. Ahora el byte 0 se evalúa al llegar el segundo byte (un ZLP no pasa de ahí) y con Report ID se sueltan las cuatro direcciones de ese decodificador. `tb_usb_hid_host` con un caso ZLP: con el RTL anterior falla (palabra 040h), con el arreglo pasa; FPGA_PATCH = 5.
+- **Menú** (bios 72a8b47): el joystick solo autorrepite arriba y abajo; izquierda y derecha cuentan una vez por pulsación. Con este pack el navegador ya iba bien sobre la 3.7.4. `tools/test_navegador/browse_test.py --joy-left` reproduce el vídeo con el menú anterior.
+- **Timing: las escrituras de configuración registradas** (9ff2c3a). Tres campañas con el arreglo del mando (pf60h 4951-4973, pf60i 5003-5023, pf60j 5039-5081): quince dados, cuatro por el gate, uno con margen, el **5003** (feaf6968, 0,534 ns), entregado como 3.7.5 y **retirado**: pantalla negra con la máquina funcionando (F11 cambia el turbo), la DDR3 de la VRAM no calibra. Casi todos los rechazos caían en el mismo camino, `IORQ_n`/`WR_n` del T80 → `config*_ff` y `mapper_reg*` en 27 MHz (cruce de 9,26 ns). Las escrituras a 40h-43h, 45h, 46h y a FCh-FFh pasan ahora por una etapa de registro en 27 MHz, como el 44h desde la v3.7; `tools/cfgreg_sim` (20.000 OUT) da los mismos registros y los mismos pulsos de guardar y reiniciar (su número puede variar en uno, como ya pasaba). La campaña siguiente, pf60k (5087-5113), dio **tres de cinco con margen**: 5107 (0,985 ns), 5099 (0,955) y 5101 (0,526); 5087 −0,022 en otro camino, 5113 sin rutar.
+
+## v3.7.4 (29 de septiembre): el mux de lectura en árbol y el navegador ordenado
+
+Core: dado 4919, 6dae4491 (`_jtag.bin` 51d15fa7), 0,51 ns; campaña pf60g, uno de cinco (los rechazos, `IORQ_n`/`WR_n` → `config*` y `mapper_reg1`: el camino que arregló la 3.7.5). Probada por Albert: el menú, y ahí salió la izquierda fantasma.
+
+- **`cpu_din` por grupos** (8e29cbc, idea de MSXHeroTN): la cadena de ~49 ternarios del mux de lectura de la CPU va en siete grupos contiguos de la lista original, cada uno con su acierto (el OR exacto de sus condiciones) y su valor, resueltos en paralelo y luego en orden; profundidad ~15. Misma prioridad, demostrado con `tools/cpudin_equiv/verify.py` (2d26ae8: yosys con miter y SAT con los `define` de la build, con `DISABLE_BOOT_MENU` y otras cinco combinaciones, y 200.000 vectores en Icarus). El bloque va al final del módulo: la cadena leía señales declaradas miles de líneas más abajo. FPGA_PATCH = 4.
+- **Navegador** (bios ee18b2c): ordenado (carpetas primero, alfabético sin mayúsculas, por un índice de un byte por entrada en E600h), sin ficheros ocultos ni de sistema, 112 entradas por carpeta (antes 115) con un `+` en el contador si no caben. Probado en un Z80 de openMSX en las seis variantes de la BIOS.
+
+## v3.7.3 (28 y 29 de septiembre): host USB robusto
+
+Core: dado 4831, f03f2338 (`_jtag.bin` 34caf0d1), 0,87 ns; campaña pf60f, uno de cinco. Banco nuevo `tools/usb_sim/tb_usb_hid_host.sv` con un dispositivo low-speed modelado: el host de nand2mario no enumeraba dispositivos que contestan en 2,75 bits o menos (`start` llegaba tarde al SYNC y el `timing` se congelaba), y el ZLP de la enumeración dejaba la izquierda pegada. Arreglo en `usb_hid_host.v` (8cc6c32): alineación al fin del SYNC, `timing` resincronizado en cada `start`, y limpieza de las direcciones al acabar la enumeración. 22 casos (latencias de 16 a 52 ciclos, fases, ±1,5 % de bit, SNES y teclado). FPGA_PATCH = 3.
+
+## v3.7.2 (28 de septiembre): mandos HID genéricos por los USB-A
+
+Core: dado 4759, 7651149b (`_jtag.bin` 9cde1018), 1,11 ns; campañas pf60c (dos de cinco, sin margen) y pf60d (4759). Un mando genérico como el «USB Gamepad» 0810:0001 enumeraba y no se movía: `usb_hid_host` solo entiende los mandos «SNES USB». `usb_pad_rid.v` (a493cfd) va en paralelo y solo opina cuando el byte 0 del informe es 01h (Report ID): cruceta por el hat o el stick izquierdo con umbrales, botones 1-4 = A/B/X/Y, 5-6 = L/R, 9-10 = SELECT/START; `tb_usb_pad_rid.sv` con 29 informes medidos. Los puertos 20h-27h enseñan el último informe (f774209; build de diagnóstico 4793, da6e0843). Menú (bios 39e201d): ESC sale de Ajustes sin guardar. FPGA_PATCH = 2.
+
+## v3.7.1 (27 y 28 de septiembre): solo arreglos, y el tercer dígito
+
+Albert, el 27 de septiembre: el 60K y el 138K solo reciben arreglos, y cada lote sube el tercer dígito. Core: dado 4679, 3acd3068 (`_jtag.bin` a1ce9ada), 1,24 ns; campañas pf60a (uno de cinco, con 0,13 ns, y los peores caminos en lo tocado: el 29h añadía un escalón al mux de `cpu_din` y un OR de tres modos en el motor de comandos) y pf60b tras corregirlo sin cambiar la función (0d75e64).
+
+- Tres arreglos del V9968 de HRA! y el de HMMM/HMMV/YMMM/HMMC en SCREEN 2 con CMD=1 (f8040e5), portados de la Zynq ([capítulo 05](05-v9968.md)).
+- **Puerto 29h = FPGA_PATCH**: el menú imprime «3.7.1» en Ajustes.
+- Menú (bios d8d64dd): la cinta ya no se atasca en «Found:» tras buscar con F o configurar la WiFi con W (el EXTBIO del ESP quedaba encadenado a sí mismo en el segundo pase del INIT), y una ROM de más de 4 MB sin firma se lanza como ASCII16-X. Packs del 28 de septiembre: 2.1.4 192eedcb, inglés dcac4bae, Nextor 3 5e76e705, inglés con Nextor 3 ff823b68.
+
+## Porte de la Zynq (24 y 25 de septiembre, interna)
+
+- **ASCII16-X y megaram de 8 MB, Plain 0000h, #46 y ajustes** (ad37e24): los ficheros de la megaram, la DMA y los puertos de la SD de la Zynq; los 4 MB altos van a las filas con el bit 11 del W9825 (`tools/sdr16_tb` T11); el reset conserva los bits 0-2 del 46h; cada escritura en 41h o 42h confirma solo su registro. Menú con los mappers nuevos y **packs en inglés** (bios 36ef763, 9641d1e). Campaña pz60a, cinco de cinco por el gate: 4423, 4421 y 4447 en `files/20260924/`; Albert arrancó el 4421 el 24 de septiembre.
+- **Las rayas de arranque del V9968** (37cb6db), del shim de la VRAM, portado de la Zynq. Campaña pz60r: 4519 (0,92 ns) y 4547 en `files/20260925/`; Albert, con el 4519: «va perfecto, sin rayas».
+
 ## Pack v3.7c (21 de septiembre): nombres largos huérfanos
 
 Solo el pack; el core no cambia. Albert: un fichero con nombre largo renombrado desde MSX-DOS a `GM2.ROM` seguía saliendo en el menú con el nombre largo viejo (no confundir con los nombres cortos automáticos, que se ven así siempre). Nextor no conoce las entradas LFN (atributo 0Fh): al renombrar o borrar solo toca el 8.3 y deja delante las entradas del nombre largo, y el menú las montaba sin mirar el byte 13 de cada una, que es el checksum del 8.3 al que pertenecen (Windows y Linux las descartan por eso). Ahora el grupo lo abre la entrada con el bit 40h, todas han de llevar el mismo checksum y ese checksum ha de cuadrar con el 8.3 de la entrada corta; si no, se muestra el nombre corto, como en el PC. Lo mismo en el precheck de descargas del File-Hunter: un fichero renombrado ya no cuenta como "ya existe".
@@ -184,7 +222,8 @@ Core: dado 4001, c70eae6d, margen 0,771 ns (clk_54m→clk_108m, `u_sddma` → `m
 
 - Xevious Fardraut Saga: el marcador en blanco (V9968, ver arriba).
 
-- Validar la v3.6f con un mando USB HID genérico en un USB-A (Albert compra uno). El ratón sin INDEV quedó validado el 16 de septiembre con el 3593.
+- ~~Validar un mando USB HID genérico en un USB-A~~: validado con la v3.7.5 el 30 de septiembre. El ratón sin INDEV quedó validado el 16 de septiembre con el 3593.
+- La línea 138K: ninguna campaña desde la v3.7 da margen (el V9968 a 88,5 MHz y el cruce CPU → SDRAM); necesita trabajo de timing propio, no más dados, y no hay placa para probarla.
 - Entender por qué el `cpu_run` registrado (v3.6d) deja la SDRAM sin arrancar, si es que es él: un segundo dado con y sin el registro lo cerraría.
 - Fase 3 de la SD: reloj de la tarjeta a 13,5 MHz, que exige rehacer el divisor y el muestreo.
 - Guardado de Manbow 2, que usa una flash AMD en el cartucho en vez de SRAM.

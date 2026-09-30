@@ -55,6 +55,8 @@ Por síntoma, qué mirar. Casi todo lo que hay aquí ha pasado de verdad durante
 | El teclado no responde | Teclado con hub interno o inalámbrico con receptor compuesto | Probar otro teclado; conectar directo, sin hub |
 | El ratón no se ve | Receptor inalámbrico | Solo ratones con cable |
 | El mando no hace nada | Es XInput (Xbox o un receptor 2,4 GHz que se presenta como Xbox 360): el host de los USB-A es HID puro | Un mando USB genérico HID; muchos receptores tienen un modo D (DirectInput) además del X |
+| Con el mando conectado, los juegos ven la izquierda pulsada y en el navegador la lista vuelve 18 entradas atrás al llegar a la entrada 18 («no hace scroll») | Un core anterior a la 3.7.5: un paquete USB vacío del mando se leía como «eje X = 00». Se comprueba con `PRINT STICK(1)`: con el mando quieto da 7 | Core 3.7.5. Con uno anterior, desenchufar y volver a enchufar el mando suelta la izquierda hasta la siguiente vez; el pack de la 3.7.5 ya no repite izquierda/derecha en el navegador |
+| El mando mueve mal o no enumera (un mando genérico con cruceta y sticks) | Un core anterior a la 3.7.2/3.7.3: el host solo entendía los mandos «SNES USB» y no esperaba a los que contestan muy deprisa | Core 3.7.5. Los puertos 20h-27h enseñan el último informe del mando: `FOR I=0 TO 7:PRINT HEX$(INP(&H20+I));" ";:NEXT` |
 | F12 no hace nada | El BL616 no tiene firmware | Grabarlo ([capítulo 02](02-instalacion.md)); el turbo es F11 |
 | La ñ no sale con un teclado español | La distribución del MSX no la tiene en esa tecla | Pendiente |
 

@@ -8,7 +8,7 @@ Tres ficheros, cada uno a una dirección distinta de la misma flash:
 
 | Fichero | Dirección | Obligatorio |
 |---|---|---|
-| El core, `msximus_v3.x_dadoNNNN.fs` | **0x000000** | Sí |
+| El core: `MSXimus_v3.7.5.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
 | El pack de BIOS, `pack_bios_msximus*.bin` | **0x400000** | Sí, sin él la máquina no arranca |
 | `yrw801.bin`, la ROM de ondas del MoonSound (va como `.bin` porque el Programmer de Gowin no coge `.rom`; si tienes un `yrw801.rom`, renómbralo) | **0x500000** | No, solo para tener el OPL4 completo |
 
@@ -30,12 +30,14 @@ Cada entrega del core viene con dos ficheros del mismo bitstream: el `.fs` y un 
 
 ### El pack de BIOS
 
-Hay dos packs iguales en todo salvo el kernel de disco que llevan dentro:
+Hay cuatro packs iguales en todo salvo el idioma del menú y el kernel de disco que llevan dentro:
 
-| Pack | Nextor |
-|---|---|
-| `pack_bios_msximus.bin` | **2.1.4**, el estable, el que quieres |
-| `pack_bios_msximus_nextor3.bin` | **3.0 beta 1**, para probar la beta |
+| Pack | Menú | Nextor |
+|---|---|---|
+| `pack_bios_msximus.bin` | castellano | **2.1.4**, el estable, el que quieres |
+| `pack_bios_msximus_en.bin` | inglés | **2.1.4** |
+| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 1**, para probar la beta |
+| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 1** |
 
 Y de cada uno, una variante internacional y una japonesa, que cambian la BIOS y la SubROM. Quien prefiera montar el pack con sus propias ROMs tiene el [Pack Builder del MSXnano](https://github.com/Papipapito/MSXnano), que las ensambla con Nextor incluido. El [capítulo 04 de la referencia técnica](../tecnica/04-pack-bios.md) describe qué lleva y en qué orden.
 

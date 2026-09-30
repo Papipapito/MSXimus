@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>Un MSX2+ completo, en una Tang Console 60K — ahora con el VDP V9968</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.1-blue">
+  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.7.5-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-GPLv3-orange">
 </p>
@@ -66,9 +66,9 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
-| 1 | `MSXimus_v3.7.fs` | **`0x000000`** | Sí — es el core |
+| 1 | `MSXimus_v3.7.5.fs` | **`0x000000`** | Sí — es el core |
 | 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
-| 3 | `yrw801.rom` | **`0x500000`** | No — solo para MoonSound/OPL4 |
+| 3 | `yrw801.bin` | **`0x500000`** | No — solo para MoonSound/OPL4 (la ROM de ondas va como `.bin`: el Programmer de Gowin no acepta `.rom`; si tienes una `yrw801.rom`, cámbiale la extensión) |
 
 Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **ESP32-C6** (WiFi) y el del **BL616** (el panel de F12). Cada una tiene su sección más abajo.
 
@@ -92,18 +92,20 @@ Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **E
 
 ### Sobre el pack de BIOS
 
-La release trae **todo lo necesario**: el core, el pack de BIOS, la `yrw801.rom` del OPL4 y los firmwares. Descargas, grabas y arranca.
+La release trae **todo lo necesario**: el core, el pack de BIOS, la `yrw801.bin` del OPL4 y los firmwares. Descargas, grabas y arranca.
 
-Hay **dos versiones del mismo pack**, y solo cambia el kernel de disco que llevan dentro:
+Hay **cuatro versiones del mismo pack**: el menú en castellano o en inglés, y el kernel de disco que llevan dentro:
 
-| Pack | Nextor |
-|---|---|
-| `pack_bios_msximus.bin` | **2.1.4** — la estable, la que quieres |
-| `pack_bios_msximus_nextor3.bin` | **3.0 beta 1** — para probar la beta |
+| Pack | Menú | Nextor |
+|---|---|---|
+| `pack_bios_msximus.bin` | castellano | **2.1.4** — la estable |
+| `pack_bios_msximus_en.bin` | inglés | **2.1.4** — la estable |
+| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 1** — para probar la beta |
+| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 1** — para probar la beta |
 
 Si prefieres montarte el pack con tus propias ROMs, está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con ellas, Nextor incluido.
 
-Sin la `yrw801.rom` el core funciona igual; simplemente no tendrás MoonSound.
+Sin la `yrw801.bin` el core funciona igual; simplemente no tendrás MoonSound.
 
 ### Una sola BIOS, y el menú es un ajuste
 
@@ -211,7 +213,7 @@ El proyecto de Bambu Studio, los STL, los ajustes de impresión y las notas de m
 
 ## Estado
 
-Esta versión se ha validado en hardware con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+La v3.7.5 está validada en hardware (30/09/2026: imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Estructura del repositorio
 
@@ -226,6 +228,21 @@ fpga/            top.v, build.tcl
   constraints/   Pinout y constraints de la Console 60K
 tools/           Testbenches y utilidades de validación
 ```
+
+## Lo nuevo de la v3.7.5
+
+Todo lo que hay desde la v3.7 ha entrado como arreglos (de la 3.7.1 a la 3.7.5). Cambia el core y cambia el pack: **hay que grabar los dos**.
+
+- **El navegador de la SD va ordenado**: primero las carpetas y después las ROM y los discos juntos, por orden alfabético sin distinguir mayúsculas. Los ficheros ocultos y de sistema no salen (la `System Volume Information` de Windows, las `.Trashes` y los `._nombre.rom` que deja un Mac). Caben 112 entradas por carpeta; si hay más, el contador lo avisa con un `+` (`112/112+`).
+- **Mappers de la Zynq**: megaram de 8 MB con **ASCII16-X** (una ROM de más de 4 MB sin firma se detecta sola, así que la V9968 TECH DEMO 0.7.5 arranca tal cual) y **Plain 0000h**. Tras un reset, la ROM relanzada conserva su mapper.
+- **V9968**, los arreglos de HRA!: los sprites ya no salen recortados en el borde izquierdo, el scroll horizontal (R#26/R#27) se toma línea a línea y la colisión de sprites salta una vez por línea. HMMM/HMMV/YMMM/HMMC en SCREEN 2 con CMD=1 copian byte a byte (se saltaban uno de cada dos). Se acabaron las rayas de algunos arranques (arreglos de la caché de la VRAM).
+- **Mandos USB**: los mandos HID genéricos con Report ID (cruceta, sticks, 12 botones) funcionan en los USB-A, enumeran los mandos que contestan muy deprisa y se acabó la **IZQUIERDA fantasma**: un paquete USB vacío se leía como «eje X = 00», así que los juegos veían la izquierda pulsada y el navegador de la SD saltaba 18 entradas atrás.
+- **Ajustes**: `#41` y `#42` confirman solo su propio ajuste (un `#42` suelto desde un programa borraba el otro y podía grabarlo en la flash). ESC sale de Ajustes sin guardar.
+- **La versión lleva tercer dígito**: Ajustes dice `3.7.5` (puerto 29h).
+- La cinta ya no se queda atascada en «Found:» después de una búsqueda (F) o de configurar la WiFi (W).
+- **Packs en inglés** además de en castellano: cuatro packs, menú en inglés o en castellano, con Nextor 2.1.4 o 3.
+- Timing: el mux de lectura de la CPU va en árbol (misma prioridad, demostrado con una comprobación formal) y las escrituras a los puertos de configuración y al mapper pasan por una etapa de registro. La síntesis cierra con margen muchas más veces.
+- Los firmwares del BL616 y del ESP32-C6 no cambian desde la v3.7.
 
 ## Lo nuevo de la v3.7
 

@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>A complete MSX2+ on a Tang Console 60K — now with the V9968 VDP</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v3.7-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v3.7.5-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="license" src="https://img.shields.io/badge/license-GPLv3-orange">
 </p>
@@ -66,7 +66,7 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 
 | # | File | Address | Required? |
 |---|---|---|---|
-| 1 | `MSXimus_v3.7.fs` | **`0x000000`** | Yes — this is the core |
+| 1 | `MSXimus_v3.7.5.fs` | **`0x000000`** | Yes — this is the core |
 | 2 | BIOS pack (`pack_bios_msximus*.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
 | 3 | `yrw801.bin` | **`0x500000`** | No — only for MoonSound/OPL4 (the wave ROM is shipped as `.bin`: Gowin's Programmer does not accept `.rom`; rename a `yrw801.rom` if that is what you have) |
 
@@ -94,12 +94,14 @@ Two more pieces are **optional** and do not live in that flash: the **ESP32-C6**
 
 The release ships **everything you need**: the core, the BIOS pack, the OPL4's `yrw801.bin` and the firmwares. Download, flash, and it boots.
 
-There are **two builds of the same pack**, differing only in the disk kernel inside:
+There are **four builds of the same pack**: the menu in Spanish or in English, and the disk kernel inside:
 
-| Pack | Nextor |
-|---|---|
-| `pack_bios_msximus.bin` | **2.1.4** — the stable one, the one you want |
-| `pack_bios_msximus_nextor3.bin` | **3.0 beta 1** — to try the beta |
+| Pack | Menu | Nextor |
+|---|---|---|
+| `pack_bios_msximus.bin` | Spanish | **2.1.4** — the stable one |
+| `pack_bios_msximus_en.bin` | English | **2.1.4** — the stable one |
+| `pack_bios_msximus_nextor3.bin` | Spanish | **3.0 beta 1** — to try the beta |
+| `pack_bios_msximus_en_nextor3.bin` | English | **3.0 beta 1** — to try the beta |
 
 If you would rather build the pack from your own ROMs, there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from them, Nextor included.
 
@@ -211,7 +213,7 @@ The Bambu Studio project, the STLs, the print settings and the assembly notes ar
 
 ## Status
 
-This version has been validated on hardware with HRA!'s V9968 test suite, the DEVCON demos, Metal Gear 2, Aleste 2 and the usual MSX2+ catalogue. The V9968 tracks HRA!'s **latest published revision**; its provenance and every local patch are documented in [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+v3.7.5 has been validated on hardware (30/09/2026: picture from the first power-up, the sorted SD browser, a generic USB gamepad). The v3.7 base was validated with HRA!'s V9968 test suite, the DEVCON demos, Metal Gear 2, Aleste 2 and the usual MSX2+ catalogue. The V9968 tracks HRA!'s **latest published revision**; its provenance and every local patch are documented in [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Repository layout
 
@@ -226,6 +228,21 @@ fpga/            top.v, build.tcl
   constraints/   Console 60K pinout and constraints
 tools/           Testbenches and validation utilities
 ```
+
+## What's new in v3.7.5
+
+Everything since v3.7 came in as fixes (3.7.1 to 3.7.5). The core changes and so does the pack: **flash both**.
+
+- **The SD browser is sorted**: folders first, then ROMs and disks together, alphabetical and case-insensitive. Hidden and system files stay out of the list (Windows' `System Volume Information`, the `.Trashes` and `._name.rom` a Mac leaves behind). A folder holds up to 112 entries; if there are more, the counter says so with a `+` (`112/112+`).
+- **Mappers from the Zynq**: an 8 MB megaram with **ASCII16-X** (a ROM over 4 MB with no signature is detected on its own, so the V9968 TECH DEMO 0.7.5 launches as is) and **Plain 0000h**. After a reset, the relaunched ROM keeps its mapper.
+- **V9968**, HRA!'s fixes: sprites are no longer clipped at the left border, the horizontal scroll (R#26/R#27) is taken line by line, and sprite collision fires once per line. HMMM/HMMV/YMMM/HMMC in SCREEN 2 with CMD=1 now copy byte by byte (they skipped every other byte). The stripes some boots showed are gone (VRAM cache fixes).
+- **USB gamepads**: generic HID pads with a Report ID (hat, sticks, 12 buttons) now work on the USB-A ports, pads that answer very fast enumerate, and the **phantom LEFT** is gone: an empty USB packet was read as "X axis = 00", so games saw left held and the SD browser jumped 18 entries back.
+- **Settings**: `#41` and `#42` each confirm only their own setting (a lone `#42` from software used to wipe the other one, and could write it to flash). ESC leaves Settings without saving.
+- **The version has a third digit**: Settings shows `3.7.5` (port 29h).
+- The cassette no longer gets stuck on "Found:" after a search (F) or the WiFi setup (W).
+- **Packs in English** as well as Spanish: four packs, English or Spanish menu, with Nextor 2.1.4 or 3.
+- Timing: the CPU read mux is now a tree (same priority, proven with a formal check) and the writes to the config ports and the mapper go through a register stage. The build now closes with margin far more often.
+- The BL616 and ESP32-C6 firmwares do not change from v3.7.
 
 ## What's new in v3.7
 

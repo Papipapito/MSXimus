@@ -30,7 +30,7 @@ Detalles que importan:
 
 ## 2. La SDRAM física: 8 MB
 
-El controlador direcciona 8 MB con 23 bits para la CPU (filas 0-2047 del W9825); por encima, en las filas 4096 y siguientes, fuera del alcance de cualquier mapeo de la CPU, viven los 4 MB de la familia de ondas del OPL4 (la YRW801 de 2 MB copiada de la flash al arrancar, por el puerto `wv` de `memory_ctrl`) y, en las filas 5120+, los 256 KB de muestras del ADPCM del Y8950 (`adpcm_sdram`, puerto `wv2`). Roban turnos vacíos de la CPU y no compiten con ella.
+El controlador direcciona 8 MB con 23 bits para la CPU (filas 0-2047 del W9825) y, desde el 24 de septiembre de 2026, un bit 23 más que va a la **fila 11**: las filas 2048-4095, que estaban libres, guardan los 4 MB altos de la megaram de 8 MB (apartado 3); por encima, en las filas 4096 y siguientes, fuera del alcance de cualquier mapeo de la CPU, viven los 4 MB de la familia de ondas del OPL4 (la YRW801 de 2 MB copiada de la flash al arrancar, por el puerto `wv` de `memory_ctrl`) y, en las filas 5120+, los 256 KB de muestras del ADPCM del Y8950 (`adpcm_sdram`, puerto `wv2`). Roban turnos vacíos de la CPU y no compiten con ella.
 
 El controlador direcciona 8 MB con 23 bits. Los cuatro bancos de 2 MB se reparten así:
 
@@ -60,9 +60,11 @@ El banco D, en detalle:
 
 El pack se copia entero, 512 KB, desde 700000. Cada región del banco D es exactamente el pack más 700000, lo que hace trivial comprobar en placa que el streaming ha ido bien.
 
-## 3. La megaram: 4 MB y sus rincones reservados
+## 3. La megaram: 8 MB y sus rincones reservados
 
-La megaram es el cartucho emulado del slot 2. El menú carga ahí la ROM y configura el mapper con el que se va a comportar: Konami, Konami-SCC, ASCII8, ASCII16, NEO-8 o NEO-16. Los registros de banco son de 9 bits; en los mappers de 8 bits el noveno es siempre 0, y en ASCII16 y los NEO llega desde el propio registro. Para llenar la mitad alta durante la carga, que se hace en modo SCC con registros de 8 bits, el menú usa el bit 4 del puerto 46h.
+La megaram es el cartucho emulado del slot 2. El menú carga ahí la ROM y configura el mapper con el que se va a comportar: Konami, Konami-SCC, ASCII8, ASCII16, NEO-8, NEO-16, Plain 0000h o ASCII16-X.
+
+Desde el 24 de septiembre de 2026 (porte de la Zynq) mide **8 MB**: los 4 MB de siempre y otros 4 MB altos que solo alcanza el ASCII16-X, con bancos de 12 bits. La dirección física es `{A22, ~A22 & ~A21, A21, A[20:0]}` y el bit 23 de la dirección de la SDRAM va a la fila 11, así que con A22 = 0 todo sigue exactamente donde estaba; la DMA los llena armada con 81h (bit 23). Todo lo que sigue habla de los 4 MB bajos, que es donde viven los rincones reservados. Los registros de banco son de 9 bits; en los mappers de 8 bits el noveno es siempre 0, y en ASCII16 y los NEO llega desde el propio registro. Para llenar la mitad alta durante la carga, que se hace en modo SCC con registros de 8 bits, el menú usa el bit 4 del puerto 46h.
 
 Los 512 segmentos de 8 KB tienen dueño:
 

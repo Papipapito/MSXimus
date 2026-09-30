@@ -65,6 +65,16 @@ La colección más grande, porque ahí se cazaron los errores de integración de
 
 El OPL3 se simula con Verilator desde C++: `run_vgm.sh` reproduce un VGM contra el core y saca un WAV, y `tb_opl3_storm` bombardea el interfaz de host. `opl4wave_sim` guarda los volcados con que se depuró el motor PCM y su caché.
 
+### El USB: `tools/usb_sim/`
+
+`tb_usb_hid_host.sv` pone el host USB entero (`usb_hid_host` + `usb_pad_rid`) contra `usb_ls_dev_model.sv`, un dispositivo low-speed modelado con la latencia de respuesta, la fase y el periodo de bit configurables (`+LAT`, `+PHASE`, `+BITPS`) y tres personalidades (`+DEV=pad`, el 0810 con Report ID; `snes`; `kbd`). Comprueba la enumeración, el informe que llega a los ocho bytes de diagnóstico y la palabra SNES, y desde la v3.7.5 el caso **ZLP**: tres IN de EP1 contestados con un paquete vacío, que con el RTL anterior dejaban la izquierda clavada. `run_hid_host.sh pad 2 3 4 5 6` barre la latencia. `tb_usb_pad_rid.sv` prueba el decodificador de mandos genéricos con los 29 informes medidos al 0810.
+
+### Equivalencias de la v3.7.4 y la v3.7.5
+
+- `tools/cpudin_equiv/verify.py`: extrae el mux de `cpu_din` de dos `top.v` (el viejo con `git show`), toma los anchos de las declaraciones reales y los `define` del fichero, y demuestra la equivalencia con yosys (miter y SAT) y 200.000 vectores en Icarus. Las mutaciones a propósito (orden, acierto incompleto, grupos permutados) salen como diferentes.
+- `tools/cfgreg_sim/`: las escrituras a los puertos de configuración y al mapper con y sin la etapa de registro, 20.000 OUT con la fase aleatoria frente a `clk_enable_3m6_27`.
+- `tools/sdr16_tb/` T11 (24 de septiembre): el bit 23 de la dirección de la CPU va a la fila 11 del W9825 y nada se pisa con los 4 MB altos de la megaram.
+
 ### Pequeños: `mouse_sim`, `fan_sim`, `turbo_cadence_equiv`, `dbg_uart_tb`
 
 El ratón MSX por el puerto de joystick, el control del ventilador, la equivalencia de la cadencia del turbo con y sin el freno de M1, y la UART de depuración.
