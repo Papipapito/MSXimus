@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>A complete MSX2+ on a Tang Console 60K — now with the V9968 VDP</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-v3.7.5-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v3.7.6-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="license" src="https://img.shields.io/badge/license-GPLv3-orange">
 </p>
@@ -66,7 +66,7 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 
 | # | File | Address | Required? |
 |---|---|---|---|
-| 1 | `MSXimus_v3.7.5.fs` | **`0x000000`** | Yes — this is the core |
+| 1 | `MSXimus_v3.7.6.fs` | **`0x000000`** | Yes — this is the core |
 | 2 | BIOS pack (`pack_bios_msximus*.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
 | 3 | `yrw801.bin` | **`0x500000`** | No — only for MoonSound/OPL4 (the wave ROM is shipped as `.bin`: Gowin's Programmer does not accept `.rom`; rename a `yrw801.rom` if that is what you have) |
 
@@ -117,7 +117,7 @@ With the menu on you get the card browser, the ROM and DSK launcher and — if y
 
 > Mounting a `.dsk` rewrites sectors of a file that **already exists**: it never creates directory entries or allocates clusters.
 
-After that, insert a microSD with your ROMs and disk images and you're done.
+After that, insert a microSD with your ROMs and disk images and you're done. The easiest way to prepare it is **[MSX SD Maker](MSXsdmaker/README.md)**, in this repository: a Windows program that partitions the card the way Nextor does, installs Nextor and a set of programs (SofaRun, Multi Mente…) and writes the `AUTOEXEC.BAT`.
 
 > **About microSD cards:** use a **name-brand, Class 10** card (Samsung, SanDisk, Kingston...), formatted **FAT16**. Cheap no-name cards read fine but reject or lose sector writes under sustained bursts — we measured it on the bench: a no-name card kept failing writes even when paced, while a Samsung EVO+ was flawless with the exact same code and geometry. If downloads or saves act up, suspect the card first.
 
@@ -213,13 +213,14 @@ The Bambu Studio project, the STLs, the print settings and the assembly notes ar
 
 ## Status
 
-v3.7.5 has been validated on hardware (30/09/2026: picture from the first power-up, the sorted SD browser, a generic USB gamepad). The v3.7 base was validated with HRA!'s V9968 test suite, the DEVCON demos, Metal Gear 2, Aleste 2 and the usual MSX2+ catalogue. The V9968 tracks HRA!'s **latest published revision**; its provenance and every local patch are documented in [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+v3.7.6 has been validated on hardware (30/09/2026), like v3.7.5 before it (picture from the first power-up, the sorted SD browser, a generic USB gamepad). The v3.7 base was validated with HRA!'s V9968 test suite, the DEVCON demos, Metal Gear 2, Aleste 2 and the usual MSX2+ catalogue. The V9968 tracks HRA!'s **latest published revision**; its provenance and every local patch are documented in [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Repository layout
 
 ```
 carcasa/         The 3D-printable case (3MF, STLs, assembly)
 docs/            Manual, technical reference, history, logo, photos
+MSXsdmaker/      MSX SD Maker: prepares the SD card (Windows program + instructions)
 fpga/            top.v, build.tcl
   v9968/         The V9968 VDP (+ ORIGEN.txt: provenance and local patches)
   video720/      HDMI bridge and scaler
@@ -228,6 +229,16 @@ fpga/            top.v, build.tcl
   constraints/   Console 60K pinout and constraints
 tools/           Testbenches and validation utilities
 ```
+
+## What's new in v3.7.6
+
+Three fixes from HRA!'s V9968, the same ones as in the MSXimus Z (Z1.2.1). Only the core changes: **the v3.7.5 pack stays**.
+
+- **Port 99h**: a half-written register pair is now cancelled by any VDP read (98h-9Bh) and by a write to 98h, as on a real V9938/V9958. Until now only reading the status cancelled it. *Fleet Commander II* writes an odd number of bytes to 99h and relies on this; without it, every register it wrote afterwards landed in the wrong place. The first palette byte shares that latch too, as in openMSX.
+- **LMMM, HMMM and YMMM with DIY** (copying upwards) stop when the **source** reaches line 0, not only the destination.
+- **The command pixel step** is taken when R#46 is written. It is HRA!'s version of our SCREEN 2 fix from v3.7.1, and it also covers FG4.
+- Settings shows `3.7.6` (port 29h).
+- **[MSX SD Maker](MSXsdmaker/README.md)**, a Windows program that prepares the SD card: 2 or 4 GB FAT16 partitions laid out as Nextor's FDISK does, or one FAT32; Nextor 2.1.4, Nextor 3 or MSX-DOS; SofaRun, Multi Mente, utilities and networking; and the `AUTOEXEC.BAT` that mounts the other partitions.
 
 ## What's new in v3.7.5
 

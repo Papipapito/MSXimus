@@ -134,7 +134,7 @@ La pantalla **MSXimus - Ajustes** tiene estas opciones:
 | **Mezclador de audio** | | Abre la página del mezclador (v3.7): la ganancia maestra y el nivel de cada chip, con nota de prueba. Ver el [capítulo 08](08-audio.md) |
 | **Save & Restart** | | Guardar en la flash y reiniciar |
 
-Debajo se muestra *"Version FPGA (.fs): x.y.z"*, la versión del core que hay flasheado (`3.7.5`; el tercer dígito sale del puerto 29h desde la 3.7.1, y con un core anterior solo se ve `3.7`), o *"desconocida"* si el core no la publica.
+Debajo se muestra *"Version FPGA (.fs): x.y.z"*, la versión del core que hay flasheado (`3.7.6`; el tercer dígito sale del puerto 29h desde la 3.7.1, y con un core anterior solo se ve `3.7`), o *"desconocida"* si el core no la publica.
 
 | Tecla | Qué hace |
 |---|---|

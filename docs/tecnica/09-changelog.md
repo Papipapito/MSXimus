@@ -134,6 +134,20 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## v3.7.6 publicada (30 de septiembre, tag `v3.7.6`): tres arreglos del V9968 de HRA y MSX SD Maker
+
+Validada en placa por Albert el 30 de septiembre. Core: dado **5197**, 0fb615fd (`_jtag.bin` 2deacdb3), peor setup 0,965 ns (clk_86, dentro del shim); campaña pf60l, uno de cinco: 5167 −1,9 ns en el T80, 5171 −2,2 ns en el ADPCM y el shim, 5179 y 5189 sin rutar. El pack no cambia: el de la 3.7.5. FPGA_PATCH = 6 (af89f71).
+
+HRA subió el 29 de septiembre tres arreglos a su V9968 (`44e93ec` → `4410365`). Revisados contra este árbol y portados igual que en la Zynq, donde van en la Z1.2.1:
+
+- **El latch del puerto 99h** (`05f9806`). Un par de bytes a medias se cancela con cualquier lectura del VDP (98h-9Bh) y con una escritura al 98h, como en el V9938/V9958 y en openMSX (`registerDataStored`). Aquí solo lo cancelaba la lectura del estado, el `_185` de agosto que salió de la caza de Fleet Commander y DQ2. *Fleet Commander II* escribe un número impar de bytes en el 99h y cuenta con que las escrituras al 98h del `CLRSPR` lo resincronicen. El primer byte de la paleta V9938 comparte el latch con los puertos 1 y 3.
+- **DIY con el origen arriba** (`ef12ee3`). LMMM, HMMM y YMMM copiando hacia arriba acaban también cuando el origen llega a Y = 0; solo miraban el destino. Su demo `ds4.rom` se paraba.
+- **El paso de píxel registrado** (`4410365`). Es el arreglo de HRA de nuestra issue #10 (HMMM en SCREEN 2 con CMD=1) y sustituye a nuestro `ff_byte_mode` de la 3.7.1: el mismo resultado, más FG4 tratado como SCREEN 5, y la decisión de modo fuera del camino `w_next` → `ff_xsel`.
+
+Bancos: `run_port1_latch.sh` (el banco de HRA, 12 pruebas; con el RTL anterior falla la 2), `g2cmd_check.py` con 24 casos DIY y los 60 de SCREEN 5-8 idénticos al RTL anterior, `run_cpuif_dbl.sh` en cinco modos y `run_spcol_vl.sh` (Fleet y DQ2). Los ficheros son idénticos a los de la Zynq, donde además se probó en placa: una rutina en BASIC que deja un byte huérfano en el 99h da `0 0 169` con el core anterior y `167 168 169` con este.
+
+**MSX SD Maker** (`MSXsdmaker/`, fuente en `bios-msxnano-msximus/tools/sdmaker`): programa para Windows que prepara la tarjeta. Particiones FAT16 de 2 o 4 GB con la disposición y la geometría del FDISK de Nextor (hasta ocho) o una FAT32; Nextor 2.1.4, Nextor 3 o MSX-DOS; SofaRun, Multi Mente y el resto del contenido de `packs/sd`; el `AUTOEXEC.BAT` con un `MAPDRV` por partición. Relee la tabla y cada fichero por CRC al acabar. Probado con imágenes (sfdisk, fsck.fat, mtools) y en la Zynq: Nextor arranca de una tarjeta suya, ejecuta el `AUTOEXEC` y monta C: y D: en las particiones 2 y 3. De paso: Nextor no monta FAT32 (lo descarta en `partit.mac`: sin entradas de raíz), así que el capítulo 03 del manual se corrige.
+
 ## v3.7.5 publicada (30 de septiembre, tag `v3.7.5`): dado 5099
 
 Validada en placa por Albert el 30 de septiembre: imagen desde el primer encendido (la DDR3 calibra), el navegador ordenado y un mando USB genérico sin la izquierda fantasma. Release en GitHub con `MSXimus_v3.7.5.fs` (ad3fcf18, `_jtag.bin` bc025ebb; campaña pf60k, peor setup 0,955 ns en el clk_108m, holds a cero), los cuatro packs del 29 de septiembre (2.1.4 7e00b72b, inglés 4e96626a, Nextor 3 9e0f4f15, inglés con Nextor 3 c7269785), la `yrw801.bin` y los firmwares del C6 y del BL616 de la v3.7, que no cambian. La rama pública `V3.7` avanza a este commit. Respaldo sin probar: 5107 (5b0b9631, 0,985 ns) y 5101 (6bb6954c, 0,526 ns). La línea 138K lleva los mismos cambios en su rama, pero ninguna campaña ha dado margen (pf138g, h, i: el V9968 a 88,5 MHz y el cruce CPU → SDRAM, sus familias de siempre) y no se publica.

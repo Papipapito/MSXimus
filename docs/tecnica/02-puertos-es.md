@@ -130,13 +130,13 @@ Los ocho bytes del último informe HID del mando conectado a un USB-A, tal cual 
 
 | Puerto | Devuelve |
 |---|---|
-| 29h | Tercer dígito de la versión (FPGA_PATCH): 5 en la 3.7.5. El menú lo imprime tras «3.7» si vale 1-15; un core anterior devuelve FFh y el menú imprime «3.7» a secas. Comparte término del mux de lectura con el 2Fh: `bus_addr[2]` elige cuál |
+| 29h | Tercer dígito de la versión (FPGA_PATCH): 6 en la 3.7.6. El menú lo imprime tras «3.7» si vale 1-15; un core anterior devuelve FFh y el menú imprime «3.7» a secas. Comparte término del mux de lectura con el 2Fh: `bus_addr[2]` elige cuál |
 | 2Ah | Arranque de la DDR3 (v3.7b): décimas de segundo desde el encendido hasta que la VRAM calibró (255 = 25 s o más, o no ha calibrado) |
 | 2Bh | Arranque de la DDR3: duración en centésimas del intento de calibración que lo consiguió (255 = 2,55 s o más); sin calibrar, el intento en curso |
 | 2Ch | Arranque de la DDR3: bit 7 = calibrada; bits 6-0 = intentos de calibración fallidos antes (0 = a la primera, 127 = saturado) |
 | 2Dh | Estado del USB: bit 7 error de conexión en el USB 2, bit 6 en el USB 1, bits 5-4 tipo del USB 2 y bits 3-2 tipo del USB 1 (0 nada, 1 teclado, 2 ratón, 3 mando), bits 1-0 cuenta de informes recibidos, que cambia si el dispositivo habla |
 | 2Eh | Estado interno del ratón |
-| 2Fh | Versión del core, en BCD: 37h es la 3.7 (con el 29h, la 3.7.5) |
+| 2Fh | Versión del core, en BCD: 37h es la 3.7 (con el 29h, la 3.7.6) |
 
 El menú de Ajustes muestra la versión leyendo 2Fh. Un core anterior a que existiera devuelve FFh, y el menú dice "desconocida".
 
@@ -157,6 +157,8 @@ La parte PCM del MoonSound: 7Eh registro y 7Fh dato del motor de 24 slots. La RO
 ### 88h-8Bh y 98h-9Bh: el V9968
 
 Los cuatro puertos clásicos del VDP: 98h datos de VRAM, 99h registros y estado, 9Ah paleta, 9Bh registros indirectos. El rango 88h-8Bh es un alias del mismo chip: el software escrito para el cartucho V9968 de HRA! lo busca ahí como VDP externo, y en el MSXimus el V9968 ya es el interno.
+
+El 99h recibe los registros en pares de bytes (dato y luego número con el bit 7 a 1). Desde la 3.7.6, un par a medias se cancela con cualquier lectura del VDP y con una escritura al 98h, como en el V9938/V9958 y en openMSX; antes solo lo cancelaba la lectura del estado. El primer byte de la paleta (9Ah) comparte ese latch.
 
 Los puertos 9Ch y 8Ch, el "puerto 4" que el V9968 define para los flags de interrupción, **no están decodificados**. El capítulo 05 explica qué implica.
 

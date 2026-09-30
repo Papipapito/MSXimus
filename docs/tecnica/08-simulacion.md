@@ -58,6 +58,8 @@ La colección más grande, porque ahí se cazaron los errores de integración de
 | `alias_idx.py` | Búsqueda exhaustiva de la función de índice de la caché del shim que evita que la tabla de sprites y una línea de patrones se desalojen mutuamente |
 | `ddr3_ip_model.sv` | Un modelo de la IP DDR3 de Gowin para simular el backend sin la IP real |
 | `gen_stim.py`, `gen_ssg_variants.py` | Generadores de estímulos |
+| `run_port1_latch.sh` | El banco de HRA! del latch del puerto 99h (12 pruebas: cancelar el par con una escritura o una lectura del 98h y con la del estado, la paleta con el latch compartido). Con el RTL anterior a la 3.7.6 falla la prueba 2 |
+| `g2cmd_check.py` | Comandos en SCREEN 2 con CMD=1 contra un modelo de bytes, 60 casos de SCREEN 5-8 bit a bit contra el RTL anterior y, desde la 3.7.6, 24 casos de DIY con el origen arriba |
 
 `ru66_preload.svh` precarga la VRAM con la escena de la demo ru66 para los bancos que la necesitan.
 

@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>Un MSX2+ completo, en una Tang Console 60K — ahora con el VDP V9968</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.7.5-blue">
+  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.7.6-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-GPLv3-orange">
 </p>
@@ -66,7 +66,7 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
-| 1 | `MSXimus_v3.7.5.fs` | **`0x000000`** | Sí — es el core |
+| 1 | `MSXimus_v3.7.6.fs` | **`0x000000`** | Sí — es el core |
 | 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.bin` | **`0x500000`** | No — solo para MoonSound/OPL4 (la ROM de ondas va como `.bin`: el Programmer de Gowin no acepta `.rom`; si tienes una `yrw801.rom`, cámbiale la extensión) |
 
@@ -117,7 +117,7 @@ Con el menú encendido tienes el navegador de la tarjeta, el lanzador de ROM y D
 
 > Montar un `.dsk` reescribe sectores de un fichero **que ya existe**: no crea entradas de directorio ni asigna clústeres.
 
-Después, mete una microSD con tus ROMs y discos y listo.
+Después, mete una microSD con tus ROMs y discos y listo. La forma más fácil de prepararla es **[MSX SD Maker](MSXsdmaker/LEEME.md)**, en este repositorio: un programa para Windows que parte la tarjeta como lo hace Nextor, copia Nextor y una colección de programas (SofaRun, Multi Mente…) y escribe el `AUTOEXEC.BAT`.
 
 > **Sobre las microSD:** usa una tarjeta **de marca y Clase 10** (Samsung, SanDisk, Kingston...), formateada en **FAT16**. Las tarjetas baratas sin marca leen bien pero rechazan o pierden escrituras en ráfagas sostenidas — lo medimos en placa: una sin marca fallaba escrituras incluso con pausas, y una Samsung EVO+ iba perfecta con el mismo código y la misma geometría. Si las descargas o los guardados fallan, sospecha de la tarjeta primero.
 
@@ -213,13 +213,14 @@ El proyecto de Bambu Studio, los STL, los ajustes de impresión y las notas de m
 
 ## Estado
 
-La v3.7.5 está validada en hardware (30/09/2026: imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+La v3.7.6 está validada en hardware (30/09/2026), como la v3.7.5 antes que ella (imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Estructura del repositorio
 
 ```
 carcasa/         La carcasa imprimible en 3D (3MF, STL, montaje)
 docs/            Manual, referencia técnica, histórico, logo, fotos
+MSXsdmaker/      MSX SD Maker: prepara la tarjeta SD (programa para Windows + instrucciones)
 fpga/            top.v, build.tcl
   v9968/         El VDP V9968 (+ ORIGEN.txt: procedencia y parches locales)
   video720/      Puente HDMI y escalador
@@ -228,6 +229,16 @@ fpga/            top.v, build.tcl
   constraints/   Pinout y constraints de la Console 60K
 tools/           Testbenches y utilidades de validación
 ```
+
+## Lo nuevo de la v3.7.6
+
+Tres arreglos del V9968 de HRA!, los mismos que lleva el MSXimus Z (Z1.2.1). Solo cambia el core: **el pack de la v3.7.5 sirve**.
+
+- **Puerto 99h**: un par de bytes de registro a medias se cancela ahora con cualquier lectura del VDP (98h-9Bh) y con una escritura al 98h, como en un V9938/V9958 de verdad. Hasta ahora solo lo cancelaba leer el estado. *Fleet Commander II* escribe un número impar de bytes en el 99h y cuenta con ello; sin esto, todos los registros que escribía después caían en el sitio equivocado. El primer byte de la paleta comparte ese latch, como en openMSX.
+- **LMMM, HMMM y YMMM con DIY** (copiando hacia arriba) acaban cuando el **origen** llega a la línea 0, no solo el destino.
+- **El paso de píxel de los comandos** se toma al escribir R#46. Es la versión de HRA! de nuestro arreglo de SCREEN 2 de la v3.7.1, y cubre también FG4.
+- Ajustes dice `3.7.6` (puerto 29h).
+- **[MSX SD Maker](MSXsdmaker/LEEME.md)**, un programa para Windows que prepara la tarjeta SD: particiones FAT16 de 2 o 4 GB como las hace el FDISK de Nextor, o una FAT32; Nextor 2.1.4, Nextor 3 o MSX-DOS; SofaRun, Multi Mente, utilidades y red; y el `AUTOEXEC.BAT` que monta las demás particiones.
 
 ## Lo nuevo de la v3.7.5
 

@@ -18,9 +18,9 @@ El tamaño da igual: el controlador admite SD v1, SD v2 y SDHC, y el menú de pr
 | Lanzar discos `.dsk` | sí | sí |
 | Descargar con File-Hunter | sí | no: "FH: la SD es FAT32 (v1 solo FAT16)" |
 | Guardar la SRAM de cartucho y el Game Master 2 | sí | no |
-| Nextor desde MSX-DOS | sí | sí |
+| Nextor desde MSX-DOS | sí | no: Nextor no monta FAT32 (ni la 2.1.4 ni la 3.0 beta 1) |
 
-Una tarjeta de 2 GB o menos se formatea en FAT16 desde cualquier sistema. Con tarjetas mayores hay que crear una partición de hasta 2 GB en FAT16 con una herramienta de particiones, o, más fácil, dejar que lo haga Nextor desde el propio MSX con su utilidad de particiones. El menú admite **varias particiones** y la tecla **TAB** cambia de una a otra, así que una tarjeta grande puede llevar una FAT16 para el menú y otras para MSX-DOS.
+La forma más fácil de dejarla lista es **[MSX SD Maker](../../MSXsdmaker/LEEME.md)**, un programa para Windows que está en este repositorio: parte la tarjeta en particiones FAT16 de 2 o 4 GB como lo hace el FDISK de Nextor (o en una sola FAT32), copia Nextor o MSX-DOS, SofaRun, Multi Mente y el resto de programas, y escribe el `AUTOEXEC.BAT` que monta las demás particiones como C:, D:… Sin él: una tarjeta de 2 GB o menos se formatea en FAT16 desde cualquier sistema, y con tarjetas mayores hay que crear una partición de hasta 2 GB en FAT16 con una herramienta de particiones o con `CALL FDISK` desde el propio MSX. El menú admite **varias particiones** y la tecla **TAB** cambia de una a otra, así que una tarjeta grande puede llevar una FAT16 para el menú y otras para MSX-DOS.
 
 Nombres largos: el navegador los **muestra**, pero todo lo que el menú **escribe** va en formato 8.3. Un fichero que crea el menú, como una descarga o un guardado, se verá con nombre corto en el PC. Y al revés: si desde MSX-DOS renombras o borras un fichero que tenía nombre largo, Nextor solo toca el nombre corto y deja atrás las entradas del largo; el menú (desde el pack del 21 de septiembre) las descarta, como hace Windows, y muestra el nombre corto nuevo.
 

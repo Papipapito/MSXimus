@@ -41,7 +41,7 @@ Idioma: castellano. El manual de usuario se traducirá al inglés cuando esté c
 | 06 | [La tarjeta SD y la DMA](tecnica/06-sd-dma.md): el controlador, los cuatro caminos con sus velocidades, cómo funciona la DMA, los dos modos de destino, los contadores de mapper, quién usa qué, las firmas | **escrito** | sd_reader.sv, sdc_ioport.sv, sd_dma.sv, sd_rw_ports.inc |
 | 07 | [Síntesis y campañas](tecnica/07-sintesis-campanas.md): herramientas, las dos líneas de build, cómo se lanza una campaña, el gate y la regla de los 0,4 ns, lo aprendido del chip, cómo se entrega | **escrito** | lanzar_campana.ps1, gate_check.ps1 |
 | 08 | [Simulación](tecnica/08-simulacion.md): el entorno WSL, los bancos por subsistema, las ROMs de prueba, verificar contra openMSX, qué no tiene banco | **escrito** | tools/ |
-| 09 | [Changelog de la era v3](tecnica/09-changelog.md): de la v3.1 a la v3.7.5, con el dado, el margen y los hashes de cada entrega | **escrito** | los LEEME de files/, mi_release/ |
+| 09 | [Changelog de la era v3](tecnica/09-changelog.md): de la v3.1 a la v3.7.6, con el dado, el margen y los hashes de cada entrega | **escrito** | los LEEME de files/, mi_release/ |
 | 10 | [Auditoría externa de septiembre de 2026](tecnica/10-auditoria-externa.md): los 137 hallazgos de los cuatro informes contrastados uno a uno, por qué fallan los críticos, y el plan para los tres repositorios | **escrito** | los informes de Albert, el árbol de cada repo |
 
 ## Histórico (`docs/historico/`)

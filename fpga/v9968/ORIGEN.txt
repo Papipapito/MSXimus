@@ -853,3 +853,16 @@ CAMPANA _166 (rc5), dados 1181/1187/1193:
      hdmi_pal son DOS codificadores separados; unificarlos libera ~835 de logica
      (~543 CLS) segun project_syn_rsc.xml:69/78.
 ================================================================================
+
+################################################################################
+[2026-09-30] V3.7.6: UPSTREAM DE HRA 44e93ec -> 4410365 (3 arreglos del 29/09), igual que la Zynq Z1.2.1.
+################################################################################
+  05f9806  vdp_cpu_interface.v: el par del puerto 1 a medias se cancela con CUALQUIER lectura y con una escritura
+           al puerto 0 (antes solo con la lectura de status, nuestro _185). Paleta V9938: el 1er byte comparte el
+           latch con los puertos 1 y 3. Banco: tools/v9968_sim/tb_port1_latch.sv (el suyo, 12 pruebas).
+  ef12ee3  vdp_command.v: w_sy_overflow; LMMM/HMMM/YMMM con DIY acaban cuando el ORIGEN llega a Y = 0.
+  4410365  vdp_command.v: ff_pixel_step registrado al escribir R#46 = su arreglo de nuestra issue #10; sustituye a
+           nuestro ff_byte_mode de la 3.7.1 (mismo resultado, mas FG4 como SCREEN 5).
+  Ficheros identicos a los de la Zynq (MSXimus_zynq fpga/v9968, commit 05cfa53). Detalle y lo NO portado (overmap
+  5S/9S, cache compartida, escalador) en el ORIGEN.txt de la Zynq.
+================================================================================
