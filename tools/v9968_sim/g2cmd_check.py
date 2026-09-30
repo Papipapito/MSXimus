@@ -113,8 +113,13 @@ def regression(exe_new, exe_old, out, n):
                  nx=1 + rnd.randrange(80), ny=1 + rnd.randrange(16), clr=rnd.randrange(256), arg=arg,
                  cmd=CMD[op] | (rnd.randrange(3) if op in ("LMMV", "LMMM", "LINE") else 0))
         hs = k & 1
+        # 30/09 (upstream HRA ef12ee3): con DIY el ORIGEN de LMMM/HMMM/YMMM tambien corta en Y = 0. Si SY llega a 0
+        # antes de acabar NY (y antes que DY), el RTL nuevo copia SY+1 filas: es lo que hace el viejo con NY = SY+1.
+        pb = dict(p)
+        if op in ("HMMM", "YMMM", "LMMM") and (arg & 0x08) and p["sy"] + 1 < min(p["ny"], p["dy"] + 1):
+            pb["ny"] = p["sy"] + 1
         a = run(exe_new, out, screen, init, regs(**p), hs=hs, tag="rn")
-        b = run(exe_old, out, screen, init, regs(**p), hs=hs, tag="ro")
+        b = run(exe_old, out, screen, init, regs(**pb), hs=hs, tag="ro")
         same = a == b
         if not same:
             diff = [i for i in range(len(a)) if a[i] != b[i]]
@@ -122,6 +127,35 @@ def regression(exe_new, exe_old, out, n):
                   (k, screen, op, p["nx"], p["ny"], hs, arg, len(diff), diff[0]))
         fails += not same
     print("Regresion SCREEN 5-8: %d casos, %d diferencias" % (n, fails))
+    return fails
+
+
+def check_diy(exe_new, exe_old, out):
+    """30/09 (upstream HRA ef12ee3): LMMM/HMMM/YMMM con DIY = 1 y el origen pegado arriba (SY < NY-1). El RTL nuevo ha
+    de copiar SOLO SY+1 filas (openMSX: clipNY_2) = el RTL viejo con NY = SY+1; y ha de DIFERIR del viejo con el NY
+    entero (que seguia copiando desde filas envueltas por debajo de Y = 0)."""
+    rnd = random.Random(3009)
+    fails = changed = 0
+    n = 0
+    for screen in (5, 6, 7, 8):
+        for op in ("HMMM", "YMMM", "LMMM"):
+            for hs in (0, 1):
+                init = {rnd.randrange(0x20000): rnd.randrange(256) for _ in range(3000)}
+                sy = rnd.randrange(7)
+                p = dict(sx=rnd.randrange(200), sy=sy, dx=rnd.randrange(200), dy=100 + rnd.randrange(80),
+                         nx=1 + rnd.randrange(60), ny=sy + 2 + rnd.randrange(8), clr=rnd.randrange(256),
+                         arg=rnd.choice([0x08, 0x0C]), cmd=CMD[op] | (rnd.randrange(3) if op == "LMMM" else 0))
+                a = run(exe_new, out, screen, init, regs(**p), hs=hs, tag="dn")
+                b = run(exe_old, out, screen, init, regs(**dict(p, ny=sy + 1)), hs=hs, tag="do")
+                c = run(exe_old, out, screen, init, regs(**p), hs=hs, tag="dq")
+                n += 1
+                changed += a != c
+                if a != b:
+                    diff = [i for i in range(len(a)) if a[i] != b[i]]
+                    print("  DIY MAL: SCREEN %d %s sy=%d ny=%d hs=%d arg=%02x, %d bytes (primero %05x)" %
+                          (screen, op, sy, p["ny"], hs, p["arg"], len(diff), diff[0]))
+                    fails += 1
+    print("DIY con el origen arriba: %d casos, %d mal; en %d el RTL viejo (NY entero) daba otra cosa" % (n, fails, changed))
     return fails
 
 
@@ -137,6 +171,7 @@ def main():
     if len(args) > 1:
         exe_old = build(args[1], out)
         fails += regression(exe_new, exe_old, out, n)
+        fails += check_diy(exe_new, exe_old, out)
     if "--keep" not in sys.argv:
         subprocess.run(["rm", "-rf", out])
     print("RESULTADO:", "TODO OK" if fails == 0 else "%d FALLOS" % fails)

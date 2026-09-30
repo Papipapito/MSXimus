@@ -227,8 +227,8 @@ module vdp_command (
 	wire		[17:0]	w_address_d;
 	wire		[12:0]	w_next_nyb;
 	wire		[9:0]	w_next;
-	wire				w_byte_mode;				//	27/09: 1 pixel por byte (SCREEN 8, SCREEN 2 con CMD...)
-	reg					ff_byte_mode;				//	registrado con ff_screen_mode: un FF, no un OR de tres (timing del 60K)
+	reg			[2:0]	ff_pixel_step;				//	30/09: paso de pixel registrado al escribir R#46 (upstream HRA 4410365)
+	wire				w_sy_overflow;				//	30/09: el origen llega a Y = 0 con DIY = 1 (upstream HRA ef12ee3)
 	wire		[11:0]	w_next_sx;
 	wire		[13:0]	w_next_sy;
 	wire		[9:0]	w_next_dx;
@@ -310,21 +310,36 @@ module vdp_command (
 	always @( posedge clk ) begin
 		ff_screen_mode			<= screen_mode;
 		ff_screen_mode_clone	<= screen_mode;
-		ff_byte_mode			<= !(screen_mode[c_g4] || screen_mode[c_g5] || screen_mode[c_g6]);
 	end
 
 	assign w_effective_mode		= reg_command_enable || ff_fg4 || (ff_screen_mode[c_g4] || ff_screen_mode[c_g5] || ff_screen_mode[c_g6] || ff_screen_mode[c_g7]);
 	assign w_bpp				= (ff_screen_mode[c_g6] || ff_screen_mode[c_g4]) ? c_bpp_4bit:
 	            				  (ff_screen_mode[c_g5]) ? c_bpp_2bit: c_bpp_8bit;
-	//	27/09/2026 (MSXimus, aviso de la sesion del F1 Spirit V9968): los comandos rapidos (HMMV/HMMM/YMMM/HMMC,
-	//	ff_command[3:2] == 2'b11) avanzan un BYTE por paso: 1 pixel en los modos byte (SCREEN 8 y, con R#25 CMD=1,
-	//	SCREEN 2 y el resto de modos no bitmap, que w_address_*_pre direcciona como SCREEN 8), 2 en SCREEN 5/7 y 4 en
-	//	SCREEN 6. Antes se preguntaba "es SCREEN 8" y SCREEN 2 caia en el paso de 2 con direccion de 1 pixel/byte:
-	//	copiaba un byte si y otro no (tb_g2cmd / g2cmd_check.py). SCREEN 5-8 quedan bit a bit como estaban.
-	assign w_byte_mode			= ff_byte_mode;
-	assign w_next				= (w_byte_mode || ff_command[3:2] != 2'b11) ? 10'd1:
-	             				  (ff_screen_mode_clone[c_g5]) ? 10'd4: 10'd2;
+	//	Paso de pixel de los comandos. Los rapidos (HMMV/HMMM/YMMM/HMMC, R#46[7:6] == 11) avanzan un BYTE por paso:
+	//	2 pixeles en SCREEN 5/7 y con FG4, 4 en SCREEN 6, 1 en SCREEN 8 y en los modos no bitmap (SCREEN 2 con R#25
+	//	CMD = 1, que w_address_*_pre direcciona como SCREEN 8). El resto de comandos, 1. 27/09: lo arreglamos aqui con
+	//	ff_byte_mode (el RTL de HRA copiaba un byte si y otro no en SCREEN 2; nuestra issue #10). 30/09: se adopta su
+	//	arreglo (4410365): el paso se REGISTRA al escribir R#46 (ff_pixel_step, abajo), con FG4 como SCREEN 5, y la
+	//	decision de modo sale del camino w_next -> w_next_sx -> ff_xsel, el peor de su PnR y de los nuestros.
+	assign w_next				= { 7'd0, ff_pixel_step };
 	assign w_512pixel			= (ff_screen_mode_clone[c_g5] || ff_screen_mode_clone[c_g6]);
+
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_pixel_step	<= 3'd1;
+		end
+		else if( register_write && (register_num == 6'd46) ) begin
+			if( register_data[7:6] != 2'b11 || !(ff_screen_mode_clone[c_g4] || ff_screen_mode_clone[c_g5] || ff_screen_mode_clone[c_g6] || ff_fg4) ) begin
+				ff_pixel_step	<= 3'd1;
+			end
+			else if( ff_screen_mode_clone[c_g5] ) begin
+				ff_pixel_step	<= 3'd4;
+			end
+			else begin
+				ff_pixel_step	<= 3'd2;
+			end
+		end
+	end
 
 	assign vram_access_mask		= ff_mxc;
 
@@ -733,6 +748,10 @@ module vdp_command (
 							   ff_command == c_line);
 	assign w_sx_overflow	= ff_sx_active && (w_next_sx[9] || (!ff_512pixel && w_next_sx[8]));
 	assign w_dx_overflow	= ff_dx_active && (w_next_dx[9] || (!ff_512pixel && w_next_dx[8]));
+	//	30/09/2026 (upstream HRA ef12ee3): con DIY = 1 el ORIGEN tambien tiene borde de arriba. LMMM/HMMM/YMMM solo
+	//	miraban el destino (w_dy_overflow); si SY llega antes a Y = 0 hay que acabar ahi (openMSX: clipNY_2 recorta NY
+	//	al minimo de SY y DY). La demo ds4.rom se paraba. Banco: g2cmd_check.py (casos DIY con SY < NY).
+	assign w_sy_overflow	= ff_sy_active && ff_diy && (ff_sy[20:8] == 13'd0);
 	assign w_dy_overflow	= w_next_dy[12];
 
 	// --------------------------------------------------------------------
@@ -871,9 +890,9 @@ module vdp_command (
 	end
 
 	assign w_ny			= { 1'b0, ff_ny } + 12'd1;
-	//	27/09: NX se redondea al byte solo en SCREEN 5/6/7 (ver w_next); en los modos byte NX va tal cual
-	assign w_nx_max		= (ff_byte_mode || ff_command[3:2] != 2'b11) ? reg_nx:
-	             		  (ff_screen_mode[c_g5]) ? { reg_nx[10:2], 2'd0 }: { reg_nx[10:1], 1'd0 };
+	//	NX se redondea al byte con el mismo paso registrado (30/09, upstream HRA 4410365)
+	assign w_nx_max		= ff_pixel_step[2] ? { reg_nx[10:2], 2'd0 }:
+	            		  ff_pixel_step[1] ? { reg_nx[10:1], 1'd0 }: reg_nx;
 	assign w_nx_end		= (ff_nx == w_nx_max && ff_command != c_ymmm);
 	assign w_ny_end		= (ff_ny == reg_ny) | w_ny[11] | (w_ny[10] & ~reg_vram256k_mode);
 
@@ -1524,7 +1543,7 @@ module vdp_command (
 				ff_cache_vram_write		<= 1'b1;
 				ff_cache_vram_wdata		<= w_destination;
 				ff_count_valid			<= 1'b1;
-				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_dy_overflow) ) begin
+				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_sy_overflow || w_dy_overflow) ) begin
 					ff_state				<= c_state_pre_finish;
 				end
 				else if( reg_command_high_speed_mode ) begin
@@ -1665,7 +1684,7 @@ module vdp_command (
 				ff_cache_vram_write		<= 1'b1;
 				ff_cache_vram_wdata		<= ff_read_byte;
 				ff_count_valid			<= 1'b1;
-				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_dy_overflow) ) begin
+				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_sy_overflow || w_dy_overflow) ) begin
 					ff_state				<= c_state_pre_finish;
 				end
 				else if( reg_command_high_speed_mode ) begin
@@ -1699,7 +1718,7 @@ module vdp_command (
 				ff_cache_vram_write		<= 1'b1;
 				ff_cache_vram_wdata		<= ff_read_byte;
 				ff_count_valid			<= 1'b1;
-				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_dy_overflow) ) begin
+				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_sy_overflow || w_dy_overflow) ) begin
 					ff_state				<= c_state_pre_finish;
 				end
 				else if( reg_command_high_speed_mode ) begin

@@ -1063,7 +1063,9 @@ assign keyboard_addr = ppi_port_c[3:0];
     //         Report ID el decodificador SNES suelta sus direcciones). En el menu devolvia 18 atras toda seleccion >= 18.
     //         Y (timing) las escrituras a los puertos de config #40-#46 y al mapper FC-FF con una etapa de registro,
     //         como el #44 de la V3.7: su cruce 54->27 era el peor camino de casi todos los dados rechazados.
-    localparam [7:0] FPGA_PATCH   = 8'd5;
+    // 3.7.6 = + tres arreglos del upstream de HRA del 29/09 (V9968): el par del puerto 1 se cancela con cualquier lectura y
+    // con una escritura al puerto 0 (Fleet Commander II), DIY con el origen arriba (ds4), paso de pixel registrado.
+    localparam [7:0] FPGA_PATCH   = 8'd6;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
     // 2Fh y 29h en UN solo termino del mux de cpu_din (un escalon mas en esa cadena costo -0,1 ns en el 60K): las dos
     // constantes se eligen por bus_addr[2] (2Fh = ...1111, 29h = ...1001) y la sintesis las pliega por bit.

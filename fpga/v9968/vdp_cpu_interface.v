@@ -382,7 +382,7 @@ module vdp_cpu_interface (
 			ff_port3_write			<= 1'b0;
 			ff_register_num			<= 6'd0;
 		end
-		else if( w_read && ff_port1 ) begin
+		else if( w_read || (w_write && ff_port0) ) begin
 			//	_185 (caza Fleet/DQ2 05/08, intuicion de Albert "funciones del
 			//	TMS9918 no heredadas"): en el TMS9918 y en el V9938 (appmanual)
 			//	LEER el registro de status RESETEA el latch del par de bytes
@@ -395,6 +395,13 @@ module vdp_cpu_interface (
 			//	esto) y las puestas de direccion de VRAM se corren. Identico
 			//	agujero en el upstream.
 			ff_2nd_access	<= 1'b0;
+			//	30/09/2026 (upstream HRA 05f9806): en el V9938/V9958 (y en openMSX, VDP.cc: registerDataStored) el par a
+			//	medias se cancela con CUALQUIER lectura (98h-9Bh) y con una ESCRITURA al puerto 0, no solo con la lectura
+			//	de status del _185. Fleet Commander II escribe un numero IMPAR de bytes en 99h (00,22,81,0F,86,00,88) y
+			//	cuenta con que las escrituras a 98h del CLRSPR lo resincronicen; sin esto todos los registros siguientes
+			//	quedaban corridos y acababa esperando un CE eterno. Banco: tools/v9968_sim/tb_port1_latch.sv (el de HRA).
+			ff_register_write	<= 1'b0;
+			ff_port3_write		<= 1'b0;
 		end
 		else if( ff_busy ) begin
 			//	hold
@@ -425,6 +432,13 @@ module vdp_cpu_interface (
 			ff_port3_write		<= 1'b1;
 			ff_register_num		<= ff_register_pointer;
 			ff_1st_byte			<= ff_bus_wdata;
+		end
+		else if( w_write && ff_port2 && !ff_ext_palette_mode && ff_color_palette_phase == 2'd0 ) begin
+			//	30/09/2026 (upstream HRA 05f9806): el 1er byte de la paleta V9938 (R/B) comparte el latch de datos con
+			//	los puertos 1 y 3 (openMSX: dataLatch); el 2o byte saca de ahi R y B. La paleta extendida (3 bytes) no.
+			ff_1st_byte			<= ff_bus_wdata;
+			ff_register_write	<= 1'b0;
+			ff_port3_write		<= 1'b0;
 		end
 		else begin
 			ff_register_write	<= 1'b0;
@@ -858,14 +872,14 @@ module vdp_cpu_interface (
 			end
 			else begin
 				if( ff_color_palette_phase == 2'd0 ) begin
-					//	P#2 = [0][R][R][R][0][B][B][B]
-					ff_palette_r				<= { ff_bus_wdata[6:4], ff_bus_wdata[6:5] };
-					ff_palette_b				<= { ff_bus_wdata[2:0], ff_bus_wdata[2:1] };
+					//	P#2 = [0][R][R][R][0][B][B][B]  (30/09: se guarda en ff_1st_byte, el latch compartido)
 					ff_color_palette_phase		<= 2'd1;
 					ff_color_palette_valid		<= 1'b0;
 				end
 				else begin
 					//	P#2 = [0][0][0][0][0][G][G][G]
+					ff_palette_r				<= { ff_1st_byte[6:4], ff_1st_byte[6:5] };
+					ff_palette_b				<= { ff_1st_byte[2:0], ff_1st_byte[2:1] };
 					ff_palette_g				<= { ff_bus_wdata[2:0], ff_bus_wdata[2:1] };
 					ff_color_palette_phase		<= 2'd0;
 					ff_color_palette_valid		<= 1'b1;
