@@ -26,4 +26,4 @@ CAMPANA pf60l (5167, 5171, 5179, 5189, 5197): 1/5
   Recordatorio de la 3.7.5: el 5003 pasaba el gate y NO calibraba la DDR3 en placa. Si este no da imagen al primer
   arranque, avisa y lanzo otra campana (siguientes primos: 5209, 5227, 5231, 5233, 5237).
 
-VOLVER ATRAS: files/20260929/msximus_v3.7.5_dado5099.fs (mismo pack).
+VOLVER ATRAS: files/20260929/msximus_v3.7.5b_dado5099.fs (la 3.7.5 validada; mismo pack).
