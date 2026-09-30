@@ -97,7 +97,7 @@ V3.7.5b (29-30/09) - TRES CANDIDATOS - PROBAR LOS TRES - SIN PROBAR EN PLACA
 
   CANDIDATOS (todos GATE OK, 0 holds tolerados, CLS 98 %):
     msximus_v3.7.5b_dado5107.fs  (md5 5b0b96311bd4)  _jtag.bin 441c0308b753   PEOR SETUP +0,985 ns
-    msximus_v3.7.5b_dado5099.fs  (md5 ad3fcf18c52a)  _jtag.bin bc025ebba960   PEOR SETUP +0,955 ns
+    msximus_v3.7.5b_dado5099.fs  (md5 ad3fcf18c52a)  _jtag.bin bc025ebba960   PEOR SETUP +0,955 ns   <- VALIDADO (30/09)
     msximus_v3.7.5b_dado5101.fs  (md5 6bb6954c13b0)  _jtag.bin 8dc10eda8314   PEOR SETUP +0,526 ns
   0x400000: packs/pack_bios_msximus.bin (md5 7e00b72b31a5), el mismo de la tarde.
 
@@ -111,3 +111,12 @@ V3.7.5b (29-30/09) - TRES CANDIDATOS - PROBAR LOS TRES - SIN PROBAR EN PLACA
   138K pf138i (5119, 5147, 5153): 0/3, cruce CPU a SDRAM (cpu1/u0/DO), su problema de siempre: NO se entrega.
   Ramas: MSX_up_v3_port port-fixes-2809 9ff2c3a, MSXimus_138_port 99c73fa.
   VOLVER ATRAS: msximus_v3.7.4_dado4919.fs (con el mismo pack).
+
+================================================================================
+30/09 - VALIDADO EN PLACA: LA V3.7.5 ES EL DADO 5099
+================================================================================
+  Albert: "la 5099 ha funcionado bien, el joystick funciona bien". Imagen a la primera (la DDR3 calibra) y el mando
+  sin la izquierda fantasma.
+  V3.7.5 = msximus_v3.7.5b_dado5099.fs (md5 ad3fcf18c52a) + _jtag.bin (bc025ebba960)
+           + packs/pack_bios_msximus.bin (md5 7e00b72b31a5) en 0x400000.
+  Los 5107 y 5101 quedan de repuesto (sin probar); el 5003 esta retirado (no calibra).
