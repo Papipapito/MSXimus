@@ -353,6 +353,15 @@ static bool Conecta(void)
 
 static u16 Pega(c8* d, u16 i, const c8* t) { while (*t) d[i++] = *t++; return i; }
 
+// TCP_RCV puede entregar MENOS de lo pedido (el ESP lo hace): la cuenta real la deja el UNAPI en incoming_bytes.
+// 🚨 Net_Recv() de network.h devuelve siempre lo pedido: con el ESP escribia restos del bufer y daba la descarga
+// por completa antes de tiempo (visto en placa el 02/10: barra al 99 % y CRC malo). 0xFFFF = error.
+static u16 Recibe(u8* d, u16 max)
+{
+	if (tcpip_tcp_rcv((int)g_cx, (char*)d, (int)max, &g_TcpParms) != ERR_OK) return 0xFFFF;
+	return (u16)g_TcpParms.incoming_bytes;
+}
+
 // GET de 'nombre' (relativo a la carpeta de la placa) al fichero fh, o a g_man si fh == 0xFF
 static bool Http(const c8* placa, const c8* nombre, u8 fh)
 {
@@ -366,7 +375,7 @@ static bool Http(const c8* placa, const c8* nombre, u8 fh)
 	i = Pega(g_hdr, i, nombre);
 	i = Pega(g_hdr, i, " HTTP/1.0\r\nHost: ");
 	i = Pega(g_hdr, i, g_srv[0] ? g_srv : "msx.barcelona");
-	i = Pega(g_hdr, i, "\r\nUser-Agent: MXUPDATE\r\nConnection: close\r\n\r\n");
+	i = Pega(g_hdr, i, "\r\nConnection: close\r\n\r\n");
 	if (!Net_Send(g_cx, (const u8*)g_hdr, i)) { Net_Abort(g_cx); return FALSE; }
 	g_hdr_n = 0; g_man_n = 0;
 	t0 = JIFFY;
@@ -379,7 +388,9 @@ static bool Http(const c8* placa, const c8* nombre, u8 fh)
 		}
 		t0 = JIFFY;
 		if (n > sizeof g_buf) n = sizeof g_buf;
-		if (Net_Recv(g_cx, g_buf, n) != n) break;
+		n = Recibe(g_buf, n);
+		if (n == 0xFFFF) break;
+		if (!n) continue;
 		if (!cab) {                                             // cabecera HTTP hasta la linea vacia
 			while (off < n && !cab) {
 				if (g_hdr_n < sizeof g_hdr - 1) g_hdr[g_hdr_n++] = g_buf[off];
@@ -547,8 +558,8 @@ void main(void)
 	CrcIniciaTablas();
 	if (g_solo_comprobar) { placa = 0; id_flash = 0; goto fichero; }
 	if (!puente) {
-		Pr(T("Este core no se puede actualizar desde el MSX: hace\r\nfalta la V3.8 o posterior (grabala una vez con el PC).",
-		     "This core cannot be updated from the MSX: it needs\r\nV3.8 or later (flash it once from the PC)."));
+		Pr(T("Hace falta el core V3.8 o posterior (grabalo\r\nuna vez con el PC).",
+		     "Needs core V3.8 or later (flash it once\r\nfrom the PC)."));
 		Fin(1);
 	}
 	ver = P_VERSION; parche = P_PARCHE;
@@ -685,7 +696,7 @@ mal_flash:
 	LeePara();
 	Pr(T("\r\nLa flash no ha quedado bien.", "\r\nThe flash was not written correctly."));
 aviso:
-	Pr(T("\r\nNO APAGUES: el MSX sigue con el core de antes; vuelve a\r\nlanzar MXUPDATE. Si no lo consigues, graba el core con el PC.",
-	     "\r\nDO NOT SWITCH OFF: the MSX still runs the old core; run\r\nMXUPDATE again. If it keeps failing, flash the core from the PC."));
+	Pr(T("\r\nNO APAGUES: sigue el core de antes. Repite\r\nMXUPDATE o graba el core con el PC.",
+	     "\r\nDO NOT SWITCH OFF: the old core still runs. Run\r\nMXUPDATE again or flash the core from the PC."));
 	Fin(2);
 }

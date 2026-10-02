@@ -12,7 +12,7 @@ DoRun     = false;
 
 ProjName = "mxupdate";
 ProjModules = [ ProjName ];
-LibModules  = [ "system", "bios", "memory", "dos" ];
+LibModules  = [ "system", "dos" ];      // solo lo que se usa: el codigo tiene que acabar antes de 4000h
 
 // Implementacion real de las llamadas TCP/IP UNAPI (la trae MSXgl de serie).
 AddSources  = [ "../../engine/src/network/unapi_tcp.asm" ];
