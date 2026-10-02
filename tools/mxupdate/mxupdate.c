@@ -7,6 +7,8 @@
 //        a https://msx.barcelona/ota/tang60k/ (o tang138k); /S:192.168.2.200:8000 = el servidor de desarrollo
 //        del PC (fpga/zynq/ota/ota_servidor.py del MSXimus Z, http y la carpeta tang60k/).
 //   /C = solo comprobar el fichero (cabecera y CRC), sin tocar la flash; vale en cualquier MSX con DOS 2.
+//   /R = actualizacion COMPLETA: ademas, al acabar, borra el sector de los ajustes (0x480000 en el 60K, 0x880000 en el
+//        138K). Sin la firma "AB" el core arranca con los de fabrica (los mismos que el rescate con S2).
 //
 // Graba en la flash SPI de la FPGA lo que trae un .UPD (tools/mxupd.py: el bitstream y/o el pack de la BIOS) a
 // traves del puente de la flash del core (fpga/src/flash_bridge.v, dispositivo de E/S conmutada 4Dh). Orden:
@@ -40,7 +42,7 @@ __sfr __at(0x4E) P_INFO;
 
 #define JIFFY (*(volatile u16*)0xFC9E)
 
-static bool g_en, g_solo_comprobar, g_red;
+static bool g_en, g_solo_comprobar, g_red, g_ajustes;
 static c8  g_srv[48];          // /S: servidor (vacio = msx.barcelona)
 static u16 g_puerto;
 #define T(es, en) (g_en ? (en) : (es))
@@ -274,7 +276,7 @@ static void Opciones(void)
 	// el arranque de MSXgl para DOS NO pone a cero las variables: lo que no se inicializa aqui conserva lo que
 	// dejo la ejecucion anterior (visto en openMSX: un /C se colaba en la siguiente orden)
 	g_ruta[0] = 0; g_srv[0] = 0; g_puerto = 80;
-	g_solo_comprobar = FALSE; g_red = FALSE;
+	g_solo_comprobar = FALSE; g_red = FALSE; g_ajustes = FALSE;
 	while (i < n) {
 		while (i < n && s[i] == ' ') i++;
 		if (i >= n) break;
@@ -284,6 +286,7 @@ static void Opciones(void)
 			if (a == 'E' && b == 'S') g_en = FALSE;
 			if (a == 'C') g_solo_comprobar = TRUE;
 			if (a == 'N') g_red = TRUE;
+			if (a == 'R') g_ajustes = TRUE;
 			if (a == 'S' && s[i + 2] == ':') {
 				i += 3; k = 0;
 				while (i < n && s[i] != ' ' && s[i] != ':' && k < sizeof g_srv - 1) g_srv[k++] = s[i++];
@@ -541,6 +544,8 @@ static bool Red(const c8* placa)
 	return TRUE;
 }
 
+static void NoResponde(void) { Pr(T("La flash no responde.", "The flash does not answer.")); Fin(1); }
+
 //-----------------------------------------------------------------------------
 void main(void)
 {
@@ -566,11 +571,11 @@ void main(void)
 
 	// ---- la placa: el IDCODE del bitstream que hay grabado ----
 	if (P_ESTADO & ST_AJENO) {                      // justo tras encender el core carga las ondas del OPL4 de la flash
-		Pr(T("Esperando a que el core suelte la flash...\r\n", "Waiting for the core to release the flash...\r\n"));
-		if (!Espera(ST_AJENO, 0, 3600)) { Pr(T("La flash sigue ocupada.", "The flash is still busy.")); Fin(1); }
+		Pr(T("Esperando a la flash...\r\n", "Waiting for the flash...\r\n"));
+		if (!Espera(ST_AJENO, 0, 3600)) NoResponde();
 	}
-	if (!LeeEmpieza(0)) { Pr(T("La flash no responde.", "The flash does not answer.")); Fin(1); }
-	if (!LeeBloque(g_buf, 256)) { LeePara(); Pr(T("La flash no responde.", "The flash does not answer.")); Fin(1); }
+	if (!LeeEmpieza(0)) NoResponde();
+	if (!LeeBloque(g_buf, 256)) { LeePara(); NoResponde(); }
 	LeePara();
 	id_flash = Idcode(g_buf, 256);
 	placa = id_flash == 0x0001481BUL ? "console60k" : id_flash == 0x0001081BUL ? "console138k" : 0;
@@ -630,13 +635,12 @@ fichero:
 			Pr("\r\n");
 		}
 		if (~g_crc != g_seg[i].crc) goto mal_fichero;
-		if (!g_solo_comprobar && g_seg[i].dir == 0 && id_fich != id_flash) {
-			Pr(T("\r\nEl bitstream del fichero es de otro chip.", "\r\nThe bitstream in the file is for another chip."));
-			Fin(1);
-		}
+		if (!g_solo_comprobar && g_seg[i].dir == 0 && id_fich != id_flash) goto mal_fichero;   // bitstream de otro chip
 	}
 	if (g_solo_comprobar) { Pr(T("Fichero correcto.", "File OK.")); Fin(0); }
-	Pr(T("\r\nFichero correcto. Grabar en la flash? (S/N) ", "\r\nFile OK. Write it to the flash? (Y/N) "));
+	Pr(T("\r\nFichero correcto. Grabar en la flash", "\r\nFile OK. Write it to the flash"));
+	if (g_ajustes) Pr(T(" y BORRAR LOS AJUSTES", " and ERASE THE SETTINGS"));
+	Pr(T("? (S/N) ", "? (Y/N) "));
 	{
 		c8 c = DOS_CharInput() & 0xDF;
 		if (c != 'S' && c != 'Y') { Pr(T("\r\nNo se ha tocado nada.", "\r\nNothing was changed.")); Fin(0); }
@@ -681,6 +685,14 @@ fichero:
 		if (~g_crc != g_seg[i].crc) goto mal_flash;
 	}
 	DOS_CloseHandle(g_fh);
+	if (g_ajustes) {                                // el sector de los ajustes, justo detras del pack (512 KB)
+		u32 a = (id_flash == 0x0001481BUL ? 0x400000UL : 0x800000UL) + 0x80000UL;
+		if (!Borra4K(a) || !LeeEmpieza(a)) goto mal_flash;
+		if (!LeeBloque(g_buf, 16)) goto mal_flash;
+		LeePara();
+		for (i = 0; i < 16; i++) if (g_buf[i] != 0xFF) goto mal_flash;
+		Pr(T("\r\nAjustes borrados: arrancara con los de fabrica.", "\r\nSettings erased: it will start with factory settings."));
+	}
 	Pr(T("\r\nListo. Apaga y vuelve a encender el MSXimus para\r\nentrar con el core nuevo.",
 	     "\r\nDone. Switch the MSXimus off and on again to start\r\nthe new core."));
 	Fin(0);

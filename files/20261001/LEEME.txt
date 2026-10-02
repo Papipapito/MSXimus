@@ -31,6 +31,7 @@ QUE TRAE
     los puertos #41-#4E: direccion, borrar 4 KB, programar pagina, leer). MXUPDATE.COM lo usa:
       MXUPDATE /C fichero.UPD      solo comprueba el fichero (vale en cualquier MSX con DOS 2)
       MXUPDATE fichero.UPD         graba lo que trae (por defecto MSXIMUS.UPD)
+      MXUPDATE ... /R              actualizacion COMPLETA: ademas borra los ajustes (arranca con los de fabrica)
       MXUPDATE /N                  descarga la ultima de https://msx.barcelona/ota/tang60k/ (aun no esta alli)
       MXUPDATE /N /S:192.168.2.200:8000   la descarga del servidor del PC (el del Zynq, carpeta tang60k/)
     Antes de borrar nada comprueba que el core tenga el puente, que el chip (IDCODE del bitstream grabado) sea el
@@ -49,7 +50,7 @@ PRUEBAS QUE PROPONGO (en este orden, de menos a mas riesgo)
 
 FICHEROS DE ESTA CARPETA
   msximus_v3.8_dado5233.fs        md5 afefaf128da8      msximus_v3.8_dado5233_jtag.bin  md5 99d2e5362994
-  bl616_msximus_v3.8_60k.bin      md5 4c5d282eff82      MXUPDATE.COM                    md5 7491c60eb343
+  bl616_msximus_v3.8_60k.bin      md5 4c5d282eff82      MXUPDATE.COM                    md5 e8f0fd2e206e
   MSXIMUS.UPD  (= 380_n214_es.upd: bitstream + pack castellano Nextor 2.1.4)            md5 08abdb474b1e
   PACK_ES.UPD / PACK_EN.UPD  (solo el pack, Nextor 2.1.4)                                md5 91bd6df7 / bb1387c9
   Las cuatro variantes completas y el manifiesto: MSXimus_zynq/fpga/zynq/ota/servidor/tang60k/ (tools/mxupd.py
