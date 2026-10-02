@@ -4,7 +4,8 @@
 //   MXUPDATE [fichero.UPD] [/C] [/EN] [/ES]   (por defecto MSXIMUS.UPD en el directorio actual)
 //   MXUPDATE /N [/S:servidor[:puerto]] [fichero.UPD]
 //   /N = descargar la ultima version por la red (UNAPI: el ESP32 del MSXimus) a fichero.UPD y grabarla. Sin /S va
-//        a https://msx.barcelona/ota/tang60k/ (o tang138k); /S:192.168.2.200:8000 = el servidor de desarrollo
+//        a https://msx.barcelona/wp-content/ota/tang60k/ (o tang138k); /S:192.168.2.200:8000 = el servidor de
+//        desarrollo (sirve /tang60k/). En IONOS el SFTP solo llega a /wordpress/wp-content: de ahi la ruta.
 //        del PC (fpga/zynq/ota/ota_servidor.py del MSXimus Z, http y la carpeta tang60k/).
 //   /C = solo comprobar el fichero (cabecera y CRC), sin tocar la flash; vale en cualquier MSX con DOS 2.
 //   /R = actualizacion COMPLETA, todo desde cero: con /N baja la variante "completa" (core + pack + ondas del OPL4) y al
@@ -374,7 +375,7 @@ static bool Http(const c8* placa, const c8* nombre, u8 fh)
 	bool cab = FALSE, hay_clen = FALSE, ok = FALSE;
 	if (!Conecta()) return FALSE;
 	i = Pega(g_hdr, i, "GET ");
-	i = Pega(g_hdr, i, g_srv[0] ? "/" : "/ota/");
+	i = Pega(g_hdr, i, g_srv[0] ? "/" : "/wp-content/ota/");
 	i = Pega(g_hdr, i, placa[7] == '1' ? "tang138k/" : "tang60k/");
 	i = Pega(g_hdr, i, nombre);
 	i = Pega(g_hdr, i, " HTTP/1.0\r\nHost: ");
