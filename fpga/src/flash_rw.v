@@ -22,7 +22,13 @@ module flash
     input [23:0] write_addr,
     output write_busy,
     input wire write_terminate,
-    output [7:0] write_counter
+    output [7:0] write_counter,
+    // V3.8 (flash_bridge.v, actualizar desde el MSX): programar SIN borrar el sector antes, y esperar a cada byte
+    // (write_din_ok) con /CS bajo y el reloj parado; si el dato no llega en ~0,5 s se cierra la pagina con lo que
+    // haya. Los ajustes atan write_noerase a 0 y write_din_ok a 1: su camino no cambia. idle = listo para otra orden.
+    input wire write_noerase,
+    input wire write_din_ok,
+    output idle
 );
 
 
@@ -152,7 +158,7 @@ module flash
               r_data_ready <= 0;
               if (write_enable == 1) begin
                   r_write_busy <= 1;
-                  state <= STATE_06_1;
+                  state <= write_noerase ? STATE_06b_1 : STATE_06_1;
               end else if (rd == 1) begin
                   r_CS <= 0;
                   r_busy <= 1;
@@ -460,6 +466,7 @@ module flash
 
           STATE_02_2: begin
             counter <= 0;
+            wip_timeout <= 0;
             dataToSend <= write_addr;
             bitsToSend <=24;
             state <= STATE_SEND_SLOW1;
@@ -468,14 +475,19 @@ module flash
 
           STATE_02_3: begin
             counter <= 0;
-            dataToSend[23-:8] <= write_din;
-            bitsToSend <=8;
-            state <= STATE_SEND_SLOW1;
-            returnState <= STATE_02_4;
+            if (write_din_ok) begin
+              dataToSend[23-:8] <= write_din;
+              bitsToSend <=8;
+              state <= STATE_SEND_SLOW1;
+              returnState <= STATE_02_4;
+            end
+            else if (wip_timeout >= WIP_TIMEOUT)
+              state <= STATE_02_5;
           end
 
           STATE_02_4: begin
             r_write_counter <= r_write_counter + 1;
+            wip_timeout <= 0;
             if (r_write_counter != 8'd255 && write_terminate == 0) begin
                 state <= STATE_02_3;
             end
@@ -558,5 +570,6 @@ module flash
 
   assign dout = dataInBuffer;
   assign write_counter = r_write_counter;
+  assign idle = (state == STATE_LOAD_CMD_TO_SEND);
 
 endmodule

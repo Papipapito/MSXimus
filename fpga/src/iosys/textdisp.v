@@ -1,5 +1,17 @@
 // 32x28 text display in 8x8 font, with a picorv32 register I/O interface
 // to print characters to the display.
+//
+// MSXimus V3.8 (01/10/2026): CON COLOR, en la MISMA BSRAM. Pasa de 2048 x 8 a 2048 x 9 (el noveno bit lo tiraba el
+// modo x8) y el mapa queda (tools/osd_fuente.py):
+//   $000-$37F  celdas 32x28: {atributo[1:0], caracter[6:0]}
+//   $380-$3EF  tabla de atributos POR FILA: $380 + fila*4 + atributo = {fondo[3:0], tinta[3:0]} (osd_paleta.v)
+//   $400-$7FF  fuente: 128 caracteres; los huecos 0x01-0x1F y 0x7F llevan 32 glifos (marcos, bloques, iconos, tildes)
+// Cada fila tiene sus cuatro combinaciones de tinta y fondo. La tabla arranca con 0 = amarillo, 1 = blanco (el "hi"
+// de siempre: el bit 7 del caracter sigue siendo el bit 0 del atributo), 2 = cian y 3 = negro sobre amarillo, asi que
+// un firmware que no sabe de colores se ve como antes.
+// Fuera: el logo de 72x14 (su hueco es la tabla) y la columna 0 naranja (el cursor del menu de TangCore).
+// Un estado mas por pixel (leer la tabla): 4 de los 5 ciclos de hclk que dura un pixel del overlay a 720p, y el color
+// sale un ciclo mas tarde (el overlay se corre 1 pixel de los 1280; no se aprecia).
 
 module textdisp(
 	input             clk,              // main logic clock
@@ -8,128 +20,78 @@ module textdisp(
 
     input      [7:0]  x,                // 0 - 255
     input      [7:0]  y,                // 0 - 223
-    output reg [14:0] color,            // pixel color, NOTE: 2-cycle latency
-                                        // we need 1 cycle to fetch character and 1 cycle to fetch font byte
+    output reg [14:0] color,            // pixel color, NOTE: 3-cycle latency
 
-    // PicoRV32 I/O interface. Every write updates one character
-    // [23:16]: x, [15:8]: y, [7-0]: character to print
+    // reg_char_we[0]: celda   [25:24] atributo, [20:16] x, [12:8] y, [7:0] caracter (bit 7 = bit 0 del atributo)
+    // reg_char_we[1]: tabla   [17:16] atributo, [12:8] fila, [7:0] {fondo, tinta}
 	input      [3:0]  reg_char_we,
 	input      [31:0] reg_char_di
 );
+parameter [14:0] COLOR_LOGO = 15'b00000_10101_00000;    // sin uso (ya no hay logo); se deja por compatibilidad
 
-// BGR
-localparam [14:0] COLOR_BACK    = 15'b00000_00000_00000;
-localparam [14:0] COLOR_TEXT    = 15'b10000_11111_11111;    // yellow
-localparam [14:0] COLOR_CURSOR  = 15'b10000_11000_11111;    // orange
-parameter [14:0] COLOR_LOGO    = 15'b00000_10101_00000;    // green
-// MSXimus: color alternativo. El byte del caracter tenia el BIT 7 SIN USAR --
-// el original mapeaba todo lo que fuera >=128 al caracter '?' y ahi se acababa.
-// Reciclado como ATRIBUTO: bit7=1 -> este color. Sale gratis (ni un bit de
-// memoria mas) y da dos colores en cualquier celda, que es lo que hacia falta
-// para que el OSD no fuera un muro amarillo.
-localparam [14:0] COLOR_ALT     = 15'b11111_11111_11111;    // blanco
-
-// 72x14 pixels 1bpp logo
-localparam LOGO_X = 128-36;
-localparam LOGO_Y = 201;
-
-//
-// Pixel output logic for characters and logo:
-// 1. To improve timing, output logic is broken into 3 cycles.
-// 2. Char buffer, font rom, logo rom are all stored in the same bram 
-//    block to save LUTs.
-//
-reg [10:0] mem_addr_b;
-reg [7:0] mem_do_b;
-reg is_cursor;
-reg [14:0] overlay_color_buf;
-
-wire [1:0] cmd = reg_char_di[31:24];
+wire       tabla  = reg_char_we[1];
 wire [4:0] text_x = reg_char_di[20:16];
 wire [4:0] text_y = reg_char_di[12:8];
-wire [6:0] text_char = reg_char_di[6:0];
+wire [10:0] ada   = tabla ? {4'b0111, text_y, reg_char_di[17:16]} : {1'b0, text_y, text_x};
+wire [8:0]  dina  = tabla ? {1'b0, reg_char_di[7:0]}
+                          : {reg_char_di[25], reg_char_di[24] | reg_char_di[7], reg_char_di[6:0]};
 
-// Char buffer, font and logo rom backed by Dual-port BRAM (total 2KB)
-// this is initialized with font.mi (font.vh + logo.vh)
-// $000-$37F: Character buffer RAM (32*28)
-// $380-$3FF: Logo ROM (14*9 bytes)
-// $400-$800: Font ROM
+reg  [10:0] mem_addr_b;
+wire [8:0]  mem_do_b;
+
 gowin_dpb_menu menu_mem (
-    .clka(clk), .reseta(1'b0), .ocea(), .cea(1'b1), 
-    .ada({1'b0, text_y, text_x}), .wrea(reg_char_we[0] && cmd == 2'd0),
-    .dina({1'b0, text_char}), .douta(), 
+    .clka(clk), .reseta(1'b0), .ocea(1'b1), .cea(1'b1),
+    .ada(ada), .wrea(reg_char_we[0] | reg_char_we[1]),
+    .dina(dina), .douta(),
 
-    .clkb(hclk), .resetb(1'b0), .oceb(), .ceb(1'b1), 
-    .adb(mem_addr_b), .wreb(1'b0), 
-    .dinb(), .doutb(mem_do_b)
+    .clkb(hclk), .resetb(1'b0), .oceb(1'b1), .ceb(1'b1),
+    .adb(mem_addr_b), .wreb(1'b0),
+    .dinb(9'd0), .doutb(mem_do_b)
 );
 
-reg [6:0] logo_addr;
-reg [2:0] logo_xoff;
-reg logo_active;
-reg [14:0] color_buf;
-reg        attr;        // bit 7 del caracter en curso
-reg [7:0] x_r;
+wire [14:0] pal_tinta, pal_fondo;
+osd_paleta paleta (.ti(mem_do_b[3:0]), .fo(mem_do_b[7:4]), .tinta(pal_tinta), .fondo(pal_fondo));
 
-// Rendering state machine
-reg [2:0] state;
-localparam MAIN = 0;        // default state and fetching character
-localparam FETCH_FONT = 1;  // fetch font byte
-localparam FETCH_LOGO = 2;  // fetch logo byte
-localparam OUTPUT = 3;      // output new pixel and fetch character
+reg [1:0]  atr = 2'd0;           // atributo de la celda en curso
+reg        pix = 1'b0;           // bit de la fuente del pixel en curso
+reg [14:0] color_buf = 15'd0;
+reg [7:0]  x_r = 8'd0;
 
-always @* begin             // address and output logic
+reg [1:0] state = 2'd0;
+localparam MAIN       = 2'd0;   // leer la celda
+localparam FETCH_FONT = 2'd1;   // leer la fila del glifo
+localparam FETCH_ATTR = 2'd2;   // leer {fondo, tinta} de la tabla de la fila
+localparam OUTPUT     = 2'd3;   // sacar el pixel y leer la celda siguiente
+
+always @* begin
     color = color_buf;
     case (state)
-    MAIN:           mem_addr_b = {1'b0, y[7:3], x[7:3]};   
-    FETCH_FONT:     mem_addr_b = {1'b1, mem_do_b[6:0], y[2:0]};   // bit7 = color, no caracter
-    FETCH_LOGO:     mem_addr_b = {4'b0111, logo_addr};
-    OUTPUT: begin
+    MAIN:       mem_addr_b = {1'b0, y[7:3], x[7:3]};
+    FETCH_FONT: mem_addr_b = {1'b1, mem_do_b[6:0], y[2:0]};         // mem_do_b = la celda
+    FETCH_ATTR: mem_addr_b = {4'b0111, y[7:3], atr};
+    OUTPUT: begin                                                   // mem_do_b = {fondo, tinta}
         mem_addr_b = {1'b0, y[7:3], x[7:3]};
-        if (logo_active)
-            color = mem_do_b[logo_xoff] ? COLOR_LOGO : COLOR_BACK;
-        else
-            color = mem_do_b[x[2:0]] ? (attr ? COLOR_ALT
-                                             : (is_cursor ? COLOR_CURSOR : COLOR_TEXT))
-                                    : COLOR_BACK;
+        color = pix ? pal_tinta : pal_fondo;
     end
-    default: mem_addr_b = 0;
     endcase
 end
 
-always @(posedge hclk) begin    // actual state machine
-    reg [7:0] logo_x, logo_y;
-
+always @(posedge hclk) begin
     x_r <= x;
-    
     case (state)
     MAIN, OUTPUT: begin
         state <= MAIN;
         if (state == OUTPUT) color_buf <= color;
-        if (x[0] != x_r[0]) begin   // moved to new pixel
-            if (x >= LOGO_X && x < LOGO_X+72 && y >= LOGO_Y && y < LOGO_Y+14) begin
-                state <= FETCH_LOGO;
-                logo_active <= 1;
-            end else begin
-                state <= FETCH_FONT;
-                logo_active <= 0;
-            end
-        end
-        logo_x = x - LOGO_X;
-        logo_y = y - LOGO_Y;
-        logo_addr <= {logo_y, 3'b0} + logo_y + logo_x[6:3];
-        logo_xoff <= logo_x[2:0];
-        is_cursor <= x[7:3] == 0;
+        if (x[0] != x_r[0]) state <= FETCH_FONT;                    // pixel nuevo
     end
-
-    FETCH_FONT: begin
-        attr  <= mem_do_b[7];   // aqui mem_do_b es aun el CARACTER; en OUTPUT ya es la fuente
+    FETCH_FONT: begin                                               // aqui mem_do_b es aun la CELDA
+        atr   <= mem_do_b[8:7];
+        state <= FETCH_ATTR;
+    end
+    FETCH_ATTR: begin                                               // y aqui la fila del glifo
+        pix   <= mem_do_b[x[2:0]];
         state <= OUTPUT;
     end
-
-    FETCH_LOGO: state <= OUTPUT;
-
-    default: ;
     endcase
 end
 

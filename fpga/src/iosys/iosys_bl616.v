@@ -151,6 +151,11 @@ reg [7:0] x_wr;
 reg [7:0] y_wr;
 reg [7:0] char_wr;
 reg we;
+// V3.8: OSD con color (textdisp.v). Orden 0x10 = atributo (0..3) de lo que se imprime despues; orden 0x11 fila
+// a0 a1 a2 a3 = los cuatro {fondo, tinta} de esa fila. Al arrancar, atributo 0: el aspecto de siempre.
+reg [1:0] attr_reg;
+reg [1:0] attr_wr;
+reg we_tab;
 
 // Add these registers for cursor management
 reg [7:0] cursor_x;
@@ -193,6 +198,8 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0b addr[15:0] data[15:0] write to disk management interface (mgmt_address and mgmt_writedata)
 // 0x0c <scancode>            send PS/2 scancode (len specified by frame header)
 // 0x0d <string>              debug printf. core ignores this.
+// 0x10 a[7:0]                MSXimus V3.8: atributo (a[1:0]) de lo que imprime 0x05
+// 0x11 fila a0 a1 a2 a3      MSXimus V3.8: {fondo, tinta} de los 4 atributos de una fila (textdisp.v)
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -215,11 +222,15 @@ always @(posedge clk) begin
         y_wr <= 0;
         char_wr <= 0;
         we <= 0;
+        attr_reg <= 0;
+        attr_wr <= 0;
+        we_tab <= 0;
         cursor_x <= 0;
         cursor_y <= 0;
     end else begin
         rom_do_valid <= 0;
         we <= 0;
+        we_tab <= 0;
         mgmt_write <= 0;
         fdd_read_finish <= 0;
         mgmt_rx <= 0;
@@ -278,6 +289,7 @@ always @(posedge clk) begin
                         x_wr <= cursor_x;
                         y_wr <= cursor_y;
                         char_wr <= rx_data;
+                        attr_wr <= attr_reg;
                         if (cursor_x < 32) begin
                             cursor_x <= cursor_x + 1;
                             we <= 1;
@@ -327,6 +339,16 @@ always @(posedge clk) begin
                     'hc: begin                      // send PS/2 scancode to PCXT
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
+                    end
+                    'h10: attr_reg <= rx_data[1:0];  // V3.8: atributo del texto
+                    'h11: begin                     // V3.8: tabla de atributos de una fila
+                        if (data_cnt == 0)
+                            y_wr <= rx_data;
+                        else if (data_cnt < 5) begin
+                            x_wr <= data_cnt[7:0] - 8'd1;
+                            char_wr <= rx_data;
+                            we_tab <= 1;
+                        end
                     end
                     default: begin
                         // unknown command: consume all data and return
@@ -576,8 +598,8 @@ end
 
 // text display
 `ifndef SIM
-wire [31:0] reg_char_di = {8'b0, x_wr, y_wr, char_wr};
-wire [3:0] reg_char_we = {4{we}};
+wire [31:0] reg_char_di = {6'b0, attr_wr, x_wr, y_wr, char_wr};
+wire [3:0] reg_char_we = {2'b0, we_tab, we};
 
 textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
     .clk(clk), .hclk(hclk), .resetn(resetn),

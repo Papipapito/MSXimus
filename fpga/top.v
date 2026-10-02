@@ -1052,7 +1052,7 @@ assign keyboard_addr = ppi_port_c[3:0];
     // version desemparejada. Es cosmetico -- el sistema arranca igual -- pero
     // hay que cerrarlo antes de publicar la 3.0.
     // V3.5 (06/09/2026): 0x30 -> 0x35. Ajustes lo muestra como "3.5".
-    localparam [7:0] FPGA_VERSION = 8'h37;   // V3.7: mezclador por fuente (puerto #44). La 3.6 = DMA de la SD
+    localparam [7:0] FPGA_VERSION = 8'h38;   // V3.8: OSD con color + actualizar el core desde el MSX (flash_bridge.v)
     // 27/09/2026 (regla de Albert): las lineas Tang solo reciben ARREGLOS y estos suben el tercer digito: 3.7.1, 3.7.2...
     // Puerto #29 (lectura) = FPGA_PATCH; el menu lo imprime tras "M.m" si vale 1..15 (un core sin el puerto devuelve FFh).
     // 3.7.1 = HRA x3 (sprites borde izq., R#26/27 por linea, colision 1/linea) + HMMM SCREEN 2 CMD=1 + menu EXTBIO/ASCII16-X.
@@ -1065,7 +1065,10 @@ assign keyboard_addr = ppi_port_c[3:0];
     //         como el #44 de la V3.7: su cruce 54->27 era el peor camino de casi todos los dados rechazados.
     // 3.7.6 = + tres arreglos del upstream de HRA del 29/09 (V9968): el par del puerto 1 se cancela con cualquier lectura y
     // con una escritura al puerto 0 (Fleet Commander II), DIY con el origen arriba (ds4), paso de pixel registrado.
-    localparam [7:0] FPGA_PATCH   = 8'd6;
+    // 3.8   = 01/10/2026: version NUEVA (Albert, 01/10: "ya sera una version nueva"): el OSD del BL616 con color
+    //         (textdisp.v, BSRAM 2048x9 con tabla de atributos por fila) y el estado del core con version, ajustes,
+    //         USB e idioma del menu; puente de la flash SPI para actualizar el core sin programador.
+    localparam [7:0] FPGA_PATCH   = 8'd0;
     wire ver_req_r = (bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0 && bus_addr[7:0] == 8'h2F);
     // 2Fh y 29h en UN solo termino del mux de cpu_din (un escalon mas en esa cadena costo -0,1 ns en el 60K): las dos
     // constantes se eligen por bus_addr[2] (2Fh = ...1111, 29h = ...1001) y la sintesis las pliega por bit.
@@ -4937,6 +4940,16 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     // (0x480000-0x480FFF): lo "libre" de verdad empieza en 0x481000.
     assign flash_write_terminate = (flash_write_counter == CONFIG_BYTES) ? 1 : 0;
 
+    // V3.8: puente de la flash para el MSX (flash_bridge.v). Toma el puerto de escritura del modulo cuando tiene una
+    // orden y el de lectura mientras lee; los ajustes y los cargadores (pack, ondas) siguen como siempre.
+    wire        fbr_wr_start, fbr_wr_sel, fbr_noerase, fbr_wdata_ok, fbr_wterm;
+    wire [23:0] fbr_addr;
+    wire [7:0]  fbr_wdata, fbr_dout;
+    wire        fbr_rd_sel, fbr_rd, fbr_term;
+    wire [1:0]  fbr_info;
+    wire        fbr_info_ok;
+    wire        flash_cmd_idle;
+
     flash # (
         .STARTUP_WAIT(1)
     )
@@ -4952,23 +4965,26 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
         // _87: el loader YRW801 toma el puerto de LECTURA cuando el pack ya
         // esta streameado (flash_idle) — el FSM del pack queda parado en
         // STATE_IDLE y el mux le devuelve el control al terminar
-        .addr(wl_active ? wl_flash_addr : ff_flash_addr),
-        .rd(wl_active ? wl_flash_rd : ff_flash_rd),
-        .terminate(wl_active ? wl_flash_term : ff_flash_terminate),
+        .addr(fbr_rd_sel ? fbr_addr : wl_active ? wl_flash_addr : ff_flash_addr),
+        .rd(fbr_rd_sel ? fbr_rd : wl_active ? wl_flash_rd : ff_flash_rd),
+        .terminate(fbr_rd_sel ? fbr_term : wl_active ? wl_flash_term : ff_flash_terminate),
 `else
-        .addr(ff_flash_addr),
-        .rd(ff_flash_rd),
-        .terminate(ff_flash_terminate),
+        .addr(fbr_rd_sel ? fbr_addr : ff_flash_addr),
+        .rd(fbr_rd_sel ? fbr_rd : ff_flash_rd),
+        .terminate(fbr_rd_sel ? fbr_term : ff_flash_terminate),
 `endif
         .dout(flash_dout),
         .data_ready(flash_data_ready),
         .busy(flash_busy),
-        .write_enable(config_flash_write_ff),
-        .write_din(flash_write_din),
+        .write_enable(config_flash_write_ff | fbr_wr_start),
+        .write_din(fbr_wr_sel ? fbr_wdata : flash_write_din),
         .write_busy(flash_write_busy),
         .write_counter(flash_write_counter),
-        .write_terminate(flash_write_terminate),
-        .write_addr(FLASH_CONFIG_ADDRESS)   // 60K: 0x480000 (antes 0x280000 en TN20K)
+        .write_terminate(fbr_wr_sel ? fbr_wterm : flash_write_terminate),
+        .write_addr(fbr_wr_sel ? fbr_addr : FLASH_CONFIG_ADDRESS),   // 60K: 0x480000 (antes 0x280000 en TN20K)
+        .write_noerase(fbr_wr_sel & fbr_noerase),
+        .write_din_ok(~fbr_wr_sel | fbr_wdata_ok),
+        .idle(flash_cmd_idle)
     );
 
     // /WP y /HOLD de la flash QSPI del 60K: desactivados (alto) permanentemente
@@ -4988,6 +5004,32 @@ memory_ctrl #(.SDCLK_INVERT(1'b1)) mem1 (
     reg [31:0] nose = 0;
     wire flash_idle;
     assign flash_idle = (ff_flash_state == STATE_IDLE ) ? 1'b1 : 1'b0;
+
+    // V3.8: el puente (dispositivo de E/S conmutada 4Dh en #40; ver la cabecera de flash_bridge.v)
+`ifdef ENABLE_CONFIG
+    wire fbr_sel = (config0_ff == 8'hB2);
+`else
+    wire fbr_sel = 1'b0;
+`endif
+`ifdef ENABLE_WAVE_LOADER
+    wire fbr_libre = flash_idle & ~wl_active;
+`else
+    wire fbr_libre = flash_idle;
+`endif
+    flash_bridge u_fbr (
+        .clk(clk_54m), .reset_n(bus_reset_n),
+        .sel(fbr_sel), .bus_port(bus_addr[3:0]),
+        .wr_req(bus_addr[7:4] == 4'h4 && bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_wr_n == 1'b0),
+        .rd_req(bus_addr[7:4] == 4'h4 && bus_iorq_n == 1'b0 && bus_m1_n == 1'b1 && bus_rd_n == 1'b0),
+        .bus_din(cpu_dout), .dout(fbr_dout),
+        .info(fbr_info), .info_ok(fbr_info_ok),
+        .libre(fbr_libre),
+        .f_wr_start(fbr_wr_start), .f_wr_sel(fbr_wr_sel), .f_noerase(fbr_noerase), .f_addr(fbr_addr),
+        .f_wdata(fbr_wdata), .f_wdata_ok(fbr_wdata_ok), .f_wterm(fbr_wterm),
+        .f_write_busy(flash_write_busy), .f_write_counter(flash_write_counter),
+        .f_rd_sel(fbr_rd_sel), .f_rd(fbr_rd), .f_term(fbr_term),
+        .f_rdata(flash_dout), .f_data_ready(flash_data_ready), .f_idle(flash_cmd_idle)
+    );
     
     always @(posedge clk_54m, negedge reset3_n) begin
     if (reset3_n == 0) begin
@@ -6401,20 +6443,30 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
     //
     //   byte 0  {3'b0, kana, caps, ventilador, hay_SD, turbo}
     //   byte 1  {2'b0, tipo_SD[1:0], estado_SD[3:0]}
-    //   byte 2-3  termometro: fan_dbg_cnt[19:4] (oscilador de anillo del u_fanctrl)
-    //   byte 4-5  wifi_ovf_cnt  (bytes TIRADOS: falta control de flujo)
-    //   byte 6-7  wifi_unr_cnt  (lecturas en vacio: el ESP no entrega)
+    //   V3.8 (el OSD nuevo solo ensena datos para el usuario; fuera el termometro sin calibrar y los contadores
+    //   de depuracion del WiFi):
+    //   byte 2  FPGA_VERSION (38h)          byte 3  FPGA_PATCH
+    //   byte 4  {tipo_USB2[1:0], tipo_USB1[1:0], 1'b0, segundo_SCC, estereo, scanlines}
+    //           (tipo: 0 nada, 1 teclado, 2 raton, 3 mando; los USB-A del fabric)
+    //   byte 5  {5'b0, el_menu_lo_ha_dicho, Nextor_3, menu_en_ingles}  (OUT #4E del puente de la flash)
+    //   byte 6-7  0
     // ========================================================================
     wire sd_hay = (sd_card_stat_w != 4'd0);
+    // los tipos USB nacen en clk_usb12 y la info del menu en clk_54m: al dominio del iosys (clk_27m) con registros
+    reg [3:0] st_usb_a = 4'd0, st_usb_b = 4'd0;
+    reg [7:0] st_b4 = 8'd0, st_b5 = 8'd0;
+    always @(posedge clk_27m) begin
+        st_usb_a <= {usb2_typ, usb1_typ};
+        st_usb_b <= st_usb_a;
+        st_b4 <= {st_usb_b, 1'b0, config_enable_ghost_scc, config_enable_stereo, config_enable_scanlines};
+        st_b5 <= {5'b0, fbr_info_ok, fbr_info};
+    end
     assign iosys_status = {
         {3'b000, kana_on, caps_on, fan_en_ctrl, sd_hay, turbo_eff},
         {2'b00, sd_card_type_w, sd_card_stat_w},
-        // Termometro: se MANDA pero el OSD no lo pinta -- es el contador de un
-        // oscilador de anillo, sube cuando el chip se enfria y no esta calibrado.
-        // Se deja en el paquete por si algun dia se calibra.
-        fan_dbg_cnt[19:4],
-        wifi_ovf_cnt,
-        wifi_unr_cnt
+        FPGA_VERSION, FPGA_PATCH,
+        st_b4, st_b5,
+        16'h0000
     };
 
     // El MCU enciende y apaga el overlay con el comando 8 (F12 desde el teclado),
@@ -6619,6 +6671,7 @@ reg [1:0]  sd_wr_seq     = 2'd0;    // rueda con cada escritura: una linea
                 `ifdef ENABLE_CONFIG
                 ( config_req == 1 && pana_sel == 1 ) ? pana_dout :
                 ( config_req == 1 && config_ok == 1 ) ? config_dout :
+                ( config_req == 1 && fbr_sel == 1 ) ? fbr_dout :     // V3.8: puente de la flash (ID 4Dh)
                 ( config_req == 1 && config_ok == 0 ) ? swio_dout :
                 `endif
                 ( menu2_req == 1 || kanji_data_req_r == 1 ) ? ram_dout :

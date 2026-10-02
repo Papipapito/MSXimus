@@ -1,0 +1,68 @@
+MSXimus 60K - 01/10/2026 - V3.8 (version nueva): OSD con color y actualizar el core desde el MSX
+=================================================================================================
+SIN PROBAR EN PLACA. Todo lo nuevo esta probado en simulacion y en el PC (ver VERIFICADO).
+
+QUE GRABAR (la primera vez, con el PC; despues ya se puede con MXUPDATE)
+  1. Bitstream   msximus_v3.8_dado5233.fs                    -> flash 0x000000 (Gowin Programmer, exFlash)
+                 (msximus_v3.8_dado5233_jtag.bin = lo mismo en binario; NO va en 0x400000)
+  2. Pack BIOS   bios-msxnano-msximus/packs/msximus/          -> flash 0x400000
+                   nextor-2.1.4/pack_bios_msximus.bin           (castellano)      md5 f31bc4683b33
+                   nextor-2.1.4/pack_bios_msximus_en.bin        (ingles)          md5 a138e0ad2f5b
+                   nextor-3.0.0-beta1/pack_bios_msximus_nextor3.bin               md5 1739aaf33184
+                   nextor-3.0.0-beta1/pack_bios_msximus_en_nextor3.bin            md5 472b9d00b302
+                 Los de la 3.7.6 tambien arrancan; los nuevos solo anaden que el menu le dice su idioma al core
+                 (OSD y MXUPDATE en ingles con el pack ingles).
+  3. BL616       bl616_msximus_v3.8_60k.bin                   -> 0x40000 del BL616 (la app, donde va el TangCore;
+                 el partner de 0x0 no se toca). BOOT pulsado al enchufar el USB y bflb_iot_tool con
+                 --addr=0x40000 --single, como el 16/09. Recuerda: el BL616 solo corre la app alimentado con un
+                 cargador; con el USB del PC se queda de puente JTAG.
+  4. SD          MXUPDATE.COM en la SD (en el PATH o donde quieras).
+  Los ajustes (0x480000) y las ondas del OPL4 (0x500000) no cambian.
+
+QUE TRAE
+  - OSD (F12) con color, al estilo del del MSXimus Z: cabecera azul con la version del core (V3.8), MSX (Z80 a
+    3,58 o 5,37 MHz turbo, video), tarjeta SD, ajustes (scanlines, estereo, segundo SCC), que hay en cada USB-A
+    (teclado, raton, mando), ventilador y bloqueo de mayusculas. En el idioma del menu. ESC tambien lo cierra.
+    Fuera los contadores de depuracion del WiFi y la columna naranja.
+    RTL: la BSRAM del overlay pasa de 2048x8 a 2048x9 (la MISMA BSRAM: el modo x8 tiraba un bit de cada nueve):
+    cada fila tiene 4 combinaciones fondo/tinta de una paleta de 16 y 32 glifos nuevos (marcos, iconos, tildes).
+    Un firmware viejo del BL616 se sigue viendo como antes (amarillo y blanco sobre negro).
+  - Actualizar el core desde el MSX: fpga/src/flash_bridge.v, dispositivo de E/S conmutada 4Dh (OUT #40,4Dh y
+    los puertos #41-#4E: direccion, borrar 4 KB, programar pagina, leer). MXUPDATE.COM lo usa:
+      MXUPDATE /C fichero.UPD      solo comprueba el fichero (vale en cualquier MSX con DOS 2)
+      MXUPDATE fichero.UPD         graba lo que trae (por defecto MSXIMUS.UPD)
+      MXUPDATE /N                  descarga la ultima de https://msx.barcelona/ota/tang60k/ (aun no esta alli)
+      MXUPDATE /N /S:192.168.2.200:8000   la descarga del servidor del PC (el del Zynq, carpeta tang60k/)
+    Antes de borrar nada comprueba que el core tenga el puente, que el chip (IDCODE del bitstream grabado) sea el
+    del fichero y los CRC-32 del fichero; despues relee la flash entera. Si algo falla, el MSX sigue con el core de
+    antes (la FPGA no relee la flash hasta apagar): se vuelve a lanzar. El core nuevo entra al apagar y encender.
+    Con /N deja elegir Nextor 2.1.4 / 3 y castellano / ingles y avisa de que la SD tiene que estar preparada.
+  - Coste: +88 LUT, +41 registros, 0 BSRAM. Dado 5233: puerta OK, peor setup +1,095 ns (los 5 dados pasan).
+
+PRUEBAS QUE PROPONGO (en este orden, de menos a mas riesgo)
+  a) F12 con el BL616 nuevo: colores, version, turbo (F11 y volver a F12), USB, ESC.
+  b) MXUPDATE /C MSXIMUS.UPD  -> "Fichero correcto." (no toca nada).
+  c) MXUPDATE PACK_EN.UPD (solo el pack, 512 KB, ~1 min): apagar/encender -> menu en ingles; PACK_ES.UPD lo
+     devuelve. Si saliera mal, el bitstream sigue bien y el pack se regraba con el PC en 0x400000.
+  d) MXUPDATE MSXIMUS.UPD (bitstream + pack, 3 MB, unos minutos; mejor con turbo).
+  e) MXUPDATE /N /S:192.168.2.200:8000 con el servidor del PC encendido (ota_servidor.py ya sirve tang60k/).
+
+FICHEROS DE ESTA CARPETA
+  msximus_v3.8_dado5233.fs        md5 afefaf128da8      msximus_v3.8_dado5233_jtag.bin  md5 99d2e5362994
+  bl616_msximus_v3.8_60k.bin      md5 4c5d282eff82      MXUPDATE.COM                    md5 3580348f4b72
+  MSXIMUS.UPD  (= 380_n214_es.upd: bitstream + pack castellano Nextor 2.1.4)            md5 08abdb474b1e
+  PACK_ES.UPD / PACK_EN.UPD  (solo el pack, Nextor 2.1.4)                                md5 91bd6df7 / bb1387c9
+  Las cuatro variantes completas y el manifiesto: MSXimus_zynq/fpga/zynq/ota/servidor/tang60k/ (tools/mxupd.py
+  publicar las genera).
+
+VERIFICADO
+  - OSD: tools/osd_tb (iosys_bl616 + textdisp + la DPX9B del simlib de Gowin, ordenes por la UART real a 2 Mbps):
+    0 pixeles distintos del modelo, incluida una fila escrita a la antigua (bit 7 = hi).
+  - Pagina del BL616: firmware-bl616/tests/osd_host (la pagina real compilada en el PC, sus bytes pintados con
+    ese modelo; repetir la pagina sin cambios no manda nada: sin parpadeo).
+  - Puente: tools/flash_tb (flash_rw + flash_bridge contra un modelo de flash SPI): borrar, programar dos paginas,
+    leer 600 bytes, info, sin seleccionar no hace nada, y guardar los ajustes sigue igual. Cazo una carrera: el
+    modulo podia llevarse dos veces el mismo byte (arreglada).
+  - MXUPDATE /C en openMSX (FS-A1GT con DOS 2): el CRC-32 en ensamblador da lo mismo que zlib y detecta un
+    fichero con un bit cambiado.
+  Falta la placa: el puente con la flash de verdad, la descarga por el ESP32 (UNAPI, TLS) y el OSD en la tele.

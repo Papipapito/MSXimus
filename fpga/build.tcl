@@ -94,6 +94,7 @@ add_file src/y8950_adpcm.v
 # _159: RAM de muestras del ADPCM-B (256KB) en la SDRAM via puerto wv2
 add_file src/adpcm_sdram.v
 add_file src/flash_rw.v
+add_file src/flash_bridge.v                ;# V3.8: la flash vista desde el MSX (actualizar el core)
 add_file src/megaram.v
 add_file src/gm2_slot1.v
 add_file src/sd_dma.sv
@@ -191,6 +192,7 @@ add_file src/iosys/iosys_bl616.v
 add_file src/iosys/textdisp.v
 add_file src/iosys/uart_fixed.v
 add_file src/iosys/gowin_dpb_menu.v
+add_file src/iosys/osd_paleta.v                 ;# V3.8: paleta del OSD con color (tools/gen_iosys_bram.py)
 
 # lanzador del S3: pinta por el VDP (destino OSD) y lee la SD (destino SDC)
 add_file src/usb/usb_keyboard_msx.vhd
