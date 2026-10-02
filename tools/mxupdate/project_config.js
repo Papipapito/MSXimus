@@ -15,7 +15,7 @@ ProjModules = [ ProjName ];
 LibModules  = [ "system", "dos" ];      // solo lo que se usa: el codigo tiene que acabar antes de 4000h
 
 // Implementacion real de las llamadas TCP/IP UNAPI (la trae MSXgl de serie).
-AddSources  = [ "../../engine/src/network/unapi_tcp.asm" ];
+AddSources  = [ "unapi_tcp_mxu.asm" ];      // el unapi_tcp.asm de MSXgl sin lo que no se usa (UDP, IP en crudo, eco, config)
 
 Machine = "2";          // MSX2
 Target  = "DOS2";       // .COM bajo MSX-DOS 2

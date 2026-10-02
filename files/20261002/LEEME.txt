@@ -1,0 +1,35 @@
+MSXimus 60K - V3.8: instalar una actualizacion desde el menu (02/10/2026)
+
+Ajustes > "Instalar actualizacion" graba el MSXIMUS.UPD de la raiz de la SD (core, pack y/o ondas del OPL4), con
+las mismas comprobaciones que MXUPDATE.COM: el fichero entero y del mismo chip antes de borrar nada, y la flash
+releida al final. Despues, apagar y encender. El fichero lo deja en la SD MXUPDATE /N lanzado en la raiz (contestando N
+a "Grabar?") o se copia desde el PC. El core sigue siendo el de files/20261001 (dado 5233): solo cambia el pack.
+
+Ficheros
+  PACK_ES.UPD     md5 a998f188a990   pack nuevo, castellano, Nextor 2.1.4 (solo el pack)
+  PACK_EN.UPD     md5 5676869aad48   pack nuevo, ingles, Nextor 2.1.4 (solo el pack)
+  MSXIMUS.UPD     md5 97faca675984   core 3.8 (dado 5233) + pack nuevo (castellano, Nextor 2.1.4)
+  Los packs (bios-msxnano-msximus/packs/msximus): pack_bios_msximus.bin 0509897a0d62, _en 90987a908ac0,
+  _nextor3 a4b6ff4acc33, _en_nextor3 ba78955278f2. El servidor del PC (tang60k/) ya lleva los nuevos.
+
+Probarlo
+  1. El pack nuevo, una vez: MXUPDATE PACK_ES.UPD desde MSX-DOS (o el Gowin Programmer en 0x400000).
+  2. Apagar y encender.
+  3. MSXIMUS.UPD a la RAIZ de la SD (o PACK_ES.UPD con ese nombre: tarda menos).
+  4. S al arrancar (Ajustes) > "Instalar actualizacion" > S. Al acabar dice "Listo": apagar y encender.
+  Tiempos aproximados: solo el pack 1,5 min; core + pack 9 min; completo (con las ondas) 15 min.
+  Sin puente de flash (core anterior a la V3.8, o la MSXimus Z) lo dice y no hace nada.
+
+MXUPDATE.COM nuevo y el certificado de msx.barcelona
+  MXUPDATE.COM    md5 acd3870e9853   vale para MSXimus 60K/138K y MSXnano 2.1.1 (reconoce la placa sola)
+  esp32c6_raices_merged.bin  md5 508e20907f49   firmware del ESP32-C6 con las raices de confianza de serie
+  - /N va a msx.barcelona por TLS validando el certificado. Si el ESP no puede validarlo, sigue sin validar y
+    avisa: "Aviso: certificado sin validar". En claro (sin TLS) no va nunca.
+  - El C6 lleva las raices (la de msx.barcelona, Sectigo R46, vale hasta 2046): no hay que reflashearlo cuando la
+    web renueva su certificado cada ano. Solo si IONOS cambiara de autoridad a una que no este en la lista.
+  Grabar el C6 (PowerShell, cambia COM13 por su puerto):
+    & "C:\Users\alber\AppData\Local\Programs\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe" upload -p COM13 --fqbn esp32:esp32:esp32c6:PartitionScheme=huge_app --input-dir "C:\Users\alber\proyectosAI\msx\ESP32-UNAPI-Firmware\build\esp32.esp32.esp32c6" "C:\Users\alber\proyectosAI\msx\ESP32-UNAPI-Firmware"
+  Probar el certificado sin publicar nada: MXUPDATE /N con la web vacia.
+    "Sin actualizaciones para esta placa (HTTP 404)" sin aviso = TLS con el certificado VALIDADO (opcion 1, bien).
+    Lo mismo con "Aviso: certificado sin validar" = el C6 no valida; va sin validar (opcion 2).
+    "Sin conexion con el servidor de actualizaciones" = no hay TLS (o no hay red).

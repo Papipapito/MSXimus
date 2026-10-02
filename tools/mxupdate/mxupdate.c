@@ -1,11 +1,11 @@
 //=============================================================================
-// mxupdate.c - MXUPDATE.COM: actualiza el core del MSXimus 60K/138K desde el propio MSX (V3.8, 01/10/2026)
+// mxupdate.c - MXUPDATE.COM: actualiza el core del MSXimus 60K/138K (V3.8) y del MSXnano (2.1.1) desde el propio MSX
 //
 //   MXUPDATE [fichero.UPD] [/C] [/EN] [/ES]   (por defecto MSXIMUS.UPD en el directorio actual)
 //   MXUPDATE /N [/S:servidor[:puerto]] [fichero.UPD]
 //   /N = descargar la ultima version por la red (UNAPI: el ESP32 del MSXimus) a fichero.UPD y grabarla. Sin /S va
-//        a https://msx.barcelona/wp-content/ota/tang60k/ (o tang138k); /S:192.168.2.200:8000 = el servidor de
-//        desarrollo (sirve /tang60k/). En IONOS el SFTP solo llega a /wordpress/wp-content: de ahi la ruta.
+//        a https://msx.barcelona/wp-content/ota/tang60k/ (tang138k, msxnano); /S:192.168.2.200:8000 = el servidor
+//        de desarrollo (sirve /tang60k/...). En IONOS el SFTP solo llega a /wordpress/wp-content: de ahi la ruta.
 //        del PC (fpga/zynq/ota/ota_servidor.py del MSXimus Z, http y la carpeta tang60k/).
 //   /C = solo comprobar el fichero (cabecera y CRC), sin tocar la flash; vale en cualquier MSX con DOS 2.
 //   /R = actualizacion COMPLETA, todo desde cero: con /N baja la variante "completa" (core + pack + ondas del OPL4) y al
@@ -44,7 +44,7 @@ __sfr __at(0x4E) P_INFO;
 
 #define JIFFY (*(volatile u16*)0xFC9E)
 
-static bool g_en, g_solo_comprobar, g_red, g_ajustes;
+static bool g_en, g_solo_comprobar, g_red, g_ajustes, g_aviso;
 static c8  g_srv[48];          // /S: servidor (vacio = msx.barcelona)
 static u16 g_puerto;
 #define T(es, en) (g_en ? (en) : (es))
@@ -246,6 +246,15 @@ __endasm;
 }
 
 typedef struct { u32 dir, tam, crc, off; } Seg;
+
+// las placas: IDCODE del bitstream (bits 23-8), su nombre en el .UPD y en el manifiesto, su carpeta en la web y el byte
+// alto de la direccion del pack (el bitstream va en 0 y los ajustes, 512 KB detras del pack)
+typedef struct { u16 id; const c8* nombre; const c8* carpeta; u8 pack; } Placa;
+static const Placa g_placas[3] = {
+	{ 0x0148, "console60k",  "tang60k/",  0x40 },
+	{ 0x0108, "console138k", "tang138k/", 0x80 },
+	{ 0x0008, "msxnano",     "msxnano/",  0x20 },
+};
 static u8  g_cab[132];
 static Seg g_seg[4];
 static u8  g_nseg;
@@ -278,7 +287,7 @@ static void Opciones(void)
 	// el arranque de MSXgl para DOS NO pone a cero las variables: lo que no se inicializa aqui conserva lo que
 	// dejo la ejecucion anterior (visto en openMSX: un /C se colaba en la siguiente orden)
 	g_ruta[0] = 0; g_srv[0] = 0; g_puerto = 80;
-	g_solo_comprobar = FALSE; g_red = FALSE; g_ajustes = FALSE;
+	g_solo_comprobar = FALSE; g_red = FALSE; g_ajustes = FALSE; g_aviso = FALSE;
 	while (i < n) {
 		while (i < n && s[i] == ' ') i++;
 		if (i >= n) break;
@@ -310,6 +319,8 @@ static void Opciones(void)
 
 //-----------------------------------------------------------------------------
 // red: el manifiesto y el .UPD por HTTP (UNAPI TCP/IP; con TLS si el servidor es msx.barcelona)
+static const c8 g_web[] = "msx.barcelona";
+static c8  g_http[4];          // el codigo de la ultima respuesta ("404"); vacio = no contesto nadie
 static c8  g_hdr[512];
 static u16 g_hdr_n;
 static c8  g_man[1536];
@@ -346,9 +357,20 @@ static bool Conecta(void)
 		if (!LeeIP(g_srv, g_ipsrv) && Net_ResolveDNS(g_srv, g_ipsrv) != NET_OK) return FALSE;
 		g_cx = Net_Open(g_ipsrv, g_puerto);
 	} else {
-		if (Net_ResolveDNS("msx.barcelona", g_ipsrv) != NET_OK) return FALSE;
-		g_cx = Net_OpenTLS("msx.barcelona", g_ipsrv, 443);
-		if (g_cx == NET_INVALID_CONN) g_cx = Net_Open(g_ipsrv, 80);
+		// 02/10 (Albert): validando el certificado; si el ESP no puede, sin validar y avisando. En claro, nunca.
+		if (Net_ResolveDNS(g_web, g_ipsrv) != NET_OK) return FALSE;
+		// (el firmware del ESP32 lo valida con /ca.pem o /certs.bin de su FFat o, desde el 02/10/2026, con sus raices de
+		// serie). Si no puede, los parametros que dejo Net_OpenTLS valen otra vez quitando "verificar".
+		g_cx = Net_OpenTLS(g_web, g_ipsrv, 443);
+		if (g_cx == NET_INVALID_CONN) {
+			g_TcpParms.flags &= ~CONNTYPE_VERIFY_CERT;
+			g_ConnResult = 0;
+			if (tcpip_tcp_open(&g_TcpParms, &g_ConnResult) == ERR_OK) {
+				g_cx = (NetConn)g_ConnResult;
+				if (!g_aviso) Pr(T("Aviso: certificado sin validar.\r\n", "Warning: certificate not validated.\r\n"));
+				g_aviso = TRUE;
+			}
+		}
 	}
 	if (g_cx == NET_INVALID_CONN) return FALSE;
 	t0 = JIFFY;
@@ -368,7 +390,7 @@ static u16 Recibe(u8* d, u16 max)
 }
 
 // GET de 'nombre' (relativo a la carpeta de la placa) al fichero fh, o a g_man si fh == 0xFF
-static bool Http(const c8* placa, const c8* nombre, u8 fh)
+static bool Http(const Placa* pl, const c8* nombre, u8 fh)
 {
 	u16 i = 0, t0;
 	u32 escrito = 0, clen = 0;
@@ -376,10 +398,10 @@ static bool Http(const c8* placa, const c8* nombre, u8 fh)
 	if (!Conecta()) return FALSE;
 	i = Pega(g_hdr, i, "GET ");
 	i = Pega(g_hdr, i, g_srv[0] ? "/" : "/wp-content/ota/");
-	i = Pega(g_hdr, i, placa[7] == '1' ? "tang138k/" : "tang60k/");
+	i = Pega(g_hdr, i, pl->carpeta);
 	i = Pega(g_hdr, i, nombre);
 	i = Pega(g_hdr, i, " HTTP/1.0\r\nHost: ");
-	i = Pega(g_hdr, i, g_srv[0] ? g_srv : "msx.barcelona");
+	i = Pega(g_hdr, i, g_srv[0] ? g_srv : g_web);
 	i = Pega(g_hdr, i, "\r\nConnection: close\r\n\r\n");
 	if (!Net_Send(g_cx, (const u8*)g_hdr, i)) { Net_Abort(g_cx); return FALSE; }
 	g_hdr_n = 0; g_man_n = 0;
@@ -406,6 +428,7 @@ static bool Http(const c8* placa, const c8* nombre, u8 fh)
 				u16 k = 0;
 				g_hdr[g_hdr_n] = 0;
 				while (g_hdr[k] && g_hdr[k] != ' ') k++;
+				g_http[0] = g_hdr[k + 1]; g_http[1] = g_hdr[k + 2]; g_http[2] = g_hdr[k + 3]; g_http[3] = 0;
 				if (g_hdr[k + 1] != '2' || g_hdr[k + 2] != '0' || g_hdr[k + 3] != '0') break;
 				for (k = 0; g_hdr[k]; k++)
 					if ((g_hdr[k] == '\n') && ((g_hdr[k + 1] | 0x20) == 'c') && ((g_hdr[k + 9] | 0x20) == 'l') &&
@@ -506,17 +529,22 @@ __endasm;
 }
 
 // descarga la version del servidor a g_ruta; FALSE = no se puede o el usuario no quiere
-static bool Red(const c8* placa)
+static bool Red(const Placa* pl)
 {
 	u8 i, elegida = 0, fh;
 	c8 c;
 	if (Net_Init() != NET_OK) { Pr(T("No hay red (UNAPI): configura el WiFi con la W del menu.", "No network (UNAPI): set up the WiFi with W in the menu.")); return FALSE; }
 	Pr(T("Preguntando al servidor...\r\n", "Asking the server...\r\n"));
-	if (!Http(placa, "manifiesto.txt", 0xFF) || !LeeManifiesto(placa)) {
-		Pr(T("Sin conexion con el servidor de actualizaciones.", "Cannot reach the update server.")); return FALSE;
+	g_http[0] = 0;
+	if (!Http(pl, "manifiesto.txt", 0xFF) || !LeeManifiesto(pl->nombre)) {
+		if (g_http[0]) { Pr(T("Sin actualizaciones para esta placa (HTTP ", "No updates for this board (HTTP ")); Pr(g_http); Pr(")."); }
+		else Pr(T("Sin conexion con el servidor de actualizaciones.", "Cannot reach the update server."));
+		return FALSE;
 	}
 	Pr(T("Version en el servidor: ", "Version on the server: ")); Pr(g_ver_srv); Pr("\r\n");
 	if (g_notas[0]) { Pr("  "); Pr(g_notas); Pr("\r\n"); }
+	if (g_ajustes) Pr(T("Completas (core + pack + ondas del OPL4) y\r\nlos ajustes a los de fabrica:\r\n",
+	                    "Full images (core + pack + OPL4 waves) and\r\nfactory settings:\r\n"));
 	for (i = 0; i < g_nimg; i++) {
 		Pr("  "); DOS_CharOutput('1' + i); Pr(") "); Describe(&g_img[i]);
 		Pr("  ("); PrN(g_img[i].tam / 1024); Pr(" KB)\r\n");
@@ -539,7 +567,7 @@ static bool Red(const c8* placa)
 	Pr(T("\r\nDescargando ", "\r\nDownloading ")); Pr(g_img[elegida - 1].fich); Pr(T(" en ", " to ")); Pr(g_ruta); Pr("\r\n");
 	fh = CreaEscritura(g_ruta);
 	if (fh == 0xFF) { Pr(T("No se puede crear ", "Cannot create ")); Pr(g_ruta); return FALSE; }
-	i = Http(placa, g_img[elegida - 1].fich, fh);
+	i = Http(pl, g_img[elegida - 1].fich, fh);
 	DOS_CloseHandle(fh);
 	if (!i) { Pr(T("\r\nLa descarga se ha cortado. No se ha tocado nada.", "\r\nThe download was interrupted. Nothing was changed.")); return FALSE; }
 	Pr("\r\n");
@@ -553,7 +581,8 @@ void main(void)
 {
 	u32 id_flash, id_fich, total, hecho;
 	u8 i, ver, parche;
-	const c8* placa;
+	const Placa* pl = 0;                            // la de la flash (0 con /C)
+	const Placa* pf = 0;                            // la del fichero
 
 	bool puente;
 	P_ID = ID_PUENTE;
@@ -561,12 +590,12 @@ void main(void)
 	g_en = puente && (P_INFO & 0x05) == 0x05;      // el idioma del menu, si el core lo sabe
 	Opciones();
 
-	Pr(T("MSXimus - actualizar el core\r\n", "MSXimus - core update\r\n"));
+	Pr(T("MXUPDATE - actualizar el core\r\n", "MXUPDATE - core update\r\n"));
 	CrcIniciaTablas();
-	if (g_solo_comprobar) { placa = 0; id_flash = 0; goto fichero; }
+	if (g_solo_comprobar) { id_flash = 0; goto fichero; }
 	if (!puente) {
-		Pr(T("Hace falta el core V3.8 o posterior (grabalo\r\nuna vez con el PC).",
-		     "Needs core V3.8 or later (flash it once\r\nfrom the PC)."));
+		Pr(T("Hace falta MSXimus 3.8 o MSXnano 2.1.1 (o\r\nposterior): grabalo una vez con el PC.",
+		     "Needs MSXimus 3.8 or MSXnano 2.1.1 (or later):\r\nflash it once from the PC."));
 		Fin(1);
 	}
 	ver = P_VERSION; parche = P_PARCHE;
@@ -580,13 +609,13 @@ void main(void)
 	if (!LeeBloque(g_buf, 256)) { LeePara(); NoResponde(); }
 	LeePara();
 	id_flash = Idcode(g_buf, 256);
-	placa = id_flash == 0x0001481BUL ? "console60k" : id_flash == 0x0001081BUL ? "console138k" : 0;
+	for (i = 0; i < 3; i++) if ((u16)(id_flash >> 8) == g_placas[i].id) pl = &g_placas[i];
 	Pr(T("Core instalado: ", "Installed core: "));
 	PrN(ver >> 4); DOS_CharOutput('.'); PrN(ver & 15);
-	if (parche && parche < 16) { DOS_CharOutput('.'); PrN(parche); }
-	Pr(placa ? (id_flash == 0x0001481BUL ? " (60K)\r\n" : " (138K)\r\n") : "\r\n");
-	if (!placa) { Pr(T("No reconozco la placa.", "Unknown board.")); Fin(1); }
-	if (g_red && !Red(placa)) Fin(1);
+	DOS_CharOutput('.'); PrN(parche < 16 ? parche : 0);        // siempre M.m.p, como las etiquetas de los .UPD
+	if (!pl) { Pr(T("\r\nNo reconozco la placa.", "\r\nUnknown board.")); Fin(1); }
+	Pr(" ("); Pr(pl->nombre); Pr(")\r\n");
+	if (g_red && !Red(pl)) Fin(1);
 
 	// ---- el fichero ----
 fichero:
@@ -598,14 +627,15 @@ fichero:
 	if (!g_nseg || g_nseg > 4) goto mal_fichero;
 	g_crc = 0xFFFFFFFFUL; Crc(g_cab, 64 + 16 * g_nseg);
 	if (~g_crc != Le32(g_cab + 64 + 16 * g_nseg)) goto mal_fichero;
-	if (placa) for (i = 0; i < 10; i++) if (g_cab[8 + i] != placa[i]) break;
-	if (placa && (i < 10 || (placa[10] ? g_cab[18] != placa[10] : g_cab[18] != 0))) {
+	for (i = 0; i < 3; i++) if (Igual((const c8*)g_cab + 8, g_placas[i].nombre)) pf = &g_placas[i];
+	if (!pf) goto mal_fichero;
+	if (pl && pf != pl) {
 		Pr(T("Este fichero es para otra placa: ", "This file is for another board: ")); Pr((c8*)g_cab + 8); Fin(1);
 	}
 	total = 0;
 	for (i = 0; i < g_nseg; i++) {
 		const u8* s = g_cab + 64 + 16 * i;
-		u32 lim = g_cab[15] == '1' ? 0x800000UL : 0x400000UL;            // el pack: console138k / console60k
+		u32 lim = (u32)pf->pack << 16;                                    // la direccion del pack de la placa
 		g_seg[i].dir = Le32(s); g_seg[i].tam = Le32(s + 4); g_seg[i].crc = Le32(s + 8); g_seg[i].off = Le32(s + 12);
 		// el bitstream (0 .. pack), el pack (512 KB) y las ondas del OPL4 (1 MB detras del pack, 2 MB): nunca los ajustes
 		if ((g_seg[i].dir & 0xFFF) || !g_seg[i].tam ||
@@ -689,7 +719,7 @@ fichero:
 	}
 	DOS_CloseHandle(g_fh);
 	if (g_ajustes) {                                // el sector de los ajustes, justo detras del pack (512 KB)
-		u32 a = (id_flash == 0x0001481BUL ? 0x400000UL : 0x800000UL) + 0x80000UL;
+		u32 a = ((u32)pl->pack << 16) + 0x80000UL;
 		if (!Borra4K(a) || !LeeEmpieza(a)) goto mal_flash;
 		if (!LeeBloque(g_buf, 16)) goto mal_flash;
 		LeePara();

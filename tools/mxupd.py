@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""mxupd.py - ficheros de actualizacion del MSXimus 60K/138K (.UPD) para MXUPDATE.COM (V3.8, 01/10/2026).
+"""mxupd.py - ficheros de actualizacion del MSXimus 60K/138K y del MSXnano (.UPD) para MXUPDATE.COM (V3.8 / 2.1.1).
 
 Un .UPD lleva lo que hay que grabar en la flash SPI de la FPGA, por segmentos: el bitstream en 0x000000, el pack de
 la BIOS en 0x400000 y, en los "completos", las ondas del OPL4 (YRW801, 2 MB) en 0x500000 (138K: 0x800000 y 0x900000).
-El bloque de ajustes (0x480000 / 0x880000) nunca va en un .UPD: lo borra MXUPDATE /R. Se puede hacer uno solo con el
+MSXnano: el pack en 0x200000 y sin ondas. El bloque de ajustes (0x480000 / 0x880000 / 0x280000: 512 KB detras del
+pack) nunca va en un .UPD (la cola de 6 bytes de los packs del nano se quita): lo borra MXUPDATE /R. Se puede hacer uno solo con el
 pack (cambiar de idioma o de Nextor en un minuto) o solo con el bitstream.
 
 Formato (little endian):
     0   8   "MXUPD1", 1Ah, 0
-    8   16  placa ("console60k", "console138k"), con ceros
+    8   16  placa ("console60k", "console138k", "msxnano"), con ceros
     24  16  version ("3.8.0")
     40  16  variante ("nextor214", "nextor3", "nextor214-en", "nextor3-en", o "core" sin pack)
     56  1   numero de segmentos (1..4)
@@ -26,7 +27,7 @@ Uso:
     python tools/mxupd.py publicar --dir <carpeta del servidor> --placa console60k --version 3.8.0 \
         --bitstream msximus.fs --packs <bios-msxnano-msximus>/packs/msximus [--onda yrw801.bin] [--notas "..."]
 
-publicar deja en <dir>/tang60k/ (o tang138k/) los cuatro .UPD (Nextor 2.1.4 / 3 x castellano / ingles) y el
+publicar deja en <dir>/tang60k/ (tang138k/, msxnano/) los cuatro .UPD (Nextor 2.1.4 / 3 x castellano / ingles) y el
 manifiesto.txt que lee MXUPDATE /N:
     MSXIMUS-UPD 1
     placa=console60k
@@ -46,6 +47,7 @@ PLACAS = {
     # placa: (IDCODE del chip en el bitstream, limite del bitstream, direccion del pack)
     "console60k": (0x0001481B, 0x400000, 0x400000),
     "console138k": (0x0001081B, 0x800000, 0x800000),
+    "msxnano": (0x0000081B, 0x200000, 0x200000),           # Tang Nano 20K (GW2AR-18C)
 }
 PACK_TAM = 0x80000
 ONDA_OFF = 0x100000             # las ondas van 1 MB detras del pack
@@ -83,10 +85,14 @@ def crear(a):
         segs.append((0x000000, bs))
     if a.pack:
         pk = open(a.pack, "rb").read()
+        if len(pk) == PACK_TAM + 6 and pk[PACK_TAM:PACK_TAM + 2] == b"AB":
+            pk = pk[:PACK_TAM]                                  # pack del nano: su cola son los ajustes de fabrica
         if len(pk) > PACK_TAM:
             sys.exit("pack de %d bytes: pisaria los ajustes" % len(pk))
         segs.append((dir_pack, pk))
     if getattr(a, "onda", None):
+        if a.placa == "msxnano":
+            sys.exit("el MSXnano no tiene ondas del OPL4")
         ond = open(a.onda, "rb").read()
         if len(ond) > ONDA_TAM:
             sys.exit("ondas de %d bytes: mas de 2 MB" % len(ond))
@@ -133,17 +139,18 @@ def info(ruta):
     return todo
 
 
-VARIANTES = [   # variante, carpeta y pack en bios-msxnano-msximus/packs/msximus, nombre corto
-    ("nextor214", "nextor-2.1.4", "pack_bios_msximus.bin", "n214_es"),
-    ("nextor3", "nextor-3.0.0-beta1", "pack_bios_msximus_nextor3.bin", "n3_es"),
-    ("nextor214-en", "nextor-2.1.4", "pack_bios_msximus_en.bin", "n214_en"),
-    ("nextor3-en", "nextor-3.0.0-beta1", "pack_bios_msximus_en_nextor3.bin", "n3_en"),
+VARIANTES = [   # variante, carpeta y pack en bios-msxnano-msximus/packs/<msximus|msxnano>, nombre corto
+    ("nextor214", "nextor-2.1.4", "pack_bios_%s.bin", "n214_es"),
+    ("nextor3", "nextor-3.0.0-beta1", "pack_bios_%s_nextor3.bin", "n3_es"),
+    ("nextor214-en", "nextor-2.1.4", "pack_bios_%s_en.bin", "n214_en"),
+    ("nextor3-en", "nextor-3.0.0-beta1", "pack_bios_%s_en_nextor3.bin", "n3_en"),
 ]
+CARPETAS = {"console60k": "tang60k", "console138k": "tang138k", "msxnano": "msxnano"}   # en el servidor
 
 
 def publicar(a):
-    sub = "tang138k" if a.placa == "console138k" else "tang60k"
-    dst = os.path.join(a.dir, sub)
+    dst = os.path.join(a.dir, CARPETAS[a.placa])
+    maq = "msxnano" if a.placa == "msxnano" else "msximus"
     os.makedirs(dst, exist_ok=True)
     if a.notas and len(a.notas) > 60:
         sys.exit("notas de mas de 60 caracteres")
@@ -153,14 +160,14 @@ def publicar(a):
     for var, carpeta, pack, corto in VARIANTES:
         nombre = "%s_%s.upd" % (a.version.replace(".", ""), corto)
         a2 = argparse.Namespace(o=os.path.join(dst, nombre), placa=a.placa, version=a.version, variante=var,
-                                bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack), onda=None)
+                                bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack % maq), onda=None)
         crear(a2)
         man.append("imagen=%s %s %d" % (var, nombre, os.path.getsize(a2.o)))
     if a.onda:                                                  # los completos, para MXUPDATE /N /R
         for var, carpeta, pack, corto in VARIANTES:
             nombre = "%s_%s_full.upd" % (a.version.replace(".", ""), corto)
             a2 = argparse.Namespace(o=os.path.join(dst, nombre), placa=a.placa, version=a.version, variante=var,
-                                    bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack), onda=a.onda)
+                                    bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack % maq), onda=a.onda)
             crear(a2)
             man.append("completa=%s %s %d" % (var, nombre, os.path.getsize(a2.o)))
     open(os.path.join(dst, "manifiesto.txt"), "w", newline="\n").write("\n".join(man) + "\n")
