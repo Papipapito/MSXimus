@@ -77,7 +77,8 @@ Nada más entrar, la línea de estado dice *"Analizando ROM..."* con un indicado
 2. Si es mayor, manda la **etiqueta del nombre** si la hay: `[ASCII16]`, `[ASCII8]`, `[SCC]`, `[KONAMI]`, `NEO16` o `NEO-16`, `NEO8` o `NEO-8`. Son las etiquetas que pone File-Hunter al descargar, y las que puede poner uno mismo al renombrar un fichero.
 3. Sin etiqueta, se **analiza el contenido** de la ROM buscando las instrucciones con que cada mapper cambia de banco, al estilo de openMSX. En los cores con DMA el análisis lo hace el propio hardware mientras carga y es instantáneo.
 4. Una ROM que el análisis da como Konami pero mide 320 KB o más se promociona a **Konami-SCC**: el Konami original nunca pasa de 256 KB.
-5. Ya cargada, se miran dos casos especiales. Una ROM con la firma `ASCII16X` en el offset 10h, o de más de 4 MB aunque no la lleve, es **ASCII16-X** (así arranca tal cual la V9968 TECH DEMO 0.7.5 de renatus, de 8 MB). Y una de 16 a 48 KB que no lleva `AB` al principio pero sí en +4000h es **Plain 0000h**: una imagen lineal desde la dirección 0000h, como las demos V9990 de Edd Biddulph.
+5. Ya cargada, se mira la **firma del autor** (v3.8): ocho letras en el offset 10h del fichero, o en 4010h, según la convención de MSXgl. `ROM_ASC8`, `ROM_AS16`, `ROM_KON4`, `ROM_KON5`, `ROM_NEO8`, `ROM_NE16` y `ASCII16X` fijan el mapper por encima de la etiqueta y del análisis. Así arrancan solas las ROM de geo3d y lo hecho con MSXgl. Detalle en el [capítulo 05](05-roms-mappers.md).
+6. Y dos casos especiales. Una ROM de más de 4 MB sin firma es **ASCII16-X** (así arranca tal cual la V9968 TECH DEMO 0.7.5 de renatus, de 8 MB). Y una de 16 a 48 KB que no lleva `AB` al principio pero sí en +4000h es **Plain 0000h**: una imagen lineal desde la dirección 0000h, como las demos V9990 de Edd Biddulph.
 
 Si el análisis no ve nada, el mapper queda como *"? (desconocido)"* y hay que elegirlo a mano con la tecla M.
 
@@ -132,6 +133,7 @@ La pantalla **MSXimus - Ajustes** tiene estas opciones:
 | **Boot Turbo** | On / Off | Arrancar siempre con la CPU a 5,37 MHz. Solo entra en un arranque en frío: hay que apagar y encender, no basta el reset |
 | **Menú al arrancar** | On / Off | Si aparece el navegador de la SD al encender o se arranca MSX-DOS directamente |
 | **Mezclador de audio** | | Abre la página del mezclador (v3.7): la ganancia maestra y el nivel de cada chip, con nota de prueba. Ver el [capítulo 08](08-audio.md) |
+| **Instalar actualización** | | Graba el `MSXIMUS.UPD` de la raíz de la SD: el core, el pack o los dos (v3.8). Lo comprueba entero antes de borrar nada y pregunta. Ver el [capítulo 11](11-actualizar.md) |
 | **Save & Restart** | | Guardar en la flash y reiniciar |
 
 Debajo se muestra *"Version FPGA (.fs): x.y.z"*, la versión del core que hay flasheado (`3.7.6`; el tercer dígito sale del puerto 29h desde la 3.7.1, y con un core anterior solo se ve `3.7`), o *"desconocida"* si el core no la publica.

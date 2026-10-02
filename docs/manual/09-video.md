@@ -16,7 +16,9 @@ No hay modo 4:3 con marco negro ni ajustes de posición: se probaron y se retira
 
 ## 2. El panel F12
 
-Con el firmware del BL616 grabado ([capítulo 02](02-instalacion.md)), **F12** congela el MSX y dibuja encima un panel de texto con lo que el core dice de sí mismo: versión, CPU y turbo, tarjeta, ventilador, estado del teclado y contadores de la red. F12 otra vez y el juego sigue donde estaba. Es de solo lectura.
+Con el firmware del BL616 grabado ([capítulo 02](02-instalacion.md)), **F12** congela el MSX y dibuja encima un panel en color con lo que el core dice de sí mismo: versión, Z80 y turbo, vídeo, tarjeta, los ajustes principales (scanlines, estéreo, segundo SCC), qué hay en cada USB-A, ventilador, bloqueo de mayúsculas y la orden para actualizar. Sale en el idioma del menú. F12 otra vez, o ESC, y el juego sigue donde estaba. Es de solo lectura.
+
+Desde la v3.8 el panel lleva color (cada fila con sus combinaciones de fondo y tinta) y dibujos propios: marcos, iconos y letras con tilde. Un firmware del BL616 anterior se sigue viendo como antes, en amarillo y blanco sobre negro.
 
 Porque F12 es del panel, el **turbo va en F11**.
 

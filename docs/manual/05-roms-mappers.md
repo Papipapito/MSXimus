@@ -33,8 +33,9 @@ En este orden:
 1. **Tamaño.** Hasta 32 KB, Plain.
 2. **Etiqueta en el nombre.** `[ASCII16]`, `[ASCII8]`, `[SCC]`, `[KONAMI]`, `NEO8`, `NEO16`. Si la hay, manda, sin mirar el contenido. Las pone File-Hunter al descargar, y uno mismo al renombrar. Es la forma de fijar un mapper de una vez para siempre.
 3. **Análisis del contenido.** Sin etiqueta, el core cuenta, mientras carga, las instrucciones con que cada familia de mapper cambia de banco, y gana la familia con más. Es el mismo criterio que usa openMSX y acierta con casi todo. Una ROM detectada como Konami de 320 KB o más se promociona a Konami-SCC, porque ningún Konami sin SCC pasa de 256 KB.
-4. **Casos especiales, ya cargada.** Firma `ASCII16X` en el offset 10h, o más de 4 MB sin firma: ASCII16-X. De 16 a 48 KB, sin `AB` al principio y con `AB` en +4000h: Plain 0000h.
-5. **A mano.** Si el análisis no ve nada, el mapper sale como desconocido y se elige con **M**, que va ciclando los nueve. Una vez encontrado, lo cómodo es poner la etiqueta en el nombre.
+4. **La firma del autor, ya cargada** (desde la v3.8). Muchas ROM nuevas llevan su mapper escrito dentro: ocho letras justo después de la cabecera, en el offset 10h del fichero (o en 4010h, si la cabecera va en el segundo segmento), según la [convención de MSXgl](https://aoineko.org/msxgl/index.php?title=ROM_type_signature). Si el menú encuentra `ROM_ASC8`, `ROM_AS16`, `ROM_KON4`, `ROM_KON5`, `ROM_NEO8`, `ROM_NE16` o `ASCII16X`, ese es el mapper, por encima de la etiqueta y del análisis: lo ha puesto quien hizo la ROM. Así se lanzan solas, sin `[ASCII16]` en el nombre, las ROM de geo3d y lo hecho con MSXgl. Si la firma cambia el mapper, la fila se repinta y la SRAM queda apagada (en ASCII8 y ASCII16, la tecla **S** la enciende).
+5. **Casos especiales, ya cargada.** Más de 4 MB sin firma: ASCII16-X. De 16 a 48 KB, sin `AB` al principio y con `AB` en +4000h: Plain 0000h.
+6. **A mano.** Si el análisis no ve nada, el mapper sale como desconocido y se elige con **M**, que va ciclando los nueve. Una vez encontrado, lo cómodo es poner la etiqueta en el nombre.
 
 Un mapper equivocado no rompe nada: el juego no arranca o se cuelga, y se vuelve al menú con reset.
 

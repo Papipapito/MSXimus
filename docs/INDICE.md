@@ -28,6 +28,7 @@ Idioma: castellano. El manual de usuario se traducirá al inglés cuando esté c
 | 08 | [Audio](manual/08-audio.md): los chips, mono y estéreo, el volumen, lo comprobado, lo que no hay | **escrito** | top.v (mezclador) |
 | 09 | [Vídeo](manual/09-video.md): la salida 720p, scanlines, 50 Hz, el panel F12, el V9968 para el usuario | **escrito** | msx2hdmi_v9968.sv, README |
 | 10 | [Problemas frecuentes](manual/10-problemas.md): por síntoma, con causa probable y qué hacer; herramientas de diagnóstico; cómo reportar | **escrito** | LEEMEs, test_menu.asm |
+| 11 | [Actualizar desde el MSX](manual/11-actualizar.md): MXUPDATE por internet o desde un fichero, Instalar actualización en Ajustes, qué es un `.UPD`, tiempos, mensajes (v3.8) | **escrito** | mxupdate.c, actualizar.asm |
 
 ## Referencia técnica (`docs/tecnica/`)
 
@@ -41,8 +42,9 @@ Idioma: castellano. El manual de usuario se traducirá al inglés cuando esté c
 | 06 | [La tarjeta SD y la DMA](tecnica/06-sd-dma.md): el controlador, los cuatro caminos con sus velocidades, cómo funciona la DMA, los dos modos de destino, los contadores de mapper, quién usa qué, las firmas | **escrito** | sd_reader.sv, sdc_ioport.sv, sd_dma.sv, sd_rw_ports.inc |
 | 07 | [Síntesis y campañas](tecnica/07-sintesis-campanas.md): herramientas, las dos líneas de build, cómo se lanza una campaña, el gate y la regla de los 0,4 ns, lo aprendido del chip, cómo se entrega | **escrito** | lanzar_campana.ps1, gate_check.ps1 |
 | 08 | [Simulación](tecnica/08-simulacion.md): el entorno WSL, los bancos por subsistema, las ROMs de prueba, verificar contra openMSX, qué no tiene banco | **escrito** | tools/ |
-| 09 | [Changelog de la era v3](tecnica/09-changelog.md): de la v3.1 a la v3.7.6, con el dado, el margen y los hashes de cada entrega | **escrito** | los LEEME de files/, mi_release/ |
+| 09 | [Changelog de la era v3](tecnica/09-changelog.md): de la v3.1 a la v3.8, con el dado, el margen y los hashes de cada entrega | **escrito** | los LEEME de files/, mi_release/ |
 | 10 | [Auditoría externa de septiembre de 2026](tecnica/10-auditoria-externa.md): los 137 hallazgos de los cuatro informes contrastados uno a uno, por qué fallan los críticos, y el plan para los tres repositorios | **escrito** | los informes de Albert, el árbol de cada repo |
+| 11 | [La actualización desde el MSX](tecnica/11-actualizacion.md): el puente de la flash (4Dh), el formato `.UPD`, el manifiesto, MXUPDATE por dentro, la web, los bancos (v3.8) | **escrito** | flash_bridge.v, mxupd.py, mxupdate.c, actualizar.asm |
 
 ## Histórico (`docs/historico/`)
 

@@ -28,13 +28,14 @@ Todos los puertos a los que responde el core, sacados del decodificador de `fpga
 
 ## 2. La E/S conmutada: 40h a 4Fh
 
-Es el mecanismo del OCM. Se escribe en el puerto **40h** el identificador de un dispositivo y a partir de ahí los puertos 41h a 4Fh son de ese dispositivo. Leer 40h devuelve el identificador invertido, que es como el software comprueba que el dispositivo existe. El MSXimus responde a tres identificadores:
+Es el mecanismo del OCM. Se escribe en el puerto **40h** el identificador de un dispositivo y a partir de ahí los puertos 41h a 4Fh son de ese dispositivo. Leer 40h devuelve el identificador invertido, que es como el software comprueba que el dispositivo existe. El MSXimus responde a cuatro identificadores:
 
 | OUT 40h | Lee 40h | Dispositivo |
 |---|---|---|
 | 48h | B7h | La configuración del core, la del menú de Ajustes. Es el dispositivo "goauld" heredado del MSXnano |
 | 08h | F7h | Turbo del T9769 de Panasonic, para el software que lo maneja así |
 | D4h | 2Bh | E/S conmutada del OCM: órdenes inteligentes en 41h y DIP virtuales en 42h |
+| 4Dh | B2h | El puente de la flash (v3.8): leer, borrar y programar la flash SPI de la FPGA para actualizar desde el MSX. Detalle en el [capítulo 11](11-actualizacion.md) |
 
 Sin dispositivo seleccionado, o con otro identificador, 41h-4Fh caen en el módulo OCM.
 

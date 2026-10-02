@@ -8,7 +8,7 @@ Tres ficheros, cada uno a una dirección distinta de la misma flash:
 
 | Fichero | Dirección | Obligatorio |
 |---|---|---|
-| El core: `MSXimus_v3.7.6.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
+| El core: `MSXimus_v3.8.0b3.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
 | El pack de BIOS, `pack_bios_msximus*.bin` | **0x400000** | Sí, sin él la máquina no arranca |
 | `yrw801.bin`, la ROM de ondas del MoonSound (va como `.bin` porque el Programmer de Gowin no coge `.rom`; si tienes un `yrw801.rom`, renómbralo) | **0x500000** | No, solo para tener el OPL4 completo |
 
@@ -51,20 +51,20 @@ Con eso, una microSD con ROMs y discos, y ya está. El [capítulo 03](03-tarjeta
 
 ## 2. El panel F12: el BL616 (opcional)
 
-La Console 60K lleva un microcontrolador **BL616** cableado a la FPGA de fábrica. Con un firmware, dibuja un panel de estado sobre la imagen del MSX cuando se pulsa **F12**: versión del core, CPU y turbo, tarjeta, ventilador, teclado, red y dos filas de diagnóstico del USB del propio BL616 (*USB* y *Mando*: qué ha enumerado su host en el USB-C OTG; con nada conectado ahí dicen `USB: nada`, y es lo normal). Con F12 otra vez, el juego sigue donde estaba. Es de solo lectura: no hay menú ni cursor.
+La Console 60K lleva un microcontrolador **BL616** cableado a la FPGA de fábrica. Con un firmware, dibuja un panel de estado en color sobre la imagen del MSX cuando se pulsa **F12**: versión del core, CPU y turbo, vídeo, tarjeta, los ajustes principales (scanlines, estéreo, segundo SCC), qué hay en cada USB-A, ventilador y bloqueo de mayúsculas, y la orden para actualizar (`MXUPDATE /N`). Con F12 otra vez (o ESC), el juego sigue donde estaba. Es de solo lectura: no hay menú ni cursor. Habla el idioma del menú.
 
 No cuesta nada en hardware: la línea serie entre los dos chips ya está en la placa. Sin el firmware, el MSX funciona igual; solo falta el panel. Como el BL616 se queda la tecla F12, el turbo va en **F11**.
 
-Dos imágenes que conviven, la de Sipeed se queda donde está:
+En la release va todo en un ZIP, `bl616_msximus_v3.8_60k.zip`: las dos imágenes, que conviven (la de Sipeed se queda donde está), y el `flash_prog_cfg.ini` que las graba:
 
 | Fichero | Dirección |
 |---|---|
-| `bl616_fpga_partner_60kConsole.bin`, el de Sipeed, incluido en la release | 0x0 |
-| `bl616_v3.x.bin` | 0x40000 |
+| `bl616_fpga_partner_60kConsole.bin`, el de Sipeed | 0x0 |
+| `bl616_v3.8.bin` | 0x40000 |
 
 1. **Mantén pulsado el botón BOOT mientras conectas el USB.** Eso pone el chip en modo ISP.
 2. Aparece un **puerto COM nuevo**: ese es el BL616. Listar los puertos antes y después de conectar es la forma fácil de saber cuál.
-3. Abre **BLDevCube** (el [Bouffalo Lab Dev Cube](https://github.com/bouffalolab/bouffalo_sdk)) y carga el `flash_prog_cfg.ini` de la release: ya lleva las dos imágenes con sus direcciones. Tiene que estar en la misma carpeta que los dos `.bin`.
+3. Descomprime el ZIP en una carpeta, abre **BLDevCube** (el [Bouffalo Lab Dev Cube](https://github.com/bouffalolab/bouffalo_sdk)) y carga su `flash_prog_cfg.ini`: ya lleva las dos imágenes con sus direcciones.
 4. Desconecta, vuelve a conectar, y apaga y enciende la placa.
 
 El modo ISP vive en la ROM del chip, no en su flash, así que funciona escriba lo que se escriba: no se puede dejar la placa inservible por aquí.
@@ -94,13 +94,13 @@ Cuatro cables, o cinco con el indicador de turbo, entre el conector **J10** de l
 
 ### El firmware del C6
 
-Vive en su propio repositorio, [ESP32-for-FPGA](https://github.com/Papipapito/ESP32-for-FPGA); el mismo binario sirve para el MSXimus y para el MSXnano. La release trae el binario fusionado, `firmware_esp32c6_*_merged.bin`, que se graba por el **USB-C del módulo**, sin Arduino y sin compilar nada:
+Vive en su propio repositorio, [ESP32-for-FPGA](https://github.com/Papipapito/ESP32-for-FPGA); el mismo binario sirve para el MSXimus y para el MSXnano. La release trae el binario fusionado, `firmware_esp32c6_v3.8_merged.bin`, que se graba por el **USB-C del módulo**, sin Arduino y sin compilar nada. El de la v3.8 lleva de serie las autoridades de certificación con las que `MXUPDATE /N` valida el certificado de msx.barcelona ([capítulo 11](11-actualizar.md)):
 
 - **Desde el navegador**, sin instalar nada: [esptool-js](https://espressif.github.io/esptool-js/), el flasheador web de Espressif, en Chrome o Edge. Conectar, elegir el fichero, dirección 0x0, Program.
 - **Por línea de órdenes**, si ya se tiene esptool:
 
 ```bash
-esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_merged.bin
+esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_v3.8_merged.bin
 ```
 
 No hay ruta de arrastrar y soltar como en una Raspberry Pi Pico: el ESP32 no tiene cargador de almacenamiento masivo en ROM. El flasheador web es lo más parecido.
@@ -119,4 +119,6 @@ Hay una carcasa para imprimir en 3D con la forma de un Spectravideo SVI-728: la 
 
 ## 5. Actualizar
 
-Un core nuevo se graba igual que la primera vez, solo el `.fs` en 0x000000, y apagar y encender. Un pack nuevo, solo el pack en 0x400000. Los ajustes guardados se conservan: el pack mide 512 KB justos y los seis bytes de configuración que van detrás, en 0x480000, no los toca el programador. En una placa recién grabada esos bytes están vacíos y el core arranca con los valores de fábrica, con el menú al arrancar activado; el primer Save & Restart los escribe. El `yrw801.bin` no cambia entre versiones.
+Desde la V3.8 lo normal es actualizar **desde el propio MSX**, sin PC: `MXUPDATE /N` lo baja de internet y lo graba, y Ajustes → *Instalar actualización* graba el `MSXIMUS.UPD` de la SD. Está todo en el [capítulo 11](11-actualizar.md). La primera V3.8 hay que grabarla con el PC, como se cuenta arriba: es la que trae el puente que deja al MSX escribir en la flash.
+
+Con el PC, un core nuevo se graba igual que la primera vez, solo el `.fs` en 0x000000, y apagar y encender. Un pack nuevo, solo el pack en 0x400000. Los ajustes guardados se conservan: el pack mide 512 KB justos y los seis bytes de configuración que van detrás, en 0x480000, no los toca el programador. En una placa recién grabada esos bytes están vacíos y el core arranca con los valores de fábrica, con el menú al arrancar activado; el primer Save & Restart los escribe. El `yrw801.bin` no cambia entre versiones.

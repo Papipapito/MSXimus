@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>Un MSX2+ completo, en una Tang Console 60K — ahora con el VDP V9968</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.7.6-blue">
+  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.8.0b3-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-GPLv3-orange">
 </p>
@@ -39,7 +39,9 @@ Eso es un cambio en los cimientos, no en la superficie, y merecía número propi
 
 **Entrada** · Teclado USB directo sin hub, con F1–F10 físicas · gamepads USB mapeados a joystick MSX · ratón USB como ratón MSX
 
-**En pantalla** · **Panel de estado en F12** opcional, pintado sobre el MSX por el BL616 que la placa ya lleva
+**En pantalla** · **Panel de estado en F12** opcional, en color, pintado sobre el MSX por el BL616 que la placa ya lleva
+
+**Actualizaciones** · Desde el propio MSX, sin PC: `MXUPDATE /N` baja la última versión de internet y la graba; también vale un fichero `.UPD` en la SD
 
 **WiFi** · UNAPI mediante un **ESP32-C6** externo, con **pantalla opcional** para información adicional
 
@@ -66,11 +68,13 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
-| 1 | `MSXimus_v3.7.6.fs` | **`0x000000`** | Sí — es el core |
+| 1 | `MSXimus_v3.8.0b3.fs` | **`0x000000`** | Sí — es el core |
 | 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.bin` | **`0x500000`** | No — solo para MoonSound/OPL4 (la ROM de ondas va como `.bin`: el Programmer de Gowin no acepta `.rom`; si tienes una `yrw801.rom`, cámbiale la extensión) |
 
 Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **ESP32-C6** (WiFi) y el del **BL616** (el panel de F12). Cada una tiene su sección más abajo.
+
+**Esto solo hace falta una vez.** Desde la v3.8, las siguientes actualizaciones se hacen desde el propio MSX: ver [Actualizar desde el MSX](#actualizar-desde-el-msx).
 
 **Las herramientas que necesitas**, todas gratuitas y todas oficiales:
 
@@ -121,24 +125,55 @@ Después, mete una microSD con tus ROMs y discos y listo. La forma más fácil d
 
 > **Sobre las microSD:** usa una tarjeta **de marca y Clase 10** (Samsung, SanDisk, Kingston...), formateada en **FAT16**. Las tarjetas baratas sin marca leen bien pero rechazan o pierden escrituras en ráfagas sostenidas — lo medimos en placa: una sin marca fallaba escrituras incluso con pausas, y una Samsung EVO+ iba perfecta con el mismo código y la misma geometría. Si las descargas o los guardados fallan, sospecha de la tarjeta primero.
 
+## Actualizar desde el MSX
+
+Desde la v3.8 el MSXimus se actualiza **solo**: el core y el pack de BIOS se graban en la flash de la placa desde el MSX, sin PC y sin programador. La primera v3.8 hay que grabarla con el PC (es la que trae el *puente de la flash*, lo que deja al MSX escribir en ella); a partir de ahí vale cualquiera de estos tres caminos:
+
+| Camino | Qué hace | Hace falta |
+|---|---|---|
+| `MXUPDATE /N` | Baja la última versión de [msx.barcelona](https://msx.barcelona) y la graba | MSX-DOS 2 o Nextor, y el ESP32-C6 (WiFi) |
+| `MXUPDATE fichero.UPD` | Graba un fichero `.UPD` de la SD | MSX-DOS 2 o Nextor |
+| Ajustes → **Instalar actualización** | Graba el `MSXIMUS.UPD` de la raíz de la SD | Nada más: sin DOS |
+
+`MXUPDATE.COM` va en la release. Reconoce la placa sola y habla el idioma del menú:
+
+```
+MXUPDATE                  graba MSXIMUS.UPD del directorio actual
+MXUPDATE fichero.UPD      graba ese fichero
+MXUPDATE /C fichero.UPD   solo lo comprueba (cabecera y CRC); no toca la flash
+MXUPDATE /N               baja la ultima version y la graba
+MXUPDATE /N /R            la completa (core, pack y ondas del OPL4) y ajustes de fabrica
+```
+
+Con `/N` eliges la variante (Nextor 2.1.4 o 3, menú en castellano o en inglés), la baja a la SD, la comprueba, pregunta, la graba y relee la flash entera para comprobarla otra vez. Después: **apagar y encender**. La conexión es **TLS con el certificado validado**, con el firmware del C6 de la v3.8, que trae las autoridades de certificación; con uno anterior funciona igual, sin validar, y lo dice.
+
+Todo se comprueba **antes de borrar nada** y la flash se relee al final. Si algo sale mal, el MSX sigue con el core de antes hasta que se apaga, así que basta con repetir; y por el USB-C, con el Gowin Programmer, la placa siempre se puede volver a grabar: así no se puede estropear. Los ajustes guardados se conservan (solo `/R` los borra, a propósito).
+
+Tiempos, porque todo lo hace el Z80: solo el pack, 1,5 minutos; core y pack, 9 minutos; la completa, 15 minutos; más la descarga. Todo lo demás está en el manual: [`docs/manual/11-actualizar.md`](docs/manual/11-actualizar.md).
+
 ## El panel de estado — F12 (opcional)
 
 La Console 60K lleva un segundo chip que probablemente no hayas usado nunca: un microcontrolador **BL616**, conectado a la FPGA de fábrica. Dale un firmware y te pinta un panel de estado directamente sobre la imagen del MSX.
 
-Pulsas **F12** y el MSX se congela y sale el panel. Lo pulsas otra vez y la partida sigue exactamente donde estaba. Es de **solo lectura** — no hay menú, ni cursor, ni nada que romper. Enseña lo que el core dice de sí mismo:
+Pulsas **F12** y el MSX se congela y sale el panel, en color. Lo pulsas otra vez (o ESC) y la partida sigue exactamente donde estaba. Es de **solo lectura** — no hay menú, ni cursor, ni nada que romper. Enseña lo que el core dice de sí mismo, en el idioma del menú:
 
 ```
- ,----------------------------.
- |       MSXimus  V3.1        |
- `----------------------------'
-
-   CPU      3.58 MHz  normal
-   Tarjeta  SDHC  est 1
-   Vent.    OFF
-   Teclado  CAPS ON
-   WiFi     0 perd  0 vac
- `----------------------------'
-    F12 para volver al MSX
+  MSXimus 60K                 V3.8.0
+  MSX
+    Z80     3,58 MHz   normal
+    Vídeo   V9968 · HDMI 720p
+  Tarjeta SD
+    SDHC    lista
+  Ajustes
+    Scanlines      Estéreo
+    Segundo SCC
+  USB
+    Puerto 1  teclado    Puerto 2  mando
+  Sistema
+    Ventilador        parado
+    Bloq. mayúsculas  no
+  Actualizar: MXUPDATE /N
+  [F12] Volver al MSX
 ```
 
 Y no te cuesta nada en hardware: **ni cables, ni soldar, ni módulo**. El enlace entre los dos chips (una línea serie a 2 Mbps) ya estaba rutado en la placa; simplemente no se usaba.
@@ -147,16 +182,16 @@ Y no te cuesta nada en hardware: **ni cables, ni soldar, ni módulo**. El enlace
 
 ### Grabar el BL616
 
-Dos imágenes, y **conviven** — la de fábrica de Sipeed se queda donde está:
+La release lo trae todo en un ZIP, **`bl616_msximus_v3.8_60k.zip`**: dos imágenes que **conviven** — la de fábrica de Sipeed se queda donde está — y el `.ini` que las graba:
 
 | Fichero | Dirección |
 |---|---|
-| `bl616_fpga_partner_60kConsole.bin` (de Sipeed, va en la release) | **`0x0`** |
-| `bl616_v3.7.bin` | **`0x40000`** |
+| `bl616_fpga_partner_60kConsole.bin` (de Sipeed) | **`0x0`** |
+| `bl616_v3.8.bin` | **`0x40000`** |
 
 1. **Mantén pulsado el botón BOOT mientras enchufas el USB.** Eso mete el chip en modo ISP.
 2. Aparece un **puerto COM nuevo** — ese es el BL616. (Listar los puertos antes y después de enchufar es la forma fácil de saber cuál.)
-3. Abre **BLDevCube** y carga el **`flash_prog_cfg.ini`** de la release: ya trae las dos imágenes con sus direcciones, así que no hay que teclearlas. Déjalo en la misma carpeta que los dos `.bin`.
+3. Descomprime el ZIP en una carpeta, abre **BLDevCube** y carga su **`flash_prog_cfg.ini`**: ya trae las dos imágenes con sus direcciones, así que no hay que teclearlas.
 4. Desenchufa, vuelve a enchufar y haz un ciclo de apagado de la placa.
 
 El modo ISP vive en la ROM del chip, no en su flash, así que funciona pase lo que pase con lo que hayas escrito. **Es la marcha atrás que nunca falla**: por aquí no puedes dejar la placa inservible.
@@ -190,14 +225,14 @@ Y así queda del lado del módulo:
 
 ### Grabar el C6
 
-El firmware del módulo y su inventario técnico completo viven en su propio repositorio, [**ESP32-for-FPGA**](https://github.com/Papipapito/ESP32-for-FPGA) — el mismo binario sirve al MSXimus y al MSXnano, así que ya no se guarda una copia aquí. Coge el `firmware_esp32c6_v3.7_merged.bin` de la release y grábalo en el C6 por **su propio USB-C**. **No** hace falta el IDE de Arduino, ni compilar nada: la release trae un único binario ya fusionado.
+El firmware del módulo y su inventario técnico completo viven en su propio repositorio, [**ESP32-for-FPGA**](https://github.com/Papipapito/ESP32-for-FPGA) — el mismo binario sirve al MSXimus y al MSXnano, así que ya no se guarda una copia aquí. Coge el `firmware_esp32c6_v3.8_merged.bin` de la release y grábalo en el C6 por **su propio USB-C**. El de la v3.8 lleva las autoridades de certificación con las que `MXUPDATE /N` valida el certificado de msx.barcelona (duran hasta 2046: no hay que regrabarlo cuando la web renueva su certificado). **No** hace falta el IDE de Arduino, ni compilar nada: la release trae un único binario ya fusionado.
 
 **Lo fácil — desde el navegador, sin instalar nada.** Abre [**esptool-js**](https://espressif.github.io/esptool-js/), el grabador web del propio Espressif, en Chrome o Edge. Conectas, eliges el fichero, pones la dirección `0x0` y le das a Program. Sin drivers, sin Python, sin IDE.
 
 **Por línea de órdenes**, si ya lo tienes:
 
 ```
-esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_v3.7_merged.bin
+esptool --chip esp32c6 --port COMx write_flash 0x0 firmware_esp32c6_v3.8_merged.bin
 ```
 
 > No hay una vía de arrastrar y soltar como el `.uf2` de la Raspberry Pi Pico: el ESP32 no lleva bootloader de almacenamiento masivo en ROM, así que copiar un fichero a una unidad no es posible en **ningún** ESP32. El grabador web de arriba es lo más cerca que se puede estar: una página, dos clics y nada instalado.
@@ -213,7 +248,7 @@ El proyecto de Bambu Studio, los STL, los ajustes de impresión y las notas de m
 
 ## Estado
 
-La v3.7.6 está validada en hardware (30/09/2026), como la v3.7.5 antes que ella (imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+**La v3.8.0b3 es una pre-release.** Validada en placa (02/10/2026): el puente lee y graba la flash real, `MXUPDATE /N` baja e instala de msx.barcelona con el certificado validado, y `/R` deja los ajustes de fábrica. Falta probar en placa la fila *Instalar actualización* de Ajustes y la firma de tipo de ROM. La v3.7.6 está validada en hardware (30/09/2026), como la v3.7.5 antes que ella (imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Estructura del repositorio
 
@@ -228,7 +263,20 @@ fpga/            top.v, build.tcl
     iosys/       El enlace con el BL616 y el panel en pantalla
   constraints/   Pinout y constraints de la Console 60K
 tools/           Testbenches y utilidades de validación
+  mxupdate/      MXUPDATE.COM (MSXgl + UNAPI) y su banco Z80
+  mxupd.py       Hace los .UPD y el manifiesto de la actualización
 ```
+
+## Lo nuevo de la v3.8
+
+Versión nueva: cambian el core y el pack. **Graba los dos, una vez, con el PC**; después, las actualizaciones llegan desde el MSX.
+
+- **Actualizar desde el MSX.** Un *puente de la flash* en el core (dispositivo de E/S conmutada 4Dh) deja al MSX leer, borrar y programar la flash de la placa. `MXUPDATE.COM` lo usa: un fichero `.UPD` de la SD, o directamente de internet con `/N` (msx.barcelona, TLS con el certificado validado). `/R` hace la actualización completa (core, pack y ondas del OPL4) y vuelve a los ajustes de fábrica. Y **Ajustes → Instalar actualización** graba el `MSXIMUS.UPD` de la SD sin DOS. Todo se comprueba antes de borrar nada y se relee después. Ver [Actualizar desde el MSX](#actualizar-desde-el-msx).
+- **El panel F12 en color**, al estilo del de la MSXimus Z: Z80 y turbo, vídeo, tarjeta SD, los ajustes principales, qué hay en cada USB-A, ventilador, mayúsculas y la orden para actualizar, en el idioma del menú. ESC también lo cierra. (La memoria del panel pasa de 2048×8 a 2048×9 bits: la misma BSRAM, que tiraba un bit de cada nueve.)
+- **El mapper por la firma de la propia ROM.** Muchas ROM nuevas llevan su mapper escrito dentro, justo después de la cabecera, según la [convención de MSXgl](https://aoineko.org/msxgl/index.php?title=ROM_type_signature) (`ROM_ASC8`, `ROM_AS16`, `ROM_KON4`, `ROM_KON5`, `ROM_NEO8`, `ROM_NE16`, `ASCII16X`). El menú la lee ahora, por encima de la etiqueta del nombre y del análisis: las ROM de geo3d y lo hecho con MSXgl se lanzan con su mapper, sin `[ASCII16]` en el nombre.
+- **El firmware del ESP32-C6 lleva autoridades de certificación** (16 de Mozilla): la placa valida el certificado del servidor de actualizaciones.
+- Ajustes y `MXUPDATE` enseñan la versión con tres dígitos: `3.8.0`.
+- **Documentación**: dos capítulos nuevos, [`docs/manual/11-actualizar.md`](docs/manual/11-actualizar.md) (cómo actualizar) y [`docs/tecnica/11-actualizacion.md`](docs/tecnica/11-actualizacion.md) (el puente de la flash, el formato `.UPD`, el manifiesto).
 
 ## Lo nuevo de la v3.7.6
 

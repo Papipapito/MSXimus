@@ -134,6 +134,18 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## v3.8.0b3 publicada (2 de octubre, tag `v3.8.0b3`, pre-release): actualizar desde el MSX y el OSD con color
+
+Versión nueva, pedida por Albert el 1 de octubre. Core: dado **5233**, afefaf128da8 (`_jtag.bin` 99d2e5362994), +1,095 ns. FPGA_VERSION 38h, PATCH 0 (Ajustes y MXUPDATE dicen `3.8.0`). Validada en placa el 2 de octubre: el puente lee y graba la flash real, `MXUPDATE /N` baja e instala de msx.barcelona con el certificado validado (C6 de la v3.8), y `/R` deja los ajustes de fábrica. Falta probar en placa la fila *Instalar actualización* de Ajustes y la firma de tipo de ROM.
+
+- **Actualizar desde el MSX**: el puente de la flash (`fpga/src/flash_bridge.v`, dispositivo de E/S conmutada 4Dh), `MXUPDATE.COM` (fichero `.UPD` de la SD o `/N` de internet, `/R` completa con las ondas y ajustes de fábrica, `/C` solo comprobar) y la fila **Instalar actualización** de Ajustes, que graba el `MSXIMUS.UPD` de la raíz de la SD sin DOS. Formato `.UPD`, manifiesto y web en el [capítulo 11](11-actualizacion.md).
+- **El OSD del BL616 con color** (F12): la BSRAM del overlay pasa de 2048×8 a 2048×9 (la misma: el modo ×8 tiraba un bit de cada nueve); cada fila tiene cuatro combinaciones de fondo y tinta de una paleta de 16 y hay 32 glifos nuevos. Página nueva: versión, Z80 y turbo, vídeo, SD, ajustes, USB, ventilador, mayúsculas y `MXUPDATE /N`, en el idioma del menú (el menú se lo dice al core por el puerto 4Eh). ESC también lo cierra. Un firmware viejo del BL616 se sigue viendo como antes.
+- **La versión con tres dígitos** en MXUPDATE (`3.8.0`) y la etiqueta del `.UPD` con la del pack (`3.8.0b3`).
+- **El ESP32-C6 con autoridades de certificación de serie** (16 de Mozilla, entre ellas la Sectigo R46 de msx.barcelona, hasta 2046): `MXUPDATE /N` valida el certificado sin depender de lo que haya en la FFat del módulo.
+- **El mapper por la firma de tipo de ROM de MSXgl** (pack 3.8.0b3): `ROM_ASC8`, `ROM_AS16`, `ROM_KON4`, `ROM_KON5`, `ROM_NEO8`, `ROM_NE16` y `ASCII16X` en el offset 10h o 4010h mandan sobre la etiqueta del nombre y el análisis. Las ROM de geo3d ya no necesitan `[ASCII16]`. Banco `bios-msxnano-msximus/tools/firma_tb`, 15/15.
+- Bancos: `tools/flash_tb`, `tools/osd_tb`, `tools/mxupdate/banco` (18/18), `bios-msxnano-msximus/tools/actualizar_tb` (11/11) y `firma_tb` (15/15).
+- La 3.8.0b2 (pack con *Instalar actualización*, sin la firma) se publicó en msx.barcelona el mismo día y queda en la web para volver atrás.
+
 ## v3.7.6 publicada (30 de septiembre, tag `v3.7.6`): tres arreglos del V9968 de HRA y MSX SD Maker
 
 Validada en placa por Albert el 30 de septiembre. Core: dado **5197**, 0fb615fd (`_jtag.bin` 2deacdb3), peor setup 0,965 ns (clk_86, dentro del shim); campaña pf60l, uno de cinco: 5167 −1,9 ns en el T80, 5171 −2,2 ns en el ADPCM y el shim, 5179 y 5189 sin rutar. El pack no cambia: el de la 3.7.5. FPGA_PATCH = 6 (af89f71).
