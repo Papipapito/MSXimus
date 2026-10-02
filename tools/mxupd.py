@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """mxupd.py - ficheros de actualizacion del MSXimus 60K/138K (.UPD) para MXUPDATE.COM (V3.8, 01/10/2026).
 
-Un .UPD lleva lo que hay que grabar en la flash SPI de la FPGA, por segmentos: el bitstream en 0x000000 y el pack de
-la BIOS en 0x400000 (el 60K: el bloque de ajustes de 0x480000 y las ondas de 0x500000 NO se tocan). Se puede hacer
-uno solo con el pack (cambiar de idioma o de Nextor en un minuto) o solo con el bitstream.
+Un .UPD lleva lo que hay que grabar en la flash SPI de la FPGA, por segmentos: el bitstream en 0x000000, el pack de
+la BIOS en 0x400000 y, en los "completos", las ondas del OPL4 (YRW801, 2 MB) en 0x500000 (138K: 0x800000 y 0x900000).
+El bloque de ajustes (0x480000 / 0x880000) nunca va en un .UPD: lo borra MXUPDATE /R. Se puede hacer uno solo con el
+pack (cambiar de idioma o de Nextor en un minuto) o solo con el bitstream.
 
 Formato (little endian):
     0   8   "MXUPD1", 1Ah, 0
@@ -20,10 +21,10 @@ borrar nada, y despues relee la flash entera y vuelve a comprobarlos.
 
 Uso:
     python tools/mxupd.py crear -o MSXIMUS.UPD --placa console60k --version 3.8.0 --variante nextor214 \\
-        --bitstream msximus.fs --pack pack_bios_msximus.bin
+        --bitstream msximus.fs --pack pack_bios_msximus.bin [--onda yrw801.bin]
     python tools/mxupd.py info MSXIMUS.UPD
     python tools/mxupd.py publicar --dir <carpeta del servidor> --placa console60k --version 3.8.0 \
-        --bitstream msximus.fs --packs <bios-msxnano-msximus>/packs/msximus [--notas "..."]
+        --bitstream msximus.fs --packs <bios-msxnano-msximus>/packs/msximus [--onda yrw801.bin] [--notas "..."]
 
 publicar deja en <dir>/tang60k/ (o tang138k/) los cuatro .UPD (Nextor 2.1.4 / 3 x castellano / ingles) y el
 manifiesto.txt que lee MXUPDATE /N:
@@ -32,6 +33,7 @@ manifiesto.txt que lee MXUPDATE /N:
     version=3.8.0
     notas=...                      (opcional, solo cosas para el usuario)
     imagen=<variante> <fichero> <tamano>
+    completa=<variante> <fichero> <tamano>   (con --onda: core + pack + ondas; los que baja MXUPDATE /N /R)
 """
 import argparse
 import os
@@ -46,6 +48,8 @@ PLACAS = {
     "console138k": (0x0001081B, 0x800000, 0x800000),
 }
 PACK_TAM = 0x80000
+ONDA_OFF = 0x100000             # las ondas van 1 MB detras del pack
+ONDA_TAM = 0x200000
 
 
 def leer_bitstream(ruta):
@@ -82,6 +86,11 @@ def crear(a):
         if len(pk) > PACK_TAM:
             sys.exit("pack de %d bytes: pisaria los ajustes" % len(pk))
         segs.append((dir_pack, pk))
+    if getattr(a, "onda", None):
+        ond = open(a.onda, "rb").read()
+        if len(ond) > ONDA_TAM:
+            sys.exit("ondas de %d bytes: mas de 2 MB" % len(ond))
+        segs.append((dir_pack + ONDA_OFF, ond))
     if not segs:
         sys.exit("nada que grabar")
     for campo in (a.placa, a.version, a.variante):
@@ -144,9 +153,16 @@ def publicar(a):
     for var, carpeta, pack, corto in VARIANTES:
         nombre = "%s_%s.upd" % (a.version.replace(".", ""), corto)
         a2 = argparse.Namespace(o=os.path.join(dst, nombre), placa=a.placa, version=a.version, variante=var,
-                                bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack))
+                                bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack), onda=None)
         crear(a2)
         man.append("imagen=%s %s %d" % (var, nombre, os.path.getsize(a2.o)))
+    if a.onda:                                                  # los completos, para MXUPDATE /N /R
+        for var, carpeta, pack, corto in VARIANTES:
+            nombre = "%s_%s_full.upd" % (a.version.replace(".", ""), corto)
+            a2 = argparse.Namespace(o=os.path.join(dst, nombre), placa=a.placa, version=a.version, variante=var,
+                                    bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack), onda=a.onda)
+            crear(a2)
+            man.append("completa=%s %s %d" % (var, nombre, os.path.getsize(a2.o)))
     open(os.path.join(dst, "manifiesto.txt"), "w", newline="\n").write("\n".join(man) + "\n")
     print("manifiesto:", os.path.join(dst, "manifiesto.txt"))
 
@@ -161,6 +177,7 @@ def main():
     c.add_argument("--variante", required=True)
     c.add_argument("--bitstream")
     c.add_argument("--pack")
+    c.add_argument("--onda")
     i = s.add_parser("info")
     i.add_argument("fichero")
     u = s.add_parser("publicar")
@@ -169,6 +186,7 @@ def main():
     u.add_argument("--version", required=True)
     u.add_argument("--bitstream", required=True)
     u.add_argument("--packs", required=True)
+    u.add_argument("--onda")
     u.add_argument("--notas")
     a = p.parse_args()
     if a.orden == "crear":

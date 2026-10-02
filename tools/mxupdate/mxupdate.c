@@ -7,8 +7,9 @@
 //        a https://msx.barcelona/ota/tang60k/ (o tang138k); /S:192.168.2.200:8000 = el servidor de desarrollo
 //        del PC (fpga/zynq/ota/ota_servidor.py del MSXimus Z, http y la carpeta tang60k/).
 //   /C = solo comprobar el fichero (cabecera y CRC), sin tocar la flash; vale en cualquier MSX con DOS 2.
-//   /R = actualizacion COMPLETA: ademas, al acabar, borra el sector de los ajustes (0x480000 en el 60K, 0x880000 en el
-//        138K). Sin la firma "AB" el core arranca con los de fabrica (los mismos que el rescate con S2).
+//   /R = actualizacion COMPLETA, todo desde cero: con /N baja la variante "completa" (core + pack + ondas del OPL4) y al
+//        acabar borra el sector de los ajustes (0x480000 en el 60K, 0x880000 en el 138K). Sin la firma "AB" el core
+//        arranca con los de fabrica (los mismos que el rescate con S2).
 //
 // Graba en la flash SPI de la FPGA lo que trae un .UPD (tools/mxupd.py: el bitstream y/o el pack de la BIOS) a
 // traves del puente de la flash del core (fpga/src/flash_bridge.v, dispositivo de E/S conmutada 4Dh). Orden:
@@ -450,9 +451,9 @@ static bool LeeManifiesto(const c8* placa)
 		else if (Prefijo(l, "placa=")) placa_ok = Igual(l + 6, placa);
 		else if (Prefijo(l, "version=")) { for (k = 0; k < 15 && l[8 + k]; k++) g_ver_srv[k] = l[8 + k]; g_ver_srv[k] = 0; }
 		else if (Prefijo(l, "notas=")) { for (k = 0; k < 63 && l[6 + k]; k++) g_notas[k] = l[6 + k]; g_notas[k] = 0; }
-		else if (Prefijo(l, "imagen=") && g_nimg < 4) {
+		else if (g_nimg < 4 && (g_ajustes ? Prefijo(l, "completa=") : Prefijo(l, "imagen="))) {   // /R: core + pack + ondas
 			Imagen* im = &g_img[g_nimg];
-			c8* q = l + 7;
+			c8* q = l + (g_ajustes ? 9 : 7);
 			for (k = 0; k < 15 && *q && *q != ' '; k++) im->var[k] = *q++;
 			im->var[k] = 0;
 			while (*q == ' ') q++;
@@ -605,9 +606,10 @@ fichero:
 		const u8* s = g_cab + 64 + 16 * i;
 		u32 lim = g_cab[15] == '1' ? 0x800000UL : 0x400000UL;            // el pack: console138k / console60k
 		g_seg[i].dir = Le32(s); g_seg[i].tam = Le32(s + 4); g_seg[i].crc = Le32(s + 8); g_seg[i].off = Le32(s + 12);
-		// solo el bitstream (0 .. pack) y el pack (512 KB): nunca los ajustes ni las ondas
+		// el bitstream (0 .. pack), el pack (512 KB) y las ondas del OPL4 (1 MB detras del pack, 2 MB): nunca los ajustes
 		if ((g_seg[i].dir & 0xFFF) || !g_seg[i].tam ||
-		    !((g_seg[i].dir == 0 && g_seg[i].tam <= lim) || (g_seg[i].dir == lim && g_seg[i].tam <= 0x80000UL)))
+		    !((g_seg[i].dir == 0 && g_seg[i].tam <= lim) || (g_seg[i].dir == lim && g_seg[i].tam <= 0x80000UL) ||
+		      (g_seg[i].dir == lim + 0x100000UL && g_seg[i].tam <= 0x200000UL)))
 			goto mal_fichero;
 		total += g_seg[i].tam;
 	}
