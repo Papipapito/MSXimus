@@ -5,12 +5,17 @@ las mismas comprobaciones que MXUPDATE.COM: el fichero entero y del mismo chip a
 releida al final. Despues, apagar y encender. El fichero lo deja en la SD MXUPDATE /N lanzado en la raiz (contestando N
 a "Grabar?") o se copia desde el PC. El core sigue siendo el de files/20261001 (dado 5233): solo cambia el pack.
 
-Ficheros
-  PACK_ES.UPD     md5 a998f188a990   pack nuevo, castellano, Nextor 2.1.4 (solo el pack)
-  PACK_EN.UPD     md5 5676869aad48   pack nuevo, ingles, Nextor 2.1.4 (solo el pack)
-  MSXIMUS.UPD     md5 97faca675984   core 3.8 (dado 5233) + pack nuevo (castellano, Nextor 2.1.4)
-  Los packs (bios-msxnano-msximus/packs/msximus): pack_bios_msximus.bin 0509897a0d62, _en 90987a908ac0,
-  _nextor3 a4b6ff4acc33, _en_nextor3 ba78955278f2. El servidor del PC (tang60k/) ya lleva los nuevos.
+3.8.0b3 (02/10, la publicada en https://msx.barcelona/wp-content/ota/tang60k/): el mismo core con el pack que
+reconoce el mapper por la firma de tipo de ROM de MSXgl (ROM_ASC8/AS16/KON4/KON5/NEO8/NE16 en el offset 10h o
+4010h): las ROM de geo3d ya no necesitan [ASCII16] en el nombre. MXUPDATE /N la ofrece (la 3.8.0b2 se queda en la
+web para volver atras).
+
+Ficheros (los de la 3.8.0b3)
+  PACK_ES.UPD     md5 d6e5998459ce   pack nuevo, castellano, Nextor 2.1.4 (solo el pack)
+  PACK_EN.UPD     md5 cca5d3eab17d   pack nuevo, ingles, Nextor 2.1.4 (solo el pack)
+  MSXIMUS.UPD     md5 3e8ae260d0ff   core 3.8 (dado 5233) + pack nuevo (castellano, Nextor 2.1.4)
+  Los packs (bios-msxnano-msximus/packs/msximus): pack_bios_msximus.bin 840a9752c2f9, _en cc0ad4a3bfab,
+  _nextor3 de965fce7df2, _en_nextor3 8d73c9883c53.
 
 Probarlo
   1. El pack nuevo, una vez: MXUPDATE PACK_ES.UPD desde MSX-DOS (o el Gowin Programmer en 0x400000).
