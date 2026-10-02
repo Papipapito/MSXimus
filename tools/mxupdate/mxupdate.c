@@ -299,7 +299,7 @@ static void Opciones(void)
 			g_ruta[k] = 0;
 		}
 	}
-	if (!g_ruta[0]) { const c8* d = "MSXIMUS.UPD"; while ((g_ruta[k] = d[k])) k++; }
+	if (!g_ruta[0]) { const c8* d = "MSXIMUS.UPD"; k = 0; while ((g_ruta[k] = d[k])) k++; }   // k venia de /S:
 }
 
 

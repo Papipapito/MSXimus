@@ -49,7 +49,7 @@ PRUEBAS QUE PROPONGO (en este orden, de menos a mas riesgo)
 
 FICHEROS DE ESTA CARPETA
   msximus_v3.8_dado5233.fs        md5 afefaf128da8      msximus_v3.8_dado5233_jtag.bin  md5 99d2e5362994
-  bl616_msximus_v3.8_60k.bin      md5 4c5d282eff82      MXUPDATE.COM                    md5 3580348f4b72
+  bl616_msximus_v3.8_60k.bin      md5 4c5d282eff82      MXUPDATE.COM                    md5 0b2f6916bd9f
   MSXIMUS.UPD  (= 380_n214_es.upd: bitstream + pack castellano Nextor 2.1.4)            md5 08abdb474b1e
   PACK_ES.UPD / PACK_EN.UPD  (solo el pack, Nextor 2.1.4)                                md5 91bd6df7 / bb1387c9
   Las cuatro variantes completas y el manifiesto: MSXimus_zynq/fpga/zynq/ota/servidor/tang60k/ (tools/mxupd.py
