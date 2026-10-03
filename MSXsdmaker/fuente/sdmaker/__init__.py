@@ -1,2 +1,2 @@
 """MSXsdmaker: tarjetas SD para MSXimus, MSXnano y MSX Pico."""
-VERSION = "1.0"
+VERSION = "1.1"

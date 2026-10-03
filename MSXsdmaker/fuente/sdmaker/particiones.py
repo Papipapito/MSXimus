@@ -52,6 +52,10 @@ def planificar(sectores_disco, esquema, n=1, resto=False, tam=None):
         return [Particion(1, 8192, sectores_disco - 8192, TIPO_FAT32, activa=True)]
     tam = tam or (GB2 if esquema == "fat16-2g" else GB4)
     maximo = maximo_fat16(sectores_disco, tam)
+    if maximo == 0 and n == 1 and sectores_disco >= 1 + MIN_RESTO:
+        # 1.1: una tarjeta (o imagen) mas pequena que una particion entera -- las de "2 GB" tienen menos de 2 GiB --:
+        # una sola particion con toda la tarjeta, como hace el FDISK de Nextor. Antes no dejaba hacer ninguna FAT16.
+        return [Particion(1, 1, min(GB4, sectores_disco - 1), TIPO_FAT16, activa=True)]
     if n < 1 or n > maximo:
         raise ValueError("caben de 1 a %d particiones de ese tamano" % maximo)
     tamanos = [tam] * n

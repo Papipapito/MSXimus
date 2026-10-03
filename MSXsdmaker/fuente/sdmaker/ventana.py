@@ -28,6 +28,9 @@ class Ventana:
         self.sistema = tk.StringVar(value="nextor214")
         self.etiqueta = tk.StringVar(value="MSX")
         self.grupos = {g[0]: tk.BooleanVar(value=True) for g in contenido.GRUPOS}
+        d = contenido.OPCIONES_N3
+        self.n3 = {k: tk.BooleanVar(value=d[k]) for k in ("yenslash", "bufinsert", "btm")}
+        self.dirk = tk.StringVar(value=d["dirk"])
         self._construir()
         self.actualizar_tarjetas()
         self.raiz.after(100, self._leer_cola)
@@ -74,6 +77,23 @@ class Ventana:
         for clave, (texto, _, _) in contenido.SISTEMAS.items():
             ttk.Radiobutton(f3, text=texto, value=clave, variable=self.sistema,
                             command=self._recalcular).pack(anchor="w", padx=6)
+        fo = ttk.LabelFrame(f3, text="Opciones de Nextor 3")
+        fo.pack(fill="x", padx=6, pady=(2, 6))
+        self.controles_n3 = [
+            ttk.Checkbutton(fo, text="Barra invertida en vez de ¥ en las rutas (YENSLASH ON)", variable=self.n3["yenslash"]),
+            ttk.Checkbutton(fo, text="Modo inserción al escribir órdenes (BUFINSERT)", variable=self.n3["bufinsert"]),
+            ttk.Checkbutton(fo, text="AUTOEXEC.BTM en vez de AUTOEXEC.BAT (admite GOTO, GOSUB y END)",
+                            variable=self.n3["btm"]),
+        ]
+        for c in self.controles_n3:
+            c.pack(anchor="w", padx=6)
+        fila = ttk.Frame(fo)
+        fila.pack(anchor="w", padx=6, pady=(0, 4))
+        self.controles_n3.append(ttk.Label(fila, text="Tamaños en DIR:"))
+        self.controles_n3.append(ttk.Radiobutton(fila, text="en K desde 10K (Nextor 3)", value="", variable=self.dirk))
+        self.controles_n3.append(ttk.Radiobutton(fila, text="en bytes, como MSX-DOS 2", value="0", variable=self.dirk))
+        for c in self.controles_n3[-3:]:
+            c.pack(side="left", padx=(0, 10))
 
         f4 = ttk.LabelFrame(self.raiz, text="4. Programas (en la partición de arranque)")
         f4.pack(fill="x", **p)
@@ -176,6 +196,8 @@ class Ventana:
         return particiones.planificar(sectores, esquema, n, self.resto.get())
 
     def _recalcular(self):
+        for c in getattr(self, "controles_n3", []):
+            c.state(["!disabled"] if self.sistema.get() == "nextor3" else ["disabled"])
         sectores = self._sectores()
         esquema = self.esquema.get()
         fat16 = esquema != "fat32"
@@ -192,7 +214,7 @@ class Ventana:
             maximo = particiones.maximo_fat16(sectores, tam)
             self.spin.configure(to=max(1, maximo))
             self.max_txt["text"] = ("caben %d en esta tarjeta (máximo 8: el menú del MSXimus ve 8)" % maximo
-                                    if maximo else "no cabe ninguna de ese tamaño")
+                                    if maximo else "la tarjeta es más pequeña: una sola partición con toda ella")
             if maximo and int(self.cantidad.get() or 1) > maximo:
                 self.cantidad.set(maximo)
         try:
@@ -216,6 +238,20 @@ class Ventana:
     # ------------------------------------------------------------------ acciones
     def _elegidos(self):
         return {k for k, v in self.grupos.items() if v.get()}
+
+    def _opciones(self):
+        o = {k: v.get() for k, v in self.n3.items()}
+        o["dirk"] = self.dirk.get()
+        return o
+
+    def _texto_opciones(self):
+        if self.sistema.get() != "nextor3":
+            return ""
+        o = self._opciones()
+        partes = [contenido.nombre_autoexec("nextor3", o)]
+        partes += [t for k, t in (("yenslash", "YENSLASH ON"), ("bufinsert", "BUFINSERT"), ) if o[k]]
+        partes.append("DIR en bytes" if o["dirk"] == "0" else "DIR en K")
+        return "\nOpciones: " + ", ".join(partes)
 
     def _bloquear(self, si):
         self.trabajando = si
@@ -241,8 +277,9 @@ class Ventana:
             return
         unidades = " ".join(t["letras"]) or "sin unidad"
         texto = ("Se va a BORRAR TODO lo que hay en:\n\n    %s, %s  (%s, disco %d)\n\ny se crearán:\n%s\n\n"
-                 "Sistema: %s\n\n¿Seguro?" % (t["modelo"], formato_tamano(t["bytes"]), unidades, t["numero"],
-                                              self.plan_txt["text"], contenido.SISTEMAS[self.sistema.get()][0]))
+                 "Sistema: %s%s\n\n¿Seguro?" % (t["modelo"], formato_tamano(t["bytes"]), unidades, t["numero"],
+                                                self.plan_txt["text"], contenido.SISTEMAS[self.sistema.get()][0],
+                                                self._texto_opciones()))
         if not messagebox.askyesno("MSX SD Maker: borrar la tarjeta", texto, icon="warning", default="no"):
             return
 
@@ -253,18 +290,20 @@ class Ventana:
     def guardar_imagen(self):
         if self.trabajando:
             return
-        sectores = self._sectores()
-        if sectores is None:
-            tam = simpledialog.askstring("MSX SD Maker", "Tamaño de la imagen (por ejemplo 4G o 512M):",
-                                         initialvalue="4G")
-            if not tam:
-                return
-            try:
-                t = tam.strip().upper().rstrip("B")
-                sectores = int(float(t[:-1]) * {"M": 1 << 20, "G": 1 << 30}[t[-1]]) // 512
-            except (ValueError, KeyError):
-                messagebox.showerror("MSX SD Maker", "Tamaño no válido: %s" % tam)
-                return
+        # 1.1: el tamano se pregunta siempre (antes, con una tarjeta conectada, la imagen salia del tamano de la tarjeta).
+        # 1800M cabe en cualquier tarjeta de 2 GB (las de "2 GB" tienen menos de 2 GiB); en una mayor sobra el resto.
+        tam = simpledialog.askstring("MSX SD Maker", "Tamaño de la imagen (por ejemplo 1800M, 3500M o 7G).\n"
+                                     "Se puede grabar en una tarjeta de ese tamaño o mayor:\n"
+                                     "1800M cabe en cualquiera de 2 GB, 3500M en cualquiera de 4 GB.",
+                                     initialvalue="1800M")
+        if not tam:
+            return
+        try:
+            t = tam.strip().upper().rstrip("B")
+            sectores = int(float(t[:-1]) * {"M": 1 << 20, "G": 1 << 30}[t[-1]]) // 512
+        except (ValueError, KeyError, IndexError):
+            messagebox.showerror("MSX SD Maker", "Tamaño no válido: %s" % tam)
+            return
         ruta = filedialog.asksaveasfilename(title="Guardar la imagen", defaultextension=".img",
                                             filetypes=[("Imagen de disco", "*.img"), ("Todos", "*.*")])
         if not ruta:
@@ -283,13 +322,14 @@ class Ventana:
         self._bloquear(True)
         self.log.delete("1.0", "end")
         sistema, grupos, etiqueta = self.sistema.get(), self._elegidos(), self.etiqueta.get() or "MSX"
+        opciones = self._opciones()
 
         def trabajo():
             dev = None
             try:
                 dev = abrir()
                 inf = proceso.crear(dev, plan, sistema, grupos, etiqueta,
-                                    lambda texto, f=None: self.cola.put(("aviso", texto, f)))
+                                    lambda texto, f=None: self.cola.put(("aviso", texto, f)), opciones=opciones)
                 self.cola.put(("fin", inf, destino))
             except Exception as e:
                 self.cola.put(("error", "%s: %s" % (type(e).__name__, e), destino))

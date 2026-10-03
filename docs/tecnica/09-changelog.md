@@ -134,6 +134,10 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## v3.8.0b4 publicada (3 de octubre, tag `v3.8.0b4`, pre-release): Nextor 3.0 beta 2
+
+El core de la v3.8.0b3 (dado 5233) con los packs de Nextor 3 rehechos con la **beta 2 de Konamiman** (1 de octubre): `Nextor-3.0.0-beta2.MSXnano.ROM` (617c914304e5) es el mismo driver de la beta 1, byte a byte, sobre el kernel nuevo (almacenamiento persistente `_NEXTOR.PSF`, `CALL SETSCREEN`, `BUFINSERT`, arreglos de `partit`; COMMAND3.COM con `DIRB`, `YENSLASH` y `AUTOEXEC.BTM`). Packs `pack_bios_msximus_nextor3.bin` b2e678a72172 y `_en_nextor3` 352a92d912ad; los de Nextor 2.1.4 no cambian. En msx.barcelona como 3.8.0b4 (las cuatro variantes). Con la release va una **imagen de SD** con Nextor 3 beta 2 (1800 MB) y **MSX SD Maker 1.1** (opciones de Nextor 3: `YENSLASH ON`, que desde la beta 2 es una orden de COMMAND3.COM, `BUFINSERT`, `DIRK`, `AUTOEXEC.BTM`; una sola partición en las tarjetas de 2 GB). Sin probar en placa.
+
 ## v3.8.0b3 publicada (2 de octubre, tag `v3.8.0b3`, pre-release): actualizar desde el MSX y el OSD con color
 
 Versión nueva, pedida por Albert el 1 de octubre. Core: dado **5233**, afefaf128da8 (`_jtag.bin` 99d2e5362994), +1,095 ns. FPGA_VERSION 38h, PATCH 0 (Ajustes y MXUPDATE dicen `3.8.0`). Validada en placa el 2 de octubre: el puente lee y graba la flash real, `MXUPDATE /N` baja e instala de msx.barcelona con el certificado validado (C6 de la v3.8), y `/R` deja los ajustes de fábrica. Falta probar en placa la fila *Instalar actualización* de Ajustes y la firma de tipo de ROM.

@@ -13,7 +13,7 @@ Abrir `dist\MSXsdmaker.exe`: pide permisos de administrador (hacen falta para es
 3. **Sistema** en la partición 1: Nextor 2.1.4, Nextor 3.0 beta 2, MSX-DOS básico (`MSXDOS2.SYS` + `COMMAND2.COM`, y los de MSX-DOS 1) o ninguno.
 4. **Programas**: SofaRun, Multi Mente, UTIL, WiFi/UNAPI, fuentes, música, HUB, IA, mapper e indev. Se crean también `FHUNT` y `TMP` (el menú no puede crear carpetas) y `SAVES` y `SETTINGS` de SofaRun.
 
-El `AUTOEXEC.BAT` se genera con lo elegido: `PATH`, alias de SofaRun y una línea `mapdrv c: 2 1 0` por cada partición de más (C:, D:, E:...).
+El `AUTOEXEC.BAT` se genera con lo elegido: `PATH`, alias de SofaRun y una línea `mapdrv c: 2 1 0` por cada partición de más (C:, D:, E:...). Con Nextor 3 (1.1) lleva además las opciones del recuadro: `YENSLASH ON` (la orden interna de COMMAND3.COM desde la beta 2; el `yenslash` a secas solo diría el estado), `SET BUFINSERT=ON`, `SET DIRK=0` y, si se elige, se llama `AUTOEXEC.BTM`. Desde la 1.1, una tarjeta más pequeña que una partición entera (las de "2 GB") lleva una sola con todo, y la imagen pregunta siempre el tamaño (1800M por defecto: cabe en cualquier tarjeta de 2 GB).
 
 Al acabar se relee todo lo escrito: la tabla de particiones y cada fichero por CRC.
 

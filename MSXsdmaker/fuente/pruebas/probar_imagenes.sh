@@ -49,13 +49,15 @@ caso() {   # nombre tamano_imagen sistema opciones...
             rm -rf "$W/sacado"; mkdir -p "$W/sacado"
             "$MT/mcopy" -s -n -m -i "$W/p.img" ::/ "$W/sacado/" 2>/dev/null
             referencia "$sis" "$W/ref"
-            rm -f "$W/sacado/AUTOEXEC.BAT"
+            rm -f "$W/sacado/AUTOEXEC.BAT" "$W/sacado/AUTOEXEC.BTM"
             if diff -r "$W/ref" "$W/sacado" > "$W/diff.txt" 2>&1; then
                 echo "  P1 contenido: IDENTICO a la referencia ($(find "$W/ref" -type f | wc -l) ficheros)"
             else
                 echo "  P1 contenido: DISTINTO"; head -8 "$W/diff.txt"; fallos=$((fallos+1))
             fi
-            "$MT/mtype" -i "$W/p.img" ::/AUTOEXEC.BAT | tr -d '\r\032' | sed 's/^/     | /' | grep -iE "PATH|mapdrv|Maped|CALL"
+            for ae in AUTOEXEC.BAT AUTOEXEC.BTM; do
+                "$MT/mtype" -i "$W/p.img" ::/$ae 2>/dev/null | tr -d '\r\032' | sed "s/^/     | $ae: /" | grep -iE "PATH|mapdrv|Maped|CALL|YENSLASH|SET BUF|SET DIRK"
+            done
             echo "  P1 raiz: $("$MT/mdir" -i "$W/p.img" -b ::/ | tr '\n' ' ' | sed 's|::/||g')"
         fi
     done < <(sfdisk -d "$img" 2>/dev/null | grep -E "^/" | grep -v "type=f" | sed -E 's/.*start= *([0-9]+), size= *([0-9]+).*/\1 \2/')
@@ -68,4 +70,6 @@ caso d_fat32 16G nextor214 --esquema fat32
 caso e_msxdos 1G msxdos --esquema fat16-2g --n 1 --tam-particion 300M --programas todos
 caso f_vacia 5G ninguno --esquema fat16-2g --n 2 --programas ninguno
 caso g_8part 20G nextor214 --esquema fat16-2g --n 8
+caso h_n3_opciones 3G nextor3 --esquema fat16-2g --n 1 --resto --bufinsert --dirk bytes --btm --sin-yenslash
+caso i_2gb_real 1800M nextor3 --esquema fat16-2g --n 1
 echo "PRUEBAS: $fallos fallos"

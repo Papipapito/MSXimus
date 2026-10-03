@@ -8,7 +8,7 @@ Tres ficheros, cada uno a una dirección distinta de la misma flash:
 
 | Fichero | Dirección | Obligatorio |
 |---|---|---|
-| El core: `MSXimus_v3.8.0b3.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
+| El core: `MSXimus_v3.8.0b4.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
 | El pack de BIOS, `pack_bios_msximus*.bin` | **0x400000** | Sí, sin él la máquina no arranca |
 | `yrw801.bin`, la ROM de ondas del MoonSound (va como `.bin` porque el Programmer de Gowin no coge `.rom`; si tienes un `yrw801.rom`, renómbralo) | **0x500000** | No, solo para tener el OPL4 completo |
 

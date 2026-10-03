@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>Un MSX2+ completo, en una Tang Console 60K — ahora con el VDP V9968</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.8.0b3-blue">
+  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.8.0b4-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-GPLv3-orange">
 </p>
@@ -68,7 +68,7 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
-| 1 | `MSXimus_v3.8.0b3.fs` | **`0x000000`** | Sí — es el core |
+| 1 | `MSXimus_v3.8.0b4.fs` | **`0x000000`** | Sí — es el core |
 | 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.bin` | **`0x500000`** | No — solo para MoonSound/OPL4 (la ROM de ondas va como `.bin`: el Programmer de Gowin no acepta `.rom`; si tienes una `yrw801.rom`, cámbiale la extensión) |
 
@@ -121,7 +121,7 @@ Con el menú encendido tienes el navegador de la tarjeta, el lanzador de ROM y D
 
 > Montar un `.dsk` reescribe sectores de un fichero **que ya existe**: no crea entradas de directorio ni asigna clústeres.
 
-Después, mete una microSD con tus ROMs y discos y listo. La forma más fácil de prepararla es **[MSX SD Maker](MSXsdmaker/LEEME.md)**, en este repositorio: un programa para Windows que parte la tarjeta como lo hace Nextor, copia Nextor y una colección de programas (SofaRun, Multi Mente…) y escribe el `AUTOEXEC.BAT`.
+Después, mete una microSD con tus ROMs y discos y listo. La forma más fácil de prepararla es **[MSX SD Maker](MSXsdmaker/LEEME.md)**, en este repositorio: un programa para Windows que parte la tarjeta como lo hace Nextor, copia Nextor y una colección de programas (SofaRun, Multi Mente…) y escribe el `AUTOEXEC.BAT`. Para Nextor 3 la release trae además una imagen de tarjeta ya hecha, `MSXimus_SD_Nextor3-beta2_1800MB.zip` (1800 MB, cabe en cualquier tarjeta de 2 GB o mayor): se graba con balenaEtcher o Rufus.
 
 > **Sobre las microSD:** usa una tarjeta **de marca y Clase 10** (Samsung, SanDisk, Kingston...), formateada en **FAT16**. Las tarjetas baratas sin marca leen bien pero rechazan o pierden escrituras en ráfagas sostenidas — lo medimos en placa: una sin marca fallaba escrituras incluso con pausas, y una Samsung EVO+ iba perfecta con el mismo código y la misma geometría. Si las descargas o los guardados fallan, sospecha de la tarjeta primero.
 
@@ -248,7 +248,7 @@ El proyecto de Bambu Studio, los STL, los ajustes de impresión y las notas de m
 
 ## Estado
 
-**La v3.8.0b3 es una pre-release.** Validada en placa (02/10/2026): el puente lee y graba la flash real, `MXUPDATE /N` baja e instala de msx.barcelona con el certificado validado, y `/R` deja los ajustes de fábrica. Falta probar en placa la fila *Instalar actualización* de Ajustes y la firma de tipo de ROM. La v3.7.6 está validada en hardware (30/09/2026), como la v3.7.5 antes que ella (imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+**La v3.8.0b4 es una pre-release**: la v3.8.0b3 con Nextor 3.0 beta 2 (Konamiman, 01/10/2026) en los packs de Nextor 3 (el mismo driver de la beta 1, byte a byte, sobre el kernel nuevo; sin probar todavía en placa). La v3.8.0b3, validada en placa (02/10/2026): el puente lee y graba la flash real, `MXUPDATE /N` baja e instala de msx.barcelona con el certificado validado, y `/R` deja los ajustes de fábrica. Falta probar en placa la fila *Instalar actualización* de Ajustes y la firma de tipo de ROM. La v3.7.6 está validada en hardware (30/09/2026), como la v3.7.5 antes que ella (imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Estructura del repositorio
 

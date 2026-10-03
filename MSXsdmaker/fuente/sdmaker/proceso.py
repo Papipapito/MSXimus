@@ -17,8 +17,9 @@ def etiqueta_particion(etiqueta, numero):
     return (etiqueta[:8].rstrip() + " %d" % numero)[:11]
 
 
-def crear(dev, plan, sistema, grupos, etiqueta="MSX", aviso=None, raiz_sd=None):
-    """plan = lista de particiones.Particion. aviso(texto, fraccion) informa del avance. Devuelve un informe."""
+def crear(dev, plan, sistema, grupos, etiqueta="MSX", aviso=None, raiz_sd=None, opciones=None):
+    """plan = lista de particiones.Particion. aviso(texto, fraccion) informa del avance. opciones = las de Nextor 3
+    (contenido.OPCIONES_N3). Devuelve un informe."""
     aviso = aviso or (lambda texto, fraccion=None: None)
     t0 = time.time()
     rnd = random.Random()
@@ -32,7 +33,7 @@ def crear(dev, plan, sistema, grupos, etiqueta="MSX", aviso=None, raiz_sd=None):
 
     arbol = None
     if sistema != "ninguno" or grupos:
-        arbol = contenido.arbol(sistema, grupos, len(plan), raiz_sd)
+        arbol = contenido.arbol(sistema, grupos, len(plan), raiz_sd, opciones)
         informe["ficheros"], informe["bytes"] = contenido.resumen(arbol)
     total_ficheros = max(1, informe["ficheros"])
     hechos = [0]

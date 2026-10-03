@@ -32,8 +32,28 @@ GRUPOS = [
     ("varios", "mapper e indev", ["extras/mapper", "extras/indev.com"], ["mapper"], []),
 ]
 SIEMPRE = ["FHUNT", "TMP"]      # FHUNT: el menu descarga del File-Hunter ahi y NO puede crear carpetas
+
+# Opciones del AUTOEXEC con Nextor 3 (beta 2, COMMAND3.COM); con Nextor 2.1.4 y MSX-DOS no se usan.
+#   yenslash: YENSLASH ON, la orden INTERNA de COMMAND3.COM (desde la beta 2): barra invertida en vez de yen. La
+#             orden interna tiene preferencia sobre el YENSLASH.COM de UTIL, y sin parametros solo dice el estado.
+#   bufinsert: SET BUFINSERT=ON, la linea de ordenes empieza en modo insercion.
+#   dirk: "" = lo de Nextor 3 (tamanos en K desde 10K); "0" = como MSX-DOS 2 (bytes; los totales en K).
+#   btm: AUTOEXEC.BTM en vez de AUTOEXEC.BAT (COMMAND3.COM lo carga entero: admite GOTO, GOSUB, RETURN y END).
+OPCIONES_N3 = {"yenslash": True, "bufinsert": False, "dirk": "", "btm": False}
+
+
+def opciones_n3(opciones=None):
+    o = dict(OPCIONES_N3)
+    o.update(opciones or {})
+    if o["dirk"] not in ("", "0"):
+        raise ValueError("DIRK: \"\" o \"0\"")
+    return o
+
+
+def nombre_autoexec(sistema, opciones=None):
+    return "AUTOEXEC.BTM" if sistema == "nextor3" and opciones_n3(opciones)["btm"] else "AUTOEXEC.BAT"
 EXCLUIR_EXT = (".bak", ".tmp")
-EXCLUIR = {"ruvector.db", "thumbs.db", "desktop.ini", "autoexec.bat", "nextor.emu"}
+EXCLUIR = {"ruvector.db", "thumbs.db", "desktop.ini", "autoexec.bat", "autoexec.btm", "nextor.emu", "_nextor.psf"}
 
 
 def carpeta_sd():
@@ -79,8 +99,9 @@ def _meter(padre, ruta, nombre=None):
         padre.hijos.append(Nodo(nombre, origen=ruta, mtime=os.path.getmtime(ruta)))
 
 
-def arbol(sistema, grupos, particiones, raiz_sd=None):
-    """Nodo raiz de la particion de arranque. particiones = cuantas hay en la tarjeta (para el MAPDRV)."""
+def arbol(sistema, grupos, particiones, raiz_sd=None, opciones=None):
+    """Nodo raiz de la particion de arranque. particiones = cuantas hay en la tarjeta (para el MAPDRV); opciones = las
+    de Nextor 3 (OPCIONES_N3)."""
     sd = raiz_sd or carpeta_sd()
     raiz = Nodo("", es_dir=True)
     nombre, carpeta, lista = SISTEMAS[sistema]
@@ -102,12 +123,15 @@ def arbol(sistema, grupos, particiones, raiz_sd=None):
     if sistema != "ninguno":
         for v in SIEMPRE:
             _asegurar_dir(raiz, v)
-        raiz.hijos.append(Nodo("AUTOEXEC.BAT", datos=autoexec(sistema, grupos, particiones, raiz)))
+        raiz.hijos.append(Nodo(nombre_autoexec(sistema, opciones),
+                               datos=autoexec(sistema, grupos, particiones, raiz, opciones)))
     return raiz
 
 
-def autoexec(sistema, grupos, particiones, raiz):
-    """AUTOEXEC.BAT (CRLF y ^Z al final, como los de MSX-DOS 2). %1 = unidad de arranque."""
+def autoexec(sistema, grupos, particiones, raiz, opciones=None):
+    """AUTOEXEC.BAT o .BTM (CRLF y ^Z al final, como los de MSX-DOS 2). %1 = unidad de arranque."""
+    n3 = sistema == "nextor3"
+    o = opciones_n3(opciones)
     def hay(*ruta):
         n = raiz
         for p in ruta:
@@ -129,7 +153,14 @@ def autoexec(sistema, grupos, particiones, raiz):
         L.append("set MM=%1\\MM")
     if "sofarun" in grupos:
         L += ["alias .ROM srom", "alias .DSK sri"]
-    if hay("UTIL", "YENSLASH.COM"):
+    if n3:
+        if o["yenslash"]:
+            L.append("YENSLASH ON")
+        if o["bufinsert"]:
+            L.append("SET BUFINSERT=ON")
+        if o["dirk"]:
+            L.append("SET DIRK=" + o["dirk"])
+    elif hay("UTIL", "YENSLASH.COM"):
         L.append("yenslash")
     if hay("FONTS", "ISO-LAT1.FNT"):
         L.append("SET FONT0808=%1\\FONTS\\ISO-LAT1.FNT")

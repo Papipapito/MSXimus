@@ -1,4 +1,4 @@
-# MSX SD Maker 1.0 — preparing the SD card
+# MSX SD Maker 1.1 — preparing the SD card
 
 *[Versión en castellano](LEEME.md)*
 
@@ -95,7 +95,8 @@ How many fit on the most common cards (their real capacity is a bit less than th
 
 | Card | FAT16 2 GB | + leftover | FAT16 4 GB | + leftover |
 |---|---|---|---|---|
-| 4 GB | 1 | + 1 of 1.7 GB | — | — |
+| 2 GB | 1 with the whole card | — | 1 with the whole card | — |
+| 4 GB | 1 | + 1 of 1.7 GB | 1 with the whole card | — |
 | 8 GB | 3 | + 1 of 1.4 GB | 1 | + 1 of 3.4 GB |
 | 16 GB | 7 | + 1 of 0.8 GB | 3 | + 1 of 2.8 GB |
 | 32 GB | 8 | — | 7 | + 1 of 1.7 GB |
@@ -125,6 +126,19 @@ The other two options:
 
 - **MSX-DOS básico** (*basic MSX-DOS*): only `MSXDOS2.SYS` and `COMMAND2.COM`, plus MSX-DOS 1's `MSXDOS.SYS` and `COMMAND.COM`, without the Nextor tools. Without them the `AUTOEXEC` cannot mount C:, D:…; do it by hand with `CALL MAPDRV` from BASIC.
 - **Ninguno (solo formatear)** (*none, format only*): partitions and formats, with no system and no programs. Handy for a games-only card.
+
+If the card is smaller than a whole partition ("2 GB" cards hold a little under 2 GB), a single partition with the whole card is made.
+
+**Nextor 3 options** (*Opciones de Nextor 3*). With Nextor 3 a box with four boot options is enabled:
+
+| Option | What it does | Default |
+|---|---|---|
+| Backslash instead of ¥ (`YENSLASH ON`) | Paths show as `A:\DIR\FILE` instead of with the yen sign of Japanese MSX computers. Since beta 2, `YENSLASH` is a command of `COMMAND3.COM` itself | Ticked |
+| Insert mode (`SET BUFINSERT=ON`) | What you type at the prompt is inserted instead of overwriting. INS toggles, as always | Not ticked |
+| `AUTOEXEC.BTM` instead of `AUTOEXEC.BAT` | `COMMAND3.COM` loads it whole, so it accepts `GOTO`, `GOSUB`, `RETURN` and `END` | Not ticked |
+| Sizes in DIR | In K from 10K (Nextor 3's way) or always in bytes, like MSX-DOS 2 (`SET DIRK=0`). `DIRB` always shows bytes | In K |
+
+![Nextor 3 options](capturas/5_opciones_nextor3.png)
 
 > ℹ️ MSX-DOS 1 only boots from FAT12 partitions of 16 MB or less, which is not what this program creates. That is why any of these options boots MSX-DOS 2; the MSX-DOS 1 files are there only in case you need them.
 
@@ -224,6 +238,8 @@ What each part does:
 - **`sntp`**: sets the clock from the internet if there is a network. Without one it prints an error and carries on: that is normal.
 - **`mapdrv c: 2 1 0`**: mounts partition 2 as drive C:, partition 3 as D:, and so on.
 
+With **Nextor 3**, instead of `yenslash` come the lines of its options (`YENSLASH ON`, plus `SET BUFINSERT=ON` and `SET DIRK=0` if ticked), and the file is `AUTOEXEC.BTM` if you choose that option.
+
 You can edit `AUTOEXEC.BAT` from Windows with Notepad. Keep its name.
 
 ---
@@ -297,7 +313,9 @@ Good to know:
 - Try it in an emulator.
 - Keep a copy of a setup.
 
-If a card is selected, the image has its size. Otherwise the program asks for one (for example `8G`). The image only takes up on the PC's disk what was really written, not the whole card size.
+The program asks for the image size. An image can be written to a card of that size **or larger**, never smaller, and cards hold a little less than their label says: `1800M` fits any 2 GB card and `3500M` any 4 GB card. The image only takes up on the PC's disk what was really written, not its whole size.
+
+Every MSXimus release also ships a ready-made image with Nextor 3 (1800 MB, all programs): just write it.
 
 ---
 

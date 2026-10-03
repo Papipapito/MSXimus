@@ -6,7 +6,9 @@ de Nextor) o una FAT32, sistema (Nextor 2.1.4, Nextor 3 o MSX-DOS) y programas (
   MSXsdmaker imagen F.img --tamano 8G [opciones]     crea una imagen (para probar, o para grabarla con Rufus/dd)
   MSXsdmaker tarjeta N [opciones] --si               prepara el disco N de "listar" (BORRA TODO)
 opciones: --esquema fat16-2g|fat16-4g|fat32  --n 3  --resto  --sistema nextor214|nextor3|msxdos|ninguno
-          --programas todos|ninguno|sofarun,mm,util,...  --etiqueta MSX  --tam-particion 64M (solo pruebas)"""
+          --programas todos|ninguno|sofarun,mm,util,...  --etiqueta MSX  --tam-particion 64M (solo pruebas)
+con Nextor 3: --sin-yenslash (no pone YENSLASH ON)  --bufinsert (modo insercion)  --dirk bytes (DIR en bytes, como
+          MSX-DOS 2)  --btm (AUTOEXEC.BTM en vez de AUTOEXEC.BAT)"""
 import argparse
 import sys
 
@@ -40,6 +42,15 @@ def _opciones(ap):
     ap.add_argument("--programas", default="todos")
     ap.add_argument("--etiqueta", default="MSX")
     ap.add_argument("--tam-particion", default=None, help="tamano de las particiones FAT16 (pruebas)")
+    ap.add_argument("--sin-yenslash", action="store_true", help="Nextor 3: sin YENSLASH ON en el AUTOEXEC")
+    ap.add_argument("--bufinsert", action="store_true", help="Nextor 3: SET BUFINSERT=ON (modo insercion)")
+    ap.add_argument("--dirk", default="defecto", choices=["defecto", "bytes"], help="Nextor 3: DIR en K o en bytes")
+    ap.add_argument("--btm", action="store_true", help="Nextor 3: AUTOEXEC.BTM en vez de AUTOEXEC.BAT")
+
+
+def _opciones_n3(a):
+    return {"yenslash": not a.sin_yenslash, "bufinsert": a.bufinsert, "dirk": "0" if a.dirk == "bytes" else "",
+            "btm": a.btm}
 
 
 def _crear(dev, a):
@@ -52,7 +63,7 @@ def _crear(dev, a):
     def aviso(texto, fraccion=None):
         if not texto.startswith("Copiando"):
             print("[%3d%%] %s" % (int((fraccion or 0) * 100), texto))
-    inf = proceso.crear(dev, plan, a.sistema, _grupos(a.programas), a.etiqueta, aviso)
+    inf = proceso.crear(dev, plan, a.sistema, _grupos(a.programas), a.etiqueta, aviso, opciones=_opciones_n3(a))
     print("ficheros: %d (%s) en %.1f s" % (inf["ficheros"], dispositivos.formato_tamano(inf["bytes"]), inf["segundos"]))
     for e in inf["errores"]:
         print("ERROR:", e)

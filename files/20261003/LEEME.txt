@@ -11,7 +11,8 @@ QUE FLASHEAR (Gowin Programmer, flash externa, 0x400000; el core v3.8 no cambia)
 FICHEROS DE LA SD (para arrancar MSX-DOS con Nextor 3)
   bios-msxnano-msximus/packs/sd/nextor-3.0.0-beta2/: NEXTOR.SYS y COMMAND3.COM 3.0 beta 2 + bin/ con las 25
   herramientas oficiales (DEVINFO 1.3, EMUFILE 3.0, NEXBOOT 3.0, XDIR 1.2...). O MSX SD Maker (MSXsdmaker/, ya con
-  la beta 2): sistema "Nextor 3.0 beta 2". Con el NEXTOR.SYS de la beta 1 el kernel nuevo no arranca DOS.
+  la beta 2): sistema "Nextor 3.0 beta 2". Conviene poner los de la beta 2 (traen AUTOEXEC.BTM, DIRB y YENSLASH);
+  segun el manual de Nextor, COMMAND3.COM solo pide un kernel de Nextor 3 y un NEXTOR.SYS de version 3.
   Para volver a Nextor 2.1.4: su pack y los ficheros de nextor-2.1.4/.
 
 LO NUEVO DE LA BETA 2 (Konamiman, 01/10/2026)
