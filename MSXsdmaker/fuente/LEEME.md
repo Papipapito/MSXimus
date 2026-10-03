@@ -10,7 +10,7 @@ Abrir `dist\MSXsdmaker.exe`: pide permisos de administrador (hacen falta para es
 2. **Particiones**:
    - FAT16 de 2 GB o de 4 GB, tantas como quepan (hasta 8, las que ve el menú del MSXimus). Opcionalmente, una última con lo que sobre.
    - O una FAT32 con toda la tarjeta. Nextor 2.1.4 y 3.0 no leen FAT32: sirve para el menú del MSXimus (ROM y DSK) y la MSX Pico, no para arrancar MSX-DOS.
-3. **Sistema** en la partición 1: Nextor 2.1.4, Nextor 3.0 beta 1, MSX-DOS básico (`MSXDOS2.SYS` + `COMMAND2.COM`, y los de MSX-DOS 1) o ninguno.
+3. **Sistema** en la partición 1: Nextor 2.1.4, Nextor 3.0 beta 2, MSX-DOS básico (`MSXDOS2.SYS` + `COMMAND2.COM`, y los de MSX-DOS 1) o ninguno.
 4. **Programas**: SofaRun, Multi Mente, UTIL, WiFi/UNAPI, fuentes, música, HUB, IA, mapper e indev. Se crean también `FHUNT` y `TMP` (el menú no puede crear carpetas) y `SAVES` y `SETTINGS` de SofaRun.
 
 El `AUTOEXEC.BAT` se genera con lo elegido: `PATH`, alias de SofaRun y una línea `mapdrv c: 2 1 0` por cada partición de más (C:, D:, E:...).
@@ -25,7 +25,7 @@ Igual que el `FDISK` de Nextor (`kernel/bank5/fdisk2.c`): partición 1 primaria,
 
 ## Contenido
 
-Sale de `packs/sd/` de este repo y va dentro del `.exe`: `base/`, `nextor-2.1.4/`, `nextor-3.0.0-beta1/` y `extras/` (SOFARUN, hub, mapper, IA e indev de la SD de la MSX Pico). Para cambiar lo que se copia, se cambian esas carpetas y se vuelve a construir.
+Sale de `packs/sd/` de este repo y va dentro del `.exe`: `base/`, `nextor-2.1.4/`, `nextor-3.0.0-beta2/` y `extras/` (SOFARUN, hub, mapper, IA e indev de la SD de la MSX Pico). Para cambiar lo que se copia, se cambian esas carpetas y se vuelve a construir.
 
 ## Construir y probar
 

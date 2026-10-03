@@ -15,7 +15,7 @@
 | Ficheros / Files | Autor / Author | Licencia / License |
 |---|---|---|
 | `NEXTOR.SYS`, `COMMAND2.COM`, `MSXDOS2.SYS`, Nextor tools (`bin\`: `MAPDRV`, `DRIVERS`, `DEVINFO`, `CHKDSK`, `XCOPY`…) | Néstor Soriano (Konamiman) and The MSX Licensing Corporation | Nextor license, below |
-| `COMMAND3.COM` and the Nextor 3.0 beta 1 tools | Néstor Soriano (Konamiman) | Nextor license, below |
+| `COMMAND3.COM` and the Nextor 3.0 beta 2 tools | Néstor Soriano (Konamiman) | Nextor license, below |
 | `MSXDOS.SYS`, `COMMAND.COM` (MSX-DOS 1) | ASCII Corporation / Microsoft; today The MSX Licensing Corporation | Non-commercial distribution |
 | `SOFARUN\` (SofaRun 8.1) | Louthrax | Freeware |
 | `SOFARUN\VGMPLAY.COM` | Laurens Holst (Grauw) | Freeware |

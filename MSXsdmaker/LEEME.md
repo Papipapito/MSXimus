@@ -114,11 +114,11 @@ Es el sistema operativo que se copia en la primera partición, la de arranque. *
 | Tu máquina | Si grabaste… | Elige |
 |---|---|---|
 | MSXimus 60K o 138K | `pack_bios_msximus.bin` o `pack_bios_msximus_en.bin` | **Nextor 2.1.4** |
-| MSXimus 60K o 138K | `pack_bios_msximus_nextor3.bin` o `…_en_nextor3.bin` | **Nextor 3.0 beta 1** |
+| MSXimus 60K o 138K | `pack_bios_msximus_nextor3.bin` o `…_en_nextor3.bin` | **Nextor 3.0 beta 2** |
 | MSXimus Z (Zynq) | un `BOOT_…_nextor214.bin` | **Nextor 2.1.4** |
-| MSXimus Z (Zynq) | un `BOOT_…_nextor3.bin` | **Nextor 3.0 beta 1** |
+| MSXimus Z (Zynq) | un `BOOT_…_nextor3.bin` | **Nextor 3.0 beta 2** |
 | MSXnano | `pack_bios_msxnano.bin` o `pack_bios_msxnano_en.bin` | **Nextor 2.1.4** |
-| MSXnano | `pack_bios_msxnano_nextor3.bin` o `…_en_nextor3.bin` | **Nextor 3.0 beta 1** |
+| MSXnano | `pack_bios_msxnano_nextor3.bin` o `…_en_nextor3.bin` | **Nextor 3.0 beta 2** |
 | MSX Pico u otro MSX con Nextor 2.1 | — | **Nextor 2.1.4** |
 
 Las otras dos opciones:
@@ -345,7 +345,7 @@ No. Solo escribe en la tarjeta que elijas, y el disco de Windows nunca aparece e
 - **Nombres**: guarda el nombre corto de 8+3 que lee MSX-DOS y, si hace falta, también el nombre largo que ven Windows y el menú.
 - **La tabla de particiones se escribe al final**, cuando todo lo demás ya está en su sitio. Luego se relee y se compara cada fichero con su CRC32.
 
-El código fuente está en la carpeta [`fuente/`](fuente/) (Python 3 con tkinter; `construir_exe.bat` hace el `.exe` con PyInstaller). Para usarlo sin el `.exe` hace falta el contenido de la tarjeta en una carpeta `sd/` junto a `MSXsdmaker.py`, con `base/`, `nextor-2.1.4/`, `nextor-3.0.0-beta1/` y `extras/`. El `.exe` ya lo lleva dentro. Desde la línea de órdenes también se pueden hacer imágenes:
+El código fuente está en la carpeta [`fuente/`](fuente/) (Python 3 con tkinter; `construir_exe.bat` hace el `.exe` con PyInstaller). Para usarlo sin el `.exe` hace falta el contenido de la tarjeta en una carpeta `sd/` junto a `MSXsdmaker.py`, con `base/`, `nextor-2.1.4/`, `nextor-3.0.0-beta2/` y `extras/`. El `.exe` ya lo lleva dentro. Desde la línea de órdenes también se pueden hacer imágenes:
 
 ```
 python MSXsdmaker.py imagen prueba.img --tamano 8G --esquema fat16-2g --n 3 --sistema nextor214 --programas todos

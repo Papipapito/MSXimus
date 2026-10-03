@@ -37,7 +37,9 @@ manifiesto.txt que lee MXUPDATE /N:
     completa=<variante> <fichero> <tamano>   (con --onda: core + pack + ondas; los que baja MXUPDATE /N /R)
 """
 import argparse
+import glob
 import os
+import re
 import struct
 import sys
 import zlib
@@ -141,10 +143,22 @@ def info(ruta):
 
 VARIANTES = [   # variante, carpeta y pack en bios-msxnano-msximus/packs/<msximus|msxnano>, nombre corto
     ("nextor214", "nextor-2.1.4", "pack_bios_%s.bin", "n214_es"),
-    ("nextor3", "nextor-3.0.0-beta1", "pack_bios_%s_nextor3.bin", "n3_es"),
+    ("nextor3", "NEXTOR3", "pack_bios_%s_nextor3.bin", "n3_es"),
     ("nextor214-en", "nextor-2.1.4", "pack_bios_%s_en.bin", "n214_en"),
-    ("nextor3-en", "nextor-3.0.0-beta1", "pack_bios_%s_en_nextor3.bin", "n3_en"),
+    ("nextor3-en", "NEXTOR3", "pack_bios_%s_en_nextor3.bin", "n3_en"),
 ]
+
+
+def carpeta_n3(packs):
+    """03/10/2026: la carpeta de Nextor 3 mas nueva de packs/<maquina> (nextor-3.0.0-beta2...), como hacer_packs.py,
+    para no tener que tocar este script con cada beta. Por numero, no por orden de texto (beta10 despues de beta9)."""
+    def clave(c):
+        m = re.match(r"nextor-3\.(\d+)\.(\d+)(?:-beta(\d+))?$", os.path.basename(c))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)) if m.group(3) else 999) if m else (-1, -1, -1)
+    cands = [c for c in glob.glob(os.path.join(packs, "nextor-3*")) if os.path.isdir(c) and clave(c)[0] >= 0]
+    if not cands:
+        sys.exit("no hay carpeta nextor-3* en " + packs)
+    return os.path.basename(max(cands, key=clave))
 CARPETAS = {"console60k": "tang60k", "console138k": "tang138k", "msxnano": "msxnano"}   # en el servidor
 
 
@@ -157,7 +171,10 @@ def publicar(a):
     man = ["MSXIMUS-UPD 1", "placa=" + a.placa, "version=" + a.version]
     if a.notas:
         man.append("notas=" + a.notas)
+    n3 = carpeta_n3(a.packs)
+    print("Nextor 3:", n3)
     for var, carpeta, pack, corto in VARIANTES:
+        carpeta = n3 if carpeta == "NEXTOR3" else carpeta
         nombre = "%s_%s.upd" % (a.version.replace(".", ""), corto)
         a2 = argparse.Namespace(o=os.path.join(dst, nombre), placa=a.placa, version=a.version, variante=var,
                                 bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack % maq), onda=None)
@@ -165,6 +182,7 @@ def publicar(a):
         man.append("imagen=%s %s %d" % (var, nombre, os.path.getsize(a2.o)))
     if a.onda:                                                  # los completos, para MXUPDATE /N /R
         for var, carpeta, pack, corto in VARIANTES:
+            carpeta = n3 if carpeta == "NEXTOR3" else carpeta
             nombre = "%s_%s_full.upd" % (a.version.replace(".", ""), corto)
             a2 = argparse.Namespace(o=os.path.join(dst, nombre), placa=a.placa, version=a.version, variante=var,
                                     bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack % maq), onda=a.onda)

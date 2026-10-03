@@ -36,8 +36,8 @@ Hay cuatro packs iguales en todo salvo el idioma del menú y el kernel de disco 
 |---|---|---|
 | `pack_bios_msximus.bin` | castellano | **2.1.4**, el estable, el que quieres |
 | `pack_bios_msximus_en.bin` | inglés | **2.1.4** |
-| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 1**, para probar la beta |
-| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 1** |
+| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 2**, para probar la beta |
+| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 2** |
 
 Y de cada uno, una variante internacional y una japonesa, que cambian la BIOS y la SubROM. Quien prefiera montar el pack con sus propias ROMs tiene el [Pack Builder del MSXnano](https://github.com/Papipapito/MSXnano), que las ensambla con Nextor incluido. El [capítulo 04 de la referencia técnica](../tecnica/04-pack-bios.md) describe qué lleva y en qué orden.
 

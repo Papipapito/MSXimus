@@ -15,7 +15,7 @@ referencia() {   # $1 = sistema, $2 = destino: el arbol esperado de la particion
     local d="$2"; rm -rf "$d"; mkdir -p "$d"
     case "$1" in
         nextor214) cp -r "$SD/nextor-2.1.4/." "$d/";;
-        nextor3)   cp -r "$SD/nextor-3.0.0-beta1/." "$d/";;
+        nextor3)   cp -r "$SD/nextor-3.0.0-beta2/." "$d/";;
         msxdos)    for f in MSXDOS2.SYS COMMAND2.COM MSXDOS.SYS COMMAND.COM; do cp "$SD/nextor-2.1.4/$f" "$d/"; done;;
     esac
     for x in base/MM base/UTIL base/WIFI base/FONTS base/musica extras/SOFARUN extras/hub extras/IA extras/mapper extras/indev.com; do

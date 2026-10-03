@@ -3,7 +3,7 @@
 Las fuentes son las carpetas de packs/sd del repo (o, en el .exe, las que lleva dentro):
   base/               lo comun de las SD del MSXimus (MM, UTIL, WIFI, FONTS, musica...)
   nextor-2.1.4/       NEXTOR.SYS + COMMAND2.COM + bin/ (herramientas de Nextor 2)
-  nextor-3.0.0-beta1/ NEXTOR.SYS + COMMAND3.COM + bin/ (herramientas de Nextor 3)
+  nextor-3.0.0-beta2/ NEXTOR.SYS + COMMAND3.COM + bin/ (herramientas de Nextor 3)
   extras/             lo de la SD de la MSX Pico que no estaba en base: SOFARUN, hub, mapper, IA, indev.com
 El AUTOEXEC.BAT de base/ no se copia: se genera (PATH, alias y MAPDRV segun lo elegido y las particiones creadas)."""
 import os
@@ -13,7 +13,7 @@ from .fatfs import Nodo
 
 SISTEMAS = {
     "nextor214": ("Nextor 2.1.4", "nextor-2.1.4", None),
-    "nextor3": ("Nextor 3.0 beta 1", "nextor-3.0.0-beta1", None),
+    "nextor3": ("Nextor 3.0 beta 2", "nextor-3.0.0-beta2", None),
     "msxdos": ("MSX-DOS básico (MSXDOS2.SYS + COMMAND2.COM, y MSXDOS.SYS + COMMAND.COM)", "nextor-2.1.4",
                ["MSXDOS2.SYS", "COMMAND2.COM", "MSXDOS.SYS", "COMMAND.COM"]),
     "ninguno": ("Ninguno (solo formatear)", None, None),

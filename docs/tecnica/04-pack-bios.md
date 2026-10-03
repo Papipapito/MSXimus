@@ -27,7 +27,7 @@ El pack del MSXimus mide **512 KB justos**. Detrás, en 0x480000 de la flash, va
 |---|---|---|
 | Kanji JIS1 y JIS2 | `a1xxjis1.rom`, `a1xxjis2.rom` | Las de un Panasonic FS-A1FX. Propietarias |
 | Nextor 2.1.4 | `Nextor-2.1.4.MSXimus.ROM` | Kernel de Nestor Soto (Konamiman) más el driver de la SD, hecho aquí sobre el del WonderTANG de Luis Antoniosi (BSD-2). Se compila en `nextor214/` |
-| Nextor 3.0 beta 1 | `Nextor-3*.ROM` | El mismo driver, portado al kernel 3. Se compila en `nextor3/` |
+| Nextor 3.0 beta 2 | `Nextor-3*.ROM` | El mismo driver, portado al kernel 3. Se compila en `nextor3/` |
 | BIOS principal, internacional | `32k_msx2p_int_fix.bin` | La BIOS japonesa de Panasonic con 49 bytes cambiados: juego de caracteres, teclado y BASIC internacionales, el glifo del yen convertido en barra, el color del borde. Propietaria |
 | BIOS principal y SubROM, japonesas | `a1wsxyen.rom`, `2pextrtc.rom` | Las del Panasonic FS-A1WSX. Propietarias |
 | SubROM internacional | `16k_msx2p_subrom.bin` | Propietaria |

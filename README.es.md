@@ -104,8 +104,8 @@ Hay **cuatro versiones del mismo pack**: el menú en castellano o en inglés, y 
 |---|---|---|
 | `pack_bios_msximus.bin` | castellano | **2.1.4** — la estable |
 | `pack_bios_msximus_en.bin` | inglés | **2.1.4** — la estable |
-| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 1** — para probar la beta |
-| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 1** — para probar la beta |
+| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 2** — para probar la beta |
+| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 2** — para probar la beta |
 
 Si prefieres montarte el pack con tus propias ROMs, está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con ellas, Nextor incluido.
 

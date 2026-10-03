@@ -9,7 +9,7 @@ El pack de BIOS lleva Nextor dentro, en el slot 3-2 de la máquina, y hay dos pa
 | Pack | Nextor | Cuándo |
 |---|---|---|
 | `pack_bios_msximus.bin` | **2.1.4** | El de uso diario. Estable, con años de software probado encima |
-| `pack_bios_msximus_nextor3.bin` | **3.0 beta 1** | Para probar la beta. Arranca, lee, escribe y pasa la batería de pruebas del propio Nextor, pero es beta y hay software que todavía no la lleva bien |
+| `pack_bios_msximus_nextor3.bin` | **3.0 beta 2** | Para probar la beta. Con la beta 1 arrancaba, leía, escribía y pasaba la batería de pruebas del propio Nextor; la beta 2 (01/10/2026) lleva el mismo driver, byte a byte, y está por probar en placa. Es beta y hay software que todavía no la lleva bien |
 
 El driver de la tarjeta es el mismo en los dos, hecho para este core: sondea qué tiene delante y usa lo más rápido que encuentre. Con el core actual, la lectura va por DMA sin que DOS se entere.
 

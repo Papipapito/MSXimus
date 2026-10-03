@@ -1,0 +1,26 @@
+MSXimus 60K - 03/10/2026 - packs con Nextor 3.0 beta 2
+=====================================================
+
+QUE FLASHEAR (Gowin Programmer, flash externa, 0x400000; el core v3.8 no cambia)
+  pack_bios_msximus_nextor3.bin      (md5 b2e678a72172)  menu en castellano
+  pack_bios_msximus_en_nextor3.bin   (md5 352a92d912ad)  menu en ingles
+  Los de Nextor 2.1.4 no cambian (840a9752c2f9 / cc0ad4a3bfab).
+  Por internet: preparada la 3.8.0b4 (las cuatro variantes; solo cambian las de Nextor 3) en el servidor del PC
+  (MSXimus_zynq/fpga/zynq/ota/servidor/tang60k); a msx.barcelona cuando Albert diga "publica".
+
+FICHEROS DE LA SD (para arrancar MSX-DOS con Nextor 3)
+  bios-msxnano-msximus/packs/sd/nextor-3.0.0-beta2/: NEXTOR.SYS y COMMAND3.COM 3.0 beta 2 + bin/ con las 25
+  herramientas oficiales (DEVINFO 1.3, EMUFILE 3.0, NEXBOOT 3.0, XDIR 1.2...). O MSX SD Maker (MSXsdmaker/, ya con
+  la beta 2): sistema "Nextor 3.0 beta 2". Con el NEXTOR.SYS de la beta 1 el kernel nuevo no arranca DOS.
+  Para volver a Nextor 2.1.4: su pack y los ficheros de nextor-2.1.4/.
+
+LO NUEVO DE LA BETA 2 (Konamiman, 01/10/2026)
+  Kernel: almacenamiento persistente (_NEXTOR.PSF oculto en la primera particion: recuerda los inversores de teclas
+  y el modo de emulacion de disco), CALL SETSCREEN, BUFINSERT, arreglos de partit y del cuelgue con 4+SHIFT al
+  arrancar. COMMAND3.COM: DIRB, YENSLASH, AUTOEXEC.BTM. Nuestro driver es el mismo de la beta 1, byte a byte (la
+  beta 2 solo anade una consulta opcional, la 8, que no implementamos: lo unico que se pierde es guardar en la
+  tarjeta los inversores de teclas de arranque).
+
+PROBAR EN PLACA (orden de siempre)
+  NSYSVER (tiene que decir 3.0 beta 2) -> DRVTEST 3-2 y DRVTEST 3-2 -d 1 -> DIR/copias/CHKDSK -> reset con y sin
+  tarjeta. 🚨 El Nextor esta en el slot 3-2 (expandido): drvtest 3-2, no drvtest 3.

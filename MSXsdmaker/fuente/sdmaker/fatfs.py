@@ -4,7 +4,7 @@ FAT16: la geometria es la del FDISK de Nextor (kernel/bank5/fdisk2.c, CalculateF
 byte: 1 sector reservado, 2 FAT, 512 entradas de raiz, cluster de 2 KB a 64 KB segun el tamano, como mucho 65524
 clusters. El sector de arranque es el suyo (EB FE 90, "NEXTOR20", medio F0).
 FAT32: la receta de Microsoft (fatgen103): 32 sectores reservados (o mas, para que los datos empiecen alineados a
-4 MB), FSInfo en el 1 y copia del arranque en el 6. Ni Nextor 2.1.4 ni 3.0 beta 1 leen FAT32: es para el menu del
+4 MB), FSInfo en el 1 y copia del arranque en el 6. Ni Nextor 2.1.4 ni 3.0 beta 2 leen FAT32: es para el menu del
 MSXimus (ROM y DSK) y la MSX Pico.
 
 El arbol de ficheros se escribe con nombres 8.3 (lo que ve MSX-DOS) y, cuando hace falta, entradas de nombre largo

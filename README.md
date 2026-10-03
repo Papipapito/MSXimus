@@ -104,8 +104,8 @@ There are **four builds of the same pack**: the menu in Spanish or in English, a
 |---|---|---|
 | `pack_bios_msximus.bin` | Spanish | **2.1.4** — the stable one |
 | `pack_bios_msximus_en.bin` | English | **2.1.4** — the stable one |
-| `pack_bios_msximus_nextor3.bin` | Spanish | **3.0 beta 1** — to try the beta |
-| `pack_bios_msximus_en_nextor3.bin` | English | **3.0 beta 1** — to try the beta |
+| `pack_bios_msximus_nextor3.bin` | Spanish | **3.0 beta 2** — to try the beta |
+| `pack_bios_msximus_en_nextor3.bin` | English | **3.0 beta 2** — to try the beta |
 
 If you would rather build the pack from your own ROMs, there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from them, Nextor included.
 
