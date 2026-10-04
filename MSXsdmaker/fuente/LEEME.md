@@ -6,7 +6,7 @@
 
 ## Uso
 
-Abrir `dist\MSXsdmaker.exe`: pide permisos de administrador (hacen falta para escribir la tarjeta entera).
+Se reparte en un ZIP (`MSX_SD_Maker_<versión>.zip`, en las [releases](https://github.com/Papipapito/SD_Maker/releases/latest)): descomprimir y ejecutar `MSXsdmaker.exe`. Pide permisos de administrador (hacen falta para escribir la tarjeta entera).
 
 1. **Tarjeta**: solo aparecen lectores SD/MMC y memorias USB extraíbles, nunca el disco de Windows. Se ve el tamaño y las particiones que tiene ahora.
 2. **Particiones**:
@@ -37,7 +37,7 @@ Casi todo lo de `sd/` es de terceros (Nextor, MSX-DOS, SofaRun, Multi Mente, las
 construir_exe.bat
 ```
 
-Hace `dist\MSXsdmaker.exe` con PyInstaller.
+Hace `dist\MSXsdmaker.exe` con PyInstaller. `python hacer_zip.py` hace el ZIP de la release (`dist\MSX_SD_Maker_<versión>.zip`: el `.exe` con LEEME, README, LICENCIAS y las capturas).
 
 Línea de órdenes (con Python), útil para probar con imágenes:
 
