@@ -7,7 +7,7 @@ Los bancos de pruebas que hay en `tools/`, qué cubre cada uno y cómo se corren
 Todo se simula en **WSL, distribución Ubuntu-24.04**, que no es la distribución por defecto de la máquina. Ahí están Icarus Verilog, Verilator y GHDL. Desde Windows:
 
 ```bash
-wsl.exe -d Ubuntu-24.04 bash -lc "cd /mnt/c/Users/alber/proyectosAI/msx/MSX_up_v3/tools/sd_tb && bash run.sh"
+wsl.exe -d Ubuntu-24.04 bash -lc "cd /mnt/c/Users/alber/proyectosAI/msx/MSXimus/tools/sd_tb && bash run.sh"
 ```
 
 Dos trampas al invocar desde el terminal de Windows: las variables de shell llegan vacías si se meten en la línea, y una ruta `/mnt/c/...` suelta se reescribe a `C:/Program Files/Git/mnt/c/...`. La forma segura es meter el guion en un fichero y llamar a ese fichero.
