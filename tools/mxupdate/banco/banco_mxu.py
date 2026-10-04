@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """banco_mxu.py - banco de MXUPDATE.COM (02/10/2026): el .COM de verdad en un Z80 emulado (kosarev/z80, en el WSL:
 python3 -m pip install --user --break-system-packages z80) con un MSX-DOS de imitacion (consola, _OPEN/_CREATE/
-_READ/_WRITE/_SEEK/_CLOSE/_TERM sobre ficheros en memoria) y el puente de la flash (fpga/src/flash_bridge.v) sobre
+_READ/_WRITE/_SEEK/_CLOSE/_TERM, _GENV PROGRAM, _DELETE y _RENAME sobre ficheros en memoria) y el puente de la flash (fpga/src/flash_bridge.v) sobre
 16 MB, con la flash de un 60K, un 138K o un MSXnano. Prueba la tabla de placas: que cada .UPD solo entra en la suya,
 que el pack y el core quedan byte a byte, que /R borra los ajustes de la placa (pack + 512 KB) y nada mas.
 
     python3 banco_mxu.py --com ../mxupdate.com --upd60 PACK_ES.UPD --updnano NANO.UPD --updnanopack NANOPACK.UPD
 """
 import argparse
+import re
 import random
 import struct
 import sys
@@ -19,6 +20,7 @@ from red_mxu import Unapi, Web
 
 FRAME = 71590
 TPA = 0xD600
+PROGRAMA = "A:\\FPGA\\MXUPDATE.COM"
 
 
 class Puente:
@@ -106,6 +108,7 @@ class Dos:
         self.pu, self.teclas, self.version = puente, list(teclas), version
         self.salida = []
         self.fin = None
+        self.programa = PROGRAMA                          # la variable PROGRAM de MSX-DOS 2
         m.set_memory_block(0x0100, com)
         m.set_memory_block(0x0005, b"\xc3" + struct.pack("<H", TPA))
         m.set_memory_block(0xF36B, b"\xc9")               # SETRAM del MSX-DOS (lo llama el arranque de MSXgl)
@@ -171,6 +174,20 @@ class Dos:
                 trozo = bytes(m.memory[m.de:m.de + m.hl])
                 d[pos:pos + len(trozo)] = trozo
                 self.h[m.b][1] += len(trozo)
+                m.a = 0
+        elif c == 0x6B:                                    # _GENV: solo PROGRAM
+            v = (self.programa if self.cadena(m.hl) == "PROGRAM" else "").encode("ascii") + b"\0"
+            m.set_memory_block(m.de, v)
+            m.a = 0
+        elif c == 0x4D:                                    # _DELETE
+            m.a = 0 if self.f.pop(self.cadena(m.de), None) is not None else 0xD7
+        elif c == 0x4E:                                    # _RENAME: el nombre nuevo, sin ruta
+            n = self.cadena(m.de)
+            if n not in self.f:
+                m.a = 0xD7
+            else:
+                corte = max(n.rfind("\\"), n.rfind(":")) + 1
+                self.f[n[:corte] + self.cadena(m.hl)] = self.f.pop(n)
                 m.a = 0
         elif c == 0x4A:                                    # _SEEK desde el principio
             pos = (m.de << 16) | m.hl
@@ -269,8 +286,18 @@ def main():
          lambda f: esperado(f, unano)),
         ("nano: /R con solo el pack (borra 0x280000)", nano, {}, "NANOPACK.UPD /R", {"NANOPACK.UPD": unpack}, "S",
          0x21, "Ajustes borrados", lambda f: esperado(f, unpack, 0x280000)),
-        ("nano: el nombre por defecto (MSXIMUS.UPD)", nano, {}, "", {"MSXIMUS.UPD": unpack}, "S", 0x21, "Listo",
+        ("nano: el nombre por defecto (MSXNANO.UPD)", nano, {}, "", {"MSXNANO.UPD": unpack}, "S", 0x21, "Listo",
          lambda f: esperado(f, unpack)),
+        ("60K: el nombre por defecto (MSXIMUS.UPD)", c60, {}, "", {"MSXIMUS.UPD": u60}, "S", 0x38, "Listo",
+         lambda f: esperado(f, u60)),
+        ("nano sin nombre y solo el MSXIMUS.UPD del 60K: pregunta, no", nano, {}, "", {"MSXIMUS.UPD": u60}, "N",
+         0x21, "No encuentro MSXNANO.UPD", None),
+        ("138K sin nombre y sin fichero: pregunta, no", c138, {}, "", {}, "N", 0x38, "No encuentro MSX138K.UPD",
+         None),
+        ("nano sin nombre: el MSXIMUS.UPD del menu si es del nano", nano, {}, "", {"MSXIMUS.UPD": unpack}, "S",
+         0x21, "Listo", lambda f: esperado(f, unpack)),
+        ("/C sin nombre: el que haya (MSXNANO.UPD)", nano, {"presente": False}, "/C", {"MSXNANO.UPD": unano}, "",
+         0x21, "Fichero correcto", None),
         ("nano con un .UPD del 60K", nano, {}, "PACK.UPD", {"PACK.UPD": u60}, "S", 0x21, "para otra placa", None),
         ("60K con un .UPD del nano", c60, {}, "NANO.UPD", {"NANO.UPD": unano}, "S", 0x38, "para otra placa", None),
         ("138K con un .UPD del 60K", c138, {}, "PACK.UPD", {"PACK.UPD": u60}, "S", 0x38, "para otra placa", None),
@@ -285,6 +312,24 @@ def main():
     ]
     # ---- la red: /N contra msx.barcelona (TLS) y /S contra el PC ----
     red = []
+    ver = re.search(rb"MXUPDATE (\d+(?:\.\d+)+) - ", com).group(1)
+    com99 = com.replace(b"MXUPDATE " + ver + b" - ", b"MXUPDATE 9.9 - ")
+    def mxu(version, binario):
+        man = ("MSXIMUS-UPD 1\nplaca=mxupdate\nversion=%s\nimagen=mxupdate MXUPDATE.COM %d\n"
+               "completa=mxupdate MXUPDATE.COM %d\n" % (version, len(binario), len(binario))).encode()
+        return {"/wp-content/ota/mxupdate/manifiesto.txt": man, "/wp-content/ota/mxupdate/MXUPDATE.COM": binario}
+    def programa_es(binario, una_vez):
+        def mira(d):
+            mal = []
+            if bytes(d.f.get(PROGRAMA.upper(), b"")) != binario:
+                mal.append("%s no es el esperado" % PROGRAMA)
+            if "A:\\FPGA\\MXUPDATE.NEW" in d.f:
+                mal.append("se ha quedado MXUPDATE.NEW")
+            n = d.texto().count("actualizando MXUPDATE")
+            if n != una_vez:
+                mal.append("'actualizando MXUPDATE' sale %d veces" % n)
+            return mal
+        return mira
     def web_de(carpeta, prefijo):
         return dict((prefijo + n, open(os.path.join(carpeta, n), "rb").read()) for n in os.listdir(carpeta))
     if a.web_nano:
@@ -302,6 +347,20 @@ def main():
              "Sin conexion", None, wn(tls="no"), "nunca80"),
             ("red nano: /N, la descarga se corta", nano, {}, "/N", {}, "\rS", 0x21, "se ha cortado", None,
              wn(corta="/wp-content/ota/msxnano/211_n214_es.upd"), "valida"),
+            ("red nano: sin nombre ni fichero, pregunta y baja (en MSXNANO.UPD)", nano, {}, "", {}, "S\rSS", 0x21,
+             "en MSXNANO.UPD", lambda f: esperado(f, un_web), wn(), "valida"),
+            ("red nano: MXUPDATE 9.9 en la web: se actualiza, se relanza y graba", nano, {}, "/N",
+             {PROGRAMA: com}, "\rSS", 0x21, "se vuelve a lanzar", lambda f: esperado(f, un_web),
+             Web(dict(web_de(a.web_nano, "/wp-content/ota/msxnano/"), **mxu("9.9", com99))), "valida",
+             programa_es(com99, 1)),
+            ("red nano: la web dice 9.9 pero el .COM no lo es: no se cambia y sigue", nano, {}, "/N",
+             {PROGRAMA: com}, "\rSS", 0x21, "No se ha podido actualizar MXUPDATE", lambda f: esperado(f, un_web),
+             Web(dict(web_de(a.web_nano, "/wp-content/ota/msxnano/"), **mxu("9.9", com))), "valida",
+             programa_es(com, 1)),
+            ("red nano: la misma version en la web: nada", nano, {}, "/N", {PROGRAMA: com}, "\rSS", 0x21,
+             "Listo", lambda f: esperado(f, un_web),
+             Web(dict(web_de(a.web_nano, "/wp-content/ota/msxnano/"), **mxu(ver.decode(), com))), "valida",
+             programa_es(com, 0)),
         ]
     if a.web_60k:
         w6 = lambda **k: Web(web_de(a.web_60k, "/wp-content/ota/tang60k/"), **k)
@@ -318,6 +377,7 @@ def main():
     for caso_ in casos:
         nombre, fl, pkw, args, fich, teclas, ver, espera, ok = caso_[:9]
         web, regla = (caso_[9], caso_[10]) if len(caso_) > 9 else (None, None)
+        extra = caso_[11] if len(caso_) > 11 else None
         antes = fl()
         f = bytearray(antes)
         pu = Puente(f, **pkw)
@@ -347,6 +407,8 @@ def main():
         elif f != antes:
             fallos.append("la flash ha cambiado y no debia")
         fallos += pu.errores
+        if extra:
+            fallos += extra(d)
         print("%s %s  [%s; %d borrados, %d paginas]" % ("OK  " if not fallos else "MAL ", nombre, d.fin, pu.nborr,
                                                         pu.nprog))
         if fallos:

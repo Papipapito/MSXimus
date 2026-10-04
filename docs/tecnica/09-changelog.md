@@ -134,6 +134,13 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## MXUPDATE 1.1 (4 de octubre): el fichero de cada placa, ofrecer bajarlo y autoactualizarse
+
+- Sin fichero, busca el de la placa (`MSXIMUS.UPD`, `MSX138K.UPD`, `MSXNANO.UPD`) o el `MSXIMUS.UPD` del menú si es de esa placa; si no hay, pregunta si bajar la última versión. Antes, siempre `MSXIMUS.UPD` (en el MSXnano, el del 60K daba «Este fichero es para otra placa»).
+- Se actualiza solo: msx.barcelona/wp-content/ota/mxupdate/ (manifiesto + `MXUPDATE.COM`); lo baja, lo comprueba, se sustituye y se relanza.
+- Los stubs UNAPI se enlazan los primeros y msx.barcelona va en RAM: el código ya puede pasar de 4000h.
+- Banco: 27 casos bien (nombres por placa, la pregunta, los tres de la autoactualización). md5 `76b89636`.
+
 ## v3.8.0b4 publicada (3 de octubre, tag `v3.8.0b4`, pre-release): Nextor 3.0 beta 2
 
 El core de la v3.8.0b3 (dado 5233) con los packs de Nextor 3 rehechos con la **beta 2 de Konamiman** (1 de octubre): `Nextor-3.0.0-beta2.MSXnano.ROM` (617c914304e5) es el mismo driver de la beta 1, byte a byte, sobre el kernel nuevo (almacenamiento persistente `_NEXTOR.PSF`, `CALL SETSCREEN`, `BUFINSERT`, arreglos de `partit`; COMMAND3.COM con `DIRB`, `YENSLASH` y `AUTOEXEC.BTM`). Packs `pack_bios_msximus_nextor3.bin` b2e678a72172 y `_en_nextor3` 352a92d912ad; los de Nextor 2.1.4 no cambian. En msx.barcelona como 3.8.0b4 (las cuatro variantes). Con la release va una **imagen de SD** con Nextor 3 beta 2 (1800 MB) y **MSX SD Maker 1.1** (opciones de Nextor 3: `YENSLASH ON`, que desde la beta 2 es una orden de COMMAND3.COM, `BUFINSERT`, `DIRK`, `AUTOEXEC.BTM`; una sola partición en las tarjetas de 2 GB). Sin probar en placa.

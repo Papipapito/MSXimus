@@ -1,4 +1,4 @@
-# MSX SD Maker 1.1 — preparar la tarjeta SD
+# MSX SD Maker 1.2 — preparar la tarjeta SD
 
 *[English version](README.md)*
 
@@ -43,14 +43,14 @@ No hay nada que instalar: es un solo fichero, `MSXsdmaker.exe`.
 
 ## 2. Abrir el programa
 
-1. Descarga **`MSXsdmaker.exe`** de esta carpeta. En GitHub: pulsa el fichero y luego el botón de descarga (*Download raw file*).
+1. Descarga **`MSXsdmaker.exe`** de la [última versión de MSX SD Maker](https://github.com/Papipapito/SD_Maker/releases/latest), en su repositorio ([SD_Maker](https://github.com/Papipapito/SD_Maker)). En los repositorios de las máquinas también hay una copia en la carpeta `MSXsdmaker`: pulsa el fichero y luego el botón de descarga (*Download raw file*).
 2. Mete la tarjeta en el lector.
 3. Haz doble clic en `MSXsdmaker.exe`.
 4. Windows pregunta si permites que haga cambios en el equipo: responde **Sí**. Hace falta porque el programa escribe la tarjeta entera, tabla de particiones incluida.
 
 **Si Windows muestra «Windows protegió su PC»** (SmartScreen): pulsa **Más información** y después **Ejecutar de todas formas**. Sale porque el programa no está firmado digitalmente.
 
-**Si el antivirus se queja**: los programas hechos en Python y empaquetados en un solo `.exe` dan a veces falsos positivos. El código fuente está en la carpeta `fuente/`.
+**Si el antivirus se queja**: los programas hechos en Python y empaquetados en un solo `.exe` dan a veces falsos positivos. El código fuente está en [SD_Maker](https://github.com/Papipapito/SD_Maker) (y una copia en la carpeta `fuente/`).
 
 ---
 
@@ -120,6 +120,7 @@ Es el sistema operativo que se copia en la primera partición, la de arranque. *
 | MSXimus Z (Zynq) | un `BOOT_…_nextor3.bin` | **Nextor 3.0 beta 2** |
 | MSXnano | `pack_bios_msxnano.bin` o `pack_bios_msxnano_en.bin` | **Nextor 2.1.4** |
 | MSXnano | `pack_bios_msxnano_nextor3.bin` o `…_en_nextor3.bin` | **Nextor 3.0 beta 2** |
+| Goa'uld | `pack_bios_goauld_es.bin` o `pack_bios_goauld_en.bin` | **Nextor 2.1.4** |
 | MSX Pico u otro MSX con Nextor 2.1 | — | **Nextor 2.1.4** |
 
 Las otras dos opciones:
@@ -155,6 +156,7 @@ Se copian en la primera partición, cada uno en su carpeta. Marca los que quiera
 | HUB | `hub` | Cliente de MSX Hub, para instalar programas desde internet | `HUBG` o `HUB` |
 | IA | `IA` | Cliente de chat con IA; tus claves van en `IA\ia.cfg` | `IA` |
 | mapper e indev | `mapper`, `indev.com` | `MAPPER` desactiva el mapeador de MSX-DOS 2 para programas antiguos | por su nombre |
+| Herramientas FPGA | `FPGA` | `MXUPDATE`: actualiza el core y el pack del MSXimus 60K/138K y del MSXnano (2.1.1 o posterior) desde MSX-DOS, con un `.UPD` de la tarjeta o por WiFi (`MXUPDATE /N`); por WiFi se pone al día él mismo antes de nada. El MSXimus Z (Zynq) se actualiza por su cuenta | `MXUPDATE` |
 
 Siempre que haya sistema se crean también estas carpetas vacías. **No las borres**:
 
@@ -192,6 +194,7 @@ A:\
 ├── MM\  FONTS\                    Multi Mente y sus fuentes
 ├── UTIL\  WIFI\  musica\          utilidades, red y música
 ├── hub\  IA\  mapper\  indev.com
+├── FPGA\                          MXUPDATE: actualizar el core del MSXimus y del MSXnano
 ├── FHUNT\                         descargas del File-Hunter (no borrar)
 └── TMP\                           temporal (no borrar)
 ```
@@ -203,7 +206,7 @@ Las **particiones 2, 3…** quedan vacías para tus juegos y programas.
 Se genera según lo que hayas elegido. Con todo marcado y tres particiones queda así:
 
 ```
-PATH A:\;%1\BIN;%1\SOFARUN;%1\MM;%1\UTIL;%1\WIFI;%1\musica;%1\hub;%1\IA;%1\mapper
+PATH A:\;%1\BIN;%1\SOFARUN;%1\MM;%1\UTIL;%1\WIFI;%1\musica;%1\hub;%1\IA;%1\mapper;%1\FPGA
 SET TIMEZONE=+02:00
 mode 80
 ALIAS .BAS = "BASIC "
@@ -361,7 +364,7 @@ No. Solo escribe en la tarjeta que elijas, y el disco de Windows nunca aparece e
 - **Nombres**: guarda el nombre corto de 8+3 que lee MSX-DOS y, si hace falta, también el nombre largo que ven Windows y el menú.
 - **La tabla de particiones se escribe al final**, cuando todo lo demás ya está en su sitio. Luego se relee y se compara cada fichero con su CRC32.
 
-El código fuente está en la carpeta [`fuente/`](fuente/) (Python 3 con tkinter; `construir_exe.bat` hace el `.exe` con PyInstaller). Para usarlo sin el `.exe` hace falta el contenido de la tarjeta en una carpeta `sd/` junto a `MSXsdmaker.py`, con `base/`, `nextor-2.1.4/`, `nextor-3.0.0-beta2/` y `extras/`. El `.exe` ya lo lleva dentro. Desde la línea de órdenes también se pueden hacer imágenes:
+El código fuente y el contenido de la tarjeta están en [SD_Maker](https://github.com/Papipapito/SD_Maker); en los repositorios de las máquinas hay una copia del programa en [`fuente/`](fuente/) (Python 3 con tkinter; `construir_exe.bat` hace el `.exe` con PyInstaller). Para usarlo sin el `.exe` hace falta el contenido de la tarjeta en una carpeta `sd/` junto a `MSXsdmaker.py`, con `base/`, `nextor-2.1.4/`, `nextor-3.0.0-beta2/` y `extras/`. El `.exe` ya lo lleva dentro. Desde la línea de órdenes también se pueden hacer imágenes:
 
 ```
 python MSXsdmaker.py imagen prueba.img --tamano 8G --esquema fat16-2g --n 3 --sistema nextor214 --programas todos

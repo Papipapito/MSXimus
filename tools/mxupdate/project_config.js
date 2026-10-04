@@ -11,11 +11,11 @@ DoDeploy  = false;     // no copiamos a disco/floppy — el .com lo recoge build
 DoRun     = false;
 
 ProjName = "mxupdate";
-ProjModules = [ ProjName ];
-LibModules  = [ "system", "dos" ];      // solo lo que se usa: el codigo tiene que acabar antes de 4000h
+ProjModules = [ "unapi_tcp_mxu", ProjName ];   // los stubs UNAPI PRIMERO: su "TCP/IP" (EXTBIO) por debajo de 4000h
+LibModules  = [ "system", "dos" ];      // solo lo que se usa
 
 // Implementacion real de las llamadas TCP/IP UNAPI (la trae MSXgl de serie).
-AddSources  = [ "unapi_tcp_mxu.asm" ];      // el unapi_tcp.asm de MSXgl sin lo que no se usa (UDP, IP en crudo, eco, config)
+AddSources  = [ ];      // unapi_tcp_mxu.asm (el de MSXgl sin UDP, IP en crudo, eco, config) va en ProjModules
 
 Machine = "2";          // MSX2
 Target  = "DOS2";       // .COM bajo MSX-DOS 2
@@ -31,7 +31,7 @@ AppID        = "MU";
 
 Verbose           = true;
 CompileComplexity = "Default";
-Optim             = "Size";    // el codigo tiene que acabar antes de 4000h (UNAPI); el bucle del CRC ya es ensamblador
+Optim             = "Size";    // lo que lee el UNAPI (stubs, "TCP/IP", g_web) va antes de 4000h o en RAM: ver ProjModules
 
 // IMPORTANTE (UNAPI + SDCC 4.2.0):
 // SDCC 4.2.0 usa por defecto --sdcccall 1 (argumentos por registro: HL/DE).

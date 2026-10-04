@@ -24,10 +24,12 @@ Los **ajustes** que guardas con *Save & Restart* (en 0x480000) **nunca** van en 
 
 ## 2. `MXUPDATE.COM`
 
-Se copia a la SD y se lanza desde MSX-DOS. Reconoce la placa sola (60K, 138K o MSXnano 2.1.1) por el chip del core que hay grabado, y habla en el idioma del menú.
+Se lanza desde MSX-DOS. Va en la release y, en una tarjeta hecha con [MSX SD Maker](https://github.com/Papipapito/SD_Maker), en la carpeta `FPGA`, que está en el `PATH`: se lanza desde cualquier sitio. Reconoce la placa sola (60K, 138K o MSXnano 2.1.1) por el chip del core que hay grabado, y habla en el idioma del menú.
 
 ```
-MXUPDATE                  graba MSXIMUS.UPD del directorio actual
+MXUPDATE                  graba el fichero de esta placa del directorio actual: MSXIMUS.UPD en el
+                          60K, MSX138K.UPD en el 138K y MSXNANO.UPD en el MSXnano (o el MSXIMUS.UPD
+                          del menu, si es de esta placa); si no esta, ofrece bajar la ultima version
 MXUPDATE fichero.UPD      graba ese fichero
 MXUPDATE /C fichero.UPD   solo lo comprueba (cabecera y CRC); no toca la flash
 MXUPDATE /N               baja la ultima version de internet y la graba
@@ -36,13 +38,15 @@ MXUPDATE /EN   /ES        en ingles / en castellano
 MXUPDATE /N /S:192.168.1.10:8000    desde un servidor propio en vez de msx.barcelona
 ```
 
+**Se actualiza solo.** Cada vez que va a internet (`/N`, o cuando no encuentra el fichero y le dices que lo baje), MXUPDATE mira primero si en msx.barcelona hay una versión suya más nueva. Si la hay, la baja junto a sí mismo, comprueba que es la que dice la web, se sustituye y se vuelve a lanzar con la misma orden: `MXUPDATE 1.2 en la web: actualizando MXUPDATE...` y `MXUPDATE actualizado: se vuelve a lanzar.` Tú no tienes que hacer nada. La versión que llevas sale arriba al lanzarlo (`MXUPDATE 1.1 - actualizar el core`).
+
 ### 2.1. Por internet: `MXUPDATE /N`
 
 1. Configura antes la WiFi con la tecla **W** del menú ([capítulo 07](07-wifi-file-hunter.md)).
-2. Arranca en MSX-DOS, ve a la raíz de la SD y escribe `MXUPDATE /N`.
+2. Arranca en MSX-DOS y escribe `MXUPDATE /N` (o solo `MXUPDATE` si no tienes el fichero: te ofrece bajarlo). Lo que baja se queda en la carpeta en la que estés.
 3. Dice qué core tienes (`Core instalado: 3.8.0 (60K)`) y pregunta al servidor: `Version en el servidor: 3.8.0b3`, con una nota de qué trae.
-4. Elige la variante, del 1 al 4: Nextor 2.1.4 o 3, menú en castellano o en inglés. Si cambias de Nextor, avisa: la SD tiene que llevar el `NEXTOR.SYS` de ese Nextor ([MSX SD Maker](../../MSXsdmaker/README.md) la prepara) o MSX-DOS no arrancará.
-5. La baja a la SD como `MSXIMUS.UPD`, la comprueba entera y pregunta `Fichero correcto. Grabar en la flash? (S/N)`.
+4. Elige la variante, del 1 al 4: Nextor 2.1.4 o 3, menú en castellano o en inglés. Si cambias de Nextor, avisa: la SD tiene que llevar el `NEXTOR.SYS` de ese Nextor ([MSX SD Maker](https://github.com/Papipapito/SD_Maker) la prepara) o MSX-DOS no arrancará.
+5. La baja a la SD con el nombre de la placa (`MSXIMUS.UPD` en el 60K), la comprueba entera y pregunta `Fichero correcto. Grabar en la flash? (S/N)`.
 6. **S**: `Grabando. NO APAGUES EL MSX.` Al acabar relee la flash y comprueba los CRC otra vez.
 7. `Listo. Apaga y vuelve a encender el MSXimus.` El core nuevo entra al encender.
 
@@ -95,6 +99,7 @@ El Z80 hace todo el trabajo, a 3,58 MHz:
 | `Sin conexion con el servidor de actualizaciones.` | No hay red, o el ESP no llega | Mirar la WiFi con la W del menú |
 | `Sin actualizaciones para esta placa (HTTP 404).` | El servidor no tiene nada para tu placa | — |
 | `No hay red (UNAPI)` | No hay ESP32 o no está configurado | La W del menú |
+| `No se ha podido actualizar MXUPDATE: sigue este.` | No ha podido bajar o comprobar el MXUPDATE nuevo | Nada: sigue con el que tienes. El nuevo está también en la release y en MSX SD Maker |
 | `La flash no ha quedado bien.` | Al releer, algo no coincide | **No apagues**: el core de antes sigue en marcha hasta apagar. Repite `MXUPDATE`, o graba con el PC |
 
 Si se va la luz a mitad de grabar el core, la placa puede no arrancar. **No hay forma de estropearla**: por el USB-C, con el Gowin Programmer, siempre se puede grabar de nuevo ([capítulo 02](02-instalacion.md)).

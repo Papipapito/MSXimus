@@ -1,13 +1,22 @@
 //=============================================================================
 // mxupdate.c - MXUPDATE.COM: actualiza el core del MSXimus 60K/138K (V3.8) y del MSXnano (2.1.1) desde el propio MSX
 //
-//   MXUPDATE [fichero.UPD] [/C] [/EN] [/ES]   (por defecto MSXIMUS.UPD en el directorio actual)
+//   MXUPDATE [fichero.UPD] [/C] [/EN] [/ES]
+//   Sin fichero: el de la placa en el directorio actual (MSXIMUS.UPD en el 60K, MSX138K.UPD en el 138K, MSXNANO.UPD
+//   en el MSXnano) o, si no esta, el MSXIMUS.UPD (el nombre que busca "Instalar actualizacion" del menu) si es de
+//   esta placa; si tampoco, pregunta si bajar la ultima version por la red (como /N). Con /C y sin fichero,
+//   el primero de esos tres que encuentre.
 //   MXUPDATE /N [/S:servidor[:puerto]] [fichero.UPD]
-//   /N = descargar la ultima version por la red (UNAPI: el ESP32 del MSXimus) a fichero.UPD y grabarla. Sin /S va
+//   /N = descargar la ultima version por la red (UNAPI: el ESP32 del MSXimus) a fichero.UPD (por defecto el de la
+//        placa) y grabarla. Sin /S va
 //        a https://msx.barcelona/wp-content/ota/tang60k/ (tang138k, msxnano); /S:192.168.2.200:8000 = el servidor
 //        de desarrollo (sirve /tang60k/...). En IONOS el SFTP solo llega a /wordpress/wp-content: de ahi la ruta.
 //        del PC (fpga/zynq/ota/ota_servidor.py del MSXimus Z, http y la carpeta tang60k/).
 //   /C = solo comprobar el fichero (cabecera y CRC), sin tocar la flash; vale en cualquier MSX con DOS 2.
+//   Antes de ir a la red (/N, o sin fichero y diciendo que si), MXUPDATE mira si en la web hay una version suya
+//   mayor (mxupdate/manifiesto.txt); si la hay, la baja a MXUPDATE.NEW junto a si mismo (variable PROGRAM),
+//   comprueba tamano y version (su cartel "MXUPDATE x.y - "), se sustituye y se vuelve a lanzar con la misma
+//   orden. Cada version nueva: subir MXU_VERSION, banco/run.sh, publicar_mxu.py y ota_subir.py mxupdate.
 //   /R = actualizacion COMPLETA, todo desde cero: con /N baja la variante "completa" (core + pack + ondas del OPL4) y al
 //        acabar borra el sector de los ajustes (0x480000 en el 60K, 0x880000 en el 138K). Sin la firma "AB" el core
 //        arranca con los de fabrica (los mismos que el rescate con S2).
@@ -25,6 +34,11 @@
 //=============================================================================
 #include "msxgl.h"
 #include "network.h"
+
+#define MXU_VERSION "1.1"         // la de MXUPDATE; la de la web: mxupdate/manifiesto.txt
+// la version en UN solo sitio, el cartel: de aqui se compara con la de la web y esto es lo que se busca en el .COM
+// bajado (si no coincidieran, una version mal publicada se bajaria una y otra vez)
+static const c8 g_cartel[] = "MXUPDATE " MXU_VERSION " - ";
 
 __sfr __at(0x29) P_PARCHE;
 __sfr __at(0x2F) P_VERSION;
@@ -44,7 +58,7 @@ __sfr __at(0x4E) P_INFO;
 
 #define JIFFY (*(volatile u16*)0xFC9E)
 
-static bool g_en, g_solo_comprobar, g_red, g_ajustes, g_aviso;
+static bool g_en, g_solo_comprobar, g_red, g_ajustes, g_aviso, g_sin_nombre;
 static c8  g_srv[48];          // /S: servidor (vacio = msx.barcelona)
 static u16 g_puerto;
 #define T(es, en) (g_en ? (en) : (es))
@@ -248,12 +262,12 @@ __endasm;
 typedef struct { u32 dir, tam, crc, off; } Seg;
 
 // las placas: IDCODE del bitstream (bits 23-8), su nombre en el .UPD y en el manifiesto, su carpeta en la web y el byte
-// alto de la direccion del pack (el bitstream va en 0 y los ajustes, 512 KB detras del pack)
-typedef struct { u16 id; const c8* nombre; const c8* carpeta; u8 pack; } Placa;
+// alto de la direccion del pack (el bitstream va en 0 y los ajustes, 512 KB detras del pack) y el .UPD por defecto
+typedef struct { u16 id; const c8* nombre; const c8* carpeta; u8 pack; const c8* fich; } Placa;
 static const Placa g_placas[3] = {
-	{ 0x0148, "console60k",  "tang60k/",  0x40 },
-	{ 0x0108, "console138k", "tang138k/", 0x80 },
-	{ 0x0008, "msxnano",     "msxnano/",  0x20 },
+	{ 0x0148, "console60k",  "tang60k/",  0x40, "MSXIMUS.UPD" },
+	{ 0x0108, "console138k", "tang138k/", 0x80, "MSX138K.UPD" },
+	{ 0x0008, "msxnano",     "msxnano/",  0x20, "MSXNANO.UPD" },
 };
 static u8  g_cab[132];
 static Seg g_seg[4];
@@ -313,13 +327,14 @@ static void Opciones(void)
 			g_ruta[k] = 0;
 		}
 	}
-	if (!g_ruta[0]) { const c8* d = "MSXIMUS.UPD"; k = 0; while ((g_ruta[k] = d[k])) k++; }   // k venia de /S:
+	g_sin_nombre = !g_ruta[0];      // el nombre por defecto depende de la placa: lo pone main()
 }
 
 
 //-----------------------------------------------------------------------------
 // red: el manifiesto y el .UPD por HTTP (UNAPI TCP/IP; con TLS si el servidor es msx.barcelona)
-static const c8 g_web[] = "msx.barcelona";
+// en RAM (pagina 2): el UNAPI la lee (DNS y SNI) con la pagina 1 conmutada, y el codigo ya pasa de 4000h
+static c8 g_web[] = "msx.barcelona";
 static c8  g_http[4];          // el codigo de la ultima respuesta ("404"); vacio = no contesto nadie
 static c8  g_hdr[512];
 static u16 g_hdr_n;
@@ -528,12 +543,162 @@ cr_ok:
 __endasm;
 }
 
+//-----------------------------------------------------------------------------
+// autoactualizacion: si en la web (carpeta mxupdate/) hay un MXUPDATE mayor, se baja junto a este, se comprueba, lo
+// sustituye y se vuelve a lanzar con la misma orden (que sigue en 0080h)
+static const Placa g_mxu = { 0, "mxupdate", "mxupdate/", 0, "MXUPDATE.COM" };
+static c8 g_prog[64];
+static c8 g_nuevo[64];
+
+// _GENV PROGRAM: la ruta completa de este .COM; A = error
+static u8 Programa(c8* buf) __NAKED
+{
+	buf;
+__asm
+	push ix
+	push iy
+	ex   de, hl
+	ld   hl, #prg_nom
+	ld   b, #64
+	ld   c, #0x6B
+	call #0x0005
+	pop  iy
+	pop  ix
+	ret
+prg_nom:
+	.ascii "PROGRAM"
+	.db  0
+__endasm;
+}
+
+// carga el .COM abierto en fh sobre 0100h y salta a el, como MSX-DOS: el cargador va justo debajo del tope de la TPA
+// y la pila debajo de el; lee como mucho hasta el cargador
+static void Relanza(u8 fh) __NAKED
+{
+	fh;
+__asm
+	di
+	ld   c, a
+	ld   hl, (0x0006)
+	ld   l, #0
+	dec  h
+	push hl
+	ex   de, hl
+	ld   hl, #rl_cod
+	push bc
+	ld   bc, #rl_fin - rl_cod
+	ldir
+	pop  bc
+	pop  hl
+	push hl
+	ld   de, #rl_h1 - rl_cod
+	add  hl, de
+	ld   (hl), c
+	pop  hl
+	push hl
+	ld   de, #rl_h2 - rl_cod
+	add  hl, de
+	ld   (hl), c
+	pop  hl
+	ld   sp, hl
+	ei
+	jp   (hl)
+rl_cod:
+	.db  #0x06
+rl_h1:
+	.db  #0
+	ld   de, #0x0100
+	ld   hl, #0
+	add  hl, sp
+	dec  h
+	ld   c, #0x48
+	call #0x0005
+	.db  #0x06
+rl_h2:
+	.db  #0
+	ld   c, #0x45
+	call #0x0005
+	ld   hl, #0
+	push hl
+	jp   0x0100
+rl_fin:
+__endasm;
+}
+
+// a > b, por numeros separados por puntos ("1.10" > "1.9")
+static bool Mayor(const c8* a, const c8* b)
+{
+	for (;;) {
+		u16 x = 0, y = 0;
+		while (*a >= '0' && *a <= '9') x = x * 10 + (*a++ - '0');
+		while (*b >= '0' && *b <= '9') y = y * 10 + (*b++ - '0');
+		if (x != y) return x > y;
+		if (*a != '.' && *b != '.') return FALSE;
+		if (*a == '.') a++;
+		if (*b == '.') b++;
+	}
+}
+
+// el .COM bajado mide lo del manifiesto y lleva dentro su cartel "MXUPDATE <version de la web> - "
+static bool Comprueba(const c8* ruta, u32 tam)
+{
+	c8 pat[28];
+	u8 lp, k = 0, fh;
+	u16 n, j;
+	u32 total = 0;
+	bool ok = FALSE;
+	lp = (u8)Pega(pat, 0, "MXUPDATE ");
+	lp = (u8)Pega(pat, lp, g_ver_srv);
+	lp = (u8)Pega(pat, lp, " - ");
+	fh = AbreLectura(ruta);
+	if (fh == 0xFF) return FALSE;
+	while ((n = DOS_ReadHandle(fh, g_buf, sizeof g_buf)) != 0) {
+		total += n;
+		for (j = 0; j < n && !ok; j++) {
+			if (g_buf[j] == (u8)pat[k]) { if (++k == lp) ok = TRUE; }
+			else k = g_buf[j] == (u8)pat[0];
+		}
+	}
+	DOS_CloseHandle(fh);
+	return ok && total == tam;
+}
+
+static void AutoActualiza(void)
+{
+	u8 fh, k;
+	c8* nom;
+	c8* p;
+	bool ok;
+	if (!Http(&g_mxu, "manifiesto.txt", 0xFF) || !LeeManifiesto(g_mxu.nombre) || !Mayor(g_ver_srv, g_cartel + 9)) return;
+	Pr(T("MXUPDATE ", "MXUPDATE ")); Pr(g_ver_srv); Pr(T(" en la web: actualizando MXUPDATE...\r\n",
+	   " on the web: updating MXUPDATE...\r\n"));
+	if (Programa(g_prog) || !g_prog[0]) goto no;
+	nom = g_prog;
+	for (p = g_prog; *p; p++) if (*p == '\\' || *p == ':') nom = p + 1;
+	for (k = 0; g_prog + k != nom; k++) g_nuevo[k] = g_prog[k];
+	Pega(g_nuevo, k, "MXUPDATE.NEW");
+	g_nuevo[k + 12] = 0;
+	fh = CreaEscritura(g_nuevo);
+	if (fh == 0xFF) goto no;
+	ok = Http(&g_mxu, g_img[0].fich, fh);
+	DOS_CloseHandle(fh);
+	if (!ok || !Comprueba(g_nuevo, g_img[0].tam)) { DOS_Delete(g_nuevo); goto no; }
+	if (DOS_Delete(g_prog) || DOS_Rename(g_nuevo, nom)) goto no;
+	fh = AbreLectura(g_prog);
+	if (fh == 0xFF || *(u16*)0x0006 < 0xA000) goto no;
+	Pr(T("\r\nMXUPDATE actualizado: se vuelve a lanzar.\r\n\r\n", "\r\nMXUPDATE updated: starting it again.\r\n\r\n"));
+	Relanza(fh);
+no:
+	Pr(T("\r\nNo se ha podido actualizar MXUPDATE: sigue este.\r\n", "\r\nCould not update MXUPDATE: carrying on with this one.\r\n"));
+}
+
 // descarga la version del servidor a g_ruta; FALSE = no se puede o el usuario no quiere
 static bool Red(const Placa* pl)
 {
 	u8 i, elegida = 0, fh;
 	c8 c;
 	if (Net_Init() != NET_OK) { Pr(T("No hay red (UNAPI): configura el WiFi con la W del menu.", "No network (UNAPI): set up the WiFi with W in the menu.")); return FALSE; }
+	AutoActualiza();                            // si hay un MXUPDATE mayor, se sustituye y se relanza (no vuelve)
 	Pr(T("Preguntando al servidor...\r\n", "Asking the server...\r\n"));
 	g_http[0] = 0;
 	if (!Http(pl, "manifiesto.txt", 0xFF) || !LeeManifiesto(pl->nombre)) {
@@ -574,6 +739,20 @@ static bool Red(const Placa* pl)
 	return TRUE;
 }
 
+static void PonRuta(const c8* d) { u8 k = 0; while ((g_ruta[k] = d[k])) k++; }
+static bool Existe(const c8* ruta) { u8 fh = AbreLectura(ruta); if (fh == 0xFF) return FALSE; DOS_CloseHandle(fh); return TRUE; }
+// el .UPD es de la placa pl (su nombre en la cabecera, offset 8)
+static bool DeLaPlaca(const c8* ruta, const Placa* pl)
+{
+	u8 fh = AbreLectura(ruta);
+	bool ok;
+	if (fh == 0xFF) return FALSE;
+	g_cab[8 + 15] = 0;
+	ok = DOS_ReadHandle(fh, g_cab, 24) == 24 && Igual((const c8*)g_cab + 8, pl->nombre);
+	DOS_CloseHandle(fh);
+	return ok;
+}
+
 static void NoResponde(void) { Pr(T("La flash no responde.", "The flash does not answer.")); Fin(1); }
 
 //-----------------------------------------------------------------------------
@@ -590,9 +769,16 @@ void main(void)
 	g_en = puente && (P_INFO & 0x05) == 0x05;      // el idioma del menu, si el core lo sabe
 	Opciones();
 
-	Pr(T("MXUPDATE - actualizar el core\r\n", "MXUPDATE - core update\r\n"));
+	Pr(g_cartel); Pr(T("actualizar el core\r\n", "core update\r\n"));
 	CrcIniciaTablas();
-	if (g_solo_comprobar) { id_flash = 0; goto fichero; }
+	if (g_solo_comprobar) {
+		id_flash = 0;
+		if (g_sin_nombre) {                         // el primero de los tres que haya
+			PonRuta(g_placas[0].fich);
+			for (i = 3; i-- > 0; ) if (Existe(g_placas[i].fich)) PonRuta(g_placas[i].fich);
+		}
+		goto fichero;
+	}
 	if (!puente) {
 		Pr(T("Hace falta MSXimus 3.8 o MSXnano 2.1.1 (o\r\nposterior): grabalo una vez con el PC.",
 		     "Needs MSXimus 3.8 or MSXnano 2.1.1 (or later):\r\nflash it once from the PC."));
@@ -615,6 +801,20 @@ void main(void)
 	DOS_CharOutput('.'); PrN(parche < 16 ? parche : 0);        // siempre M.m.p, como las etiquetas de los .UPD
 	if (!pl) { Pr(T("\r\nNo reconozco la placa.", "\r\nUnknown board.")); Fin(1); }
 	Pr(" ("); Pr(pl->nombre); Pr(")\r\n");
+	if (g_sin_nombre) {
+		PonRuta(pl->fich);
+		if (!g_red && !Existe(g_ruta) && pl != &g_placas[0] && DeLaPlaca(g_placas[0].fich, pl))
+			PonRuta(g_placas[0].fich);              // el MSXIMUS.UPD del menu, si es de esta placa
+		if (!g_red && !Existe(g_ruta)) {           // sin fichero de esta placa: ofrecer la ultima de la web
+			c8 c;
+			Pr(T("No encuentro ", "Cannot find ")); Pr(g_ruta);
+			Pr(T(". Bajar la ultima version\r\nde internet? (S/N) ", ". Download the latest version\r\nfrom the internet? (Y/N) "));
+			c = DOS_CharInput() & 0xDF;
+			Pr("\r\n");
+			if (c != 'S' && c != 'Y') { Pr(T("No se ha tocado nada.", "Nothing was changed.")); Fin(0); }
+			g_red = TRUE;
+		}
+	}
 	if (g_red && !Red(pl)) Fin(1);
 
 	// ---- el fichero ----

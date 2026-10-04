@@ -91,7 +91,13 @@ Las notas son solo para el usuario (las enseña `MXUPDATE /N`), de 60 caracteres
 
 ## 4. `MXUPDATE.COM`
 
-MSXgl + la librería UNAPI de red, compilado en el WSL (`tools/mxupdate/build.sh`, entorno de `sdk-tools/msx-unapi-env`). El código tiene que quedar por debajo de 4000h, porque la página 1 es la del UNAPI; por eso `unapi_tcp_mxu.asm` es el `unapi_tcp.asm` de MSXgl sin UDP, IP en crudo, eco ni configuración (unos 500 bytes menos).
+MSXgl + la librería UNAPI de red, compilado en el WSL (`tools/mxupdate/build.sh`, entorno de `sdk-tools/msx-unapi-env`). Lo que el UNAPI lee con la página 1 conmutada a su ROM o a su segmento (la cadena «TCP/IP» que busca EXTBIO y el nombre msx.barcelona para el DNS y el SNI) tiene que estar por debajo de 4000h o en RAM: `unapi_tcp_mxu.asm` (el `unapi_tcp.asm` de MSXgl sin UDP, IP en crudo, eco ni configuración) va el primero en `ProjModules`, justo detrás del arranque, y `g_web` es una variable en RAM. Los datos van desde 8000h (`ForceRamAddr`). El resto del código ya pasa de 4000h desde la 1.1.
+
+**Versión y autoactualización (1.1).** La versión está en un solo sitio, el cartel `"MXUPDATE " MXU_VERSION " - "`: se enseña al arrancar, se compara con la de la web y es lo que se busca en el `.COM` bajado. Antes de ir a por las imágenes de la placa (`/N`, o sin fichero y con un sí), MXUPDATE lee `mxupdate/manifiesto.txt` (el mismo formato, `placa=mxupdate`); si la versión es mayor, baja `MXUPDATE.COM` a `MXUPDATE.NEW` junto a sí mismo (variable `PROGRAM` de MSX-DOS 2), comprueba el tamaño y que lleve el cartel de esa versión, borra el viejo, renombra el nuevo y se relanza: un cargador de 30 bytes debajo del tope de la TPA lo lee sobre 0100h y salta, con la orden intacta en 0080h. Si algo falla, sigue con el que tiene.
+
+Sin fichero, el de la placa (`MSXIMUS.UPD`, `MSX138K.UPD`, `MSXNANO.UPD`) o el `MSXIMUS.UPD` de «Instalar actualización» si es de esa placa; si no hay, ofrece bajarlo.
+
+**Cada versión nueva de MXUPDATE**: subir `MXU_VERSION`, `build.sh`, `banco/run.sh` (todo bien), `python tools/mxupdate/publicar_mxu.py` y `python ota_subir.py mxupdate` (MSXimus_zynq/fpga/zynq/ota), y el `.COM` nuevo a las releases del 60K, del 138K y del MSXnano y a SD_Maker (`sd/extras/FPGA`).
 
 Orden de trabajo:
 

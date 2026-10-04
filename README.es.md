@@ -121,7 +121,7 @@ Con el menú encendido tienes el navegador de la tarjeta, el lanzador de ROM y D
 
 > Montar un `.dsk` reescribe sectores de un fichero **que ya existe**: no crea entradas de directorio ni asigna clústeres.
 
-Después, mete una microSD con tus ROMs y discos y listo. La forma más fácil de prepararla es **[MSX SD Maker](MSXsdmaker/LEEME.md)**, en este repositorio: un programa para Windows que parte la tarjeta como lo hace Nextor, copia Nextor y una colección de programas (SofaRun, Multi Mente…) y escribe el `AUTOEXEC.BAT`. Para Nextor 3 la release trae además una imagen de tarjeta ya hecha, `MSXimus_SD_Nextor3-beta2_1800MB.zip` (1800 MB, cabe en cualquier tarjeta de 2 GB o mayor): se graba con balenaEtcher o Rufus.
+Después, mete una microSD con tus ROMs y discos y listo. La mejor forma de prepararla es **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)**, que tiene su propio repositorio (en [`MSXsdmaker/`](MSXsdmaker/LEEME.md) hay una copia con sus instrucciones): un programa para Windows que parte la tarjeta como lo hace Nextor, copia Nextor y una colección de programas (SofaRun, Multi Mente…) y escribe el `AUTOEXEC.BAT`. Para Nextor 3 la release trae además una imagen de tarjeta ya hecha, `MSXimus_SD_Nextor3-beta2_1800MB.zip` (1800 MB, cabe en cualquier tarjeta de 2 GB o mayor): se graba con balenaEtcher o Rufus.
 
 > **Sobre las microSD:** usa una tarjeta **de marca y Clase 10** (Samsung, SanDisk, Kingston...), formateada en **FAT16**. Las tarjetas baratas sin marca leen bien pero rechazan o pierden escrituras en ráfagas sostenidas — lo medimos en placa: una sin marca fallaba escrituras incluso con pausas, y una Samsung EVO+ iba perfecta con el mismo código y la misma geometría. Si las descargas o los guardados fallan, sospecha de la tarjeta primero.
 
@@ -135,10 +135,12 @@ Desde la v3.8 el MSXimus se actualiza **solo**: el core y el pack de BIOS se gra
 | `MXUPDATE fichero.UPD` | Graba un fichero `.UPD` de la SD | MSX-DOS 2 o Nextor |
 | Ajustes → **Instalar actualización** | Graba el `MSXIMUS.UPD` de la raíz de la SD | Nada más: sin DOS |
 
-`MXUPDATE.COM` va en la release. Reconoce la placa sola y habla el idioma del menú:
+`MXUPDATE.COM` va en la release y, en una tarjeta hecha con [MSX SD Maker](https://github.com/Papipapito/SD_Maker), en la carpeta `FPGA` (en el `PATH`). Reconoce la placa sola, habla el idioma del menú y **se actualiza solo**: antes de buscar un core nuevo en internet mira si hay un MXUPDATE más nuevo; si lo hay, lo baja, lo comprueba, se sustituye y sigue con el nuevo.
 
 ```
-MXUPDATE                  graba MSXIMUS.UPD del directorio actual
+MXUPDATE                  graba el fichero de esta placa del directorio actual (MSXIMUS.UPD en el
+                          60K, MSX138K.UPD en el 138K, MSXNANO.UPD en el MSXnano); si no esta,
+                          ofrece bajar la ultima version
 MXUPDATE fichero.UPD      graba ese fichero
 MXUPDATE /C fichero.UPD   solo lo comprueba (cabecera y CRC); no toca la flash
 MXUPDATE /N               baja la ultima version y la graba
@@ -286,7 +288,7 @@ Tres arreglos del V9968 de HRA!, los mismos que lleva el MSXimus Z (Z1.2.1). Sol
 - **LMMM, HMMM y YMMM con DIY** (copiando hacia arriba) acaban cuando el **origen** llega a la línea 0, no solo el destino.
 - **El paso de píxel de los comandos** se toma al escribir R#46. Es la versión de HRA! de nuestro arreglo de SCREEN 2 de la v3.7.1, y cubre también FG4.
 - Ajustes dice `3.7.6` (puerto 29h).
-- **[MSX SD Maker](MSXsdmaker/LEEME.md)**, un programa para Windows que prepara la tarjeta SD: particiones FAT16 de 2 o 4 GB como las hace el FDISK de Nextor, o una FAT32; Nextor 2.1.4, Nextor 3 o MSX-DOS; SofaRun, Multi Mente, utilidades y red; y el `AUTOEXEC.BAT` que monta las demás particiones.
+- **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)** (con su propio repositorio; una copia en [`MSXsdmaker/`](MSXsdmaker/LEEME.md)), un programa para Windows que prepara la tarjeta SD: particiones FAT16 de 2 o 4 GB como las hace el FDISK de Nextor, o una FAT32; Nextor 2.1.4, Nextor 3 o MSX-DOS; SofaRun, Multi Mente, utilidades y red; y el `AUTOEXEC.BAT` que monta las demás particiones.
 
 ## Lo nuevo de la v3.7.5
 
