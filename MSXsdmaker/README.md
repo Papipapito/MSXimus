@@ -158,7 +158,7 @@ They are copied to the first partition, each in its own folder. Tick the ones yo
 | HUB | `hub` | MSX Hub client, to install programs from the internet | `HUBG` or `HUB` |
 | IA | `IA` | AI chat client; your keys go in `IA\ia.cfg` | `IA` |
 | mapper e indev | `mapper`, `indev.com` | `MAPPER` disables the MSX-DOS 2 mapper routines for old software | by name |
-| Herramientas FPGA | `FPGA` | `MXUPDATE`: updates the core and the pack of the MSXimus 60K/138K and the MSXnano (2.1.1 or later) from MSX-DOS, from a `.UPD` on the card or over WiFi (`MXUPDATE /N`); over WiFi it first brings itself up to date. The MSXimus Z (Zynq) updates itself | `MXUPDATE` |
+| Herramientas FPGA | `FPGA` | `MXUPDATE`: updates the core and the pack of the MSXimus 60K/138K and the MSXnano (2.1.1 or later) from MSX-DOS, from a `.UPD` on the card or over WiFi (`MXUPDATE /N`); over WiFi it first brings itself up to date. `MXUPDATE /?` shows the commands. The MSXimus Z (Zynq) updates itself | `MXUPDATE` |
 
 Whenever a system is installed these empty folders are created too. **Do not delete them**:
 

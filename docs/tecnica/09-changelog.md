@@ -134,6 +134,10 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## MXUPDATE 1.2 (4 de octubre): la ayuda con /H y /?
+
+- `MXUPDATE /H` o `/?`: las órdenes en 40 columnas, en el idioma del menú; no toca la flash ni necesita el puente. md5 `de975760`, publicada en msx.barcelona (las 1.1 se la bajan solas). Banco: 29 casos bien.
+
 ## MXUPDATE 1.1 (4 de octubre): el fichero de cada placa, ofrecer bajarlo y autoactualizarse
 
 - Sin fichero, busca el de la placa (`MSXIMUS.UPD`, `MSX138K.UPD`, `MSXNANO.UPD`) o el `MSXIMUS.UPD` del menú si es de esa placa; si no hay, pregunta si bajar la última versión. Antes, siempre `MSXIMUS.UPD` (en el MSXnano, el del 60K daba «Este fichero es para otra placa»).

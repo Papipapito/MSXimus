@@ -309,6 +309,9 @@ def main():
          0x21, "Fichero correcto", None),
         ("138K: la placa en pantalla", c138, {}, "PACK.UPD /C", {"PACK.UPD": u60}, "", 0x38, "Fichero correcto",
          None),
+        ("/? la ayuda (sin puente)", nano, {"presente": False}, "/?", {}, "", 0x21, "esta ayuda", None),
+        ("/h la ayuda (con un .UPD al lado: no lo toca)", nano, {}, "/h", {"MSXNANO.UPD": unano}, "", 0x21,
+         "/H /?", None),
     ]
     # ---- la red: /N contra msx.barcelona (TLS) y /S contra el PC ----
     red = []

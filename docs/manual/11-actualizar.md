@@ -36,9 +36,10 @@ MXUPDATE /N               baja la ultima version de internet y la graba
 MXUPDATE /N /R            la completa (core, pack y ondas) y vuelve a los ajustes de fabrica
 MXUPDATE /EN   /ES        en ingles / en castellano
 MXUPDATE /N /S:192.168.1.10:8000    desde un servidor propio en vez de msx.barcelona
+MXUPDATE /H   /?        la ayuda: las ordenes, sin tocar nada (vale en cualquier MSX con DOS 2)
 ```
 
-**Se actualiza solo.** Cada vez que va a internet (`/N`, o cuando no encuentra el fichero y le dices que lo baje), MXUPDATE mira primero si en msx.barcelona hay una versión suya más nueva. Si la hay, la baja junto a sí mismo, comprueba que es la que dice la web, se sustituye y se vuelve a lanzar con la misma orden: `MXUPDATE 1.2 en la web: actualizando MXUPDATE...` y `MXUPDATE actualizado: se vuelve a lanzar.` Tú no tienes que hacer nada. La versión que llevas sale arriba al lanzarlo (`MXUPDATE 1.1 - actualizar el core`).
+**Se actualiza solo.** Cada vez que va a internet (`/N`, o cuando no encuentra el fichero y le dices que lo baje), MXUPDATE mira primero si en msx.barcelona hay una versión suya más nueva. Si la hay, la baja junto a sí mismo, comprueba que es la que dice la web, se sustituye y se vuelve a lanzar con la misma orden: `MXUPDATE 1.3 en la web: actualizando MXUPDATE...` y `MXUPDATE actualizado: se vuelve a lanzar.` Tú no tienes que hacer nada. La versión que llevas sale arriba al lanzarlo (`MXUPDATE 1.2 - actualizar el core`).
 
 ### 2.1. Por internet: `MXUPDATE /N`
 

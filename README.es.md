@@ -145,6 +145,7 @@ MXUPDATE fichero.UPD      graba ese fichero
 MXUPDATE /C fichero.UPD   solo lo comprueba (cabecera y CRC); no toca la flash
 MXUPDATE /N               baja la ultima version y la graba
 MXUPDATE /N /R            la completa (core, pack y ondas del OPL4) y ajustes de fabrica
+MXUPDATE /H   /?          la ayuda: las ordenes, sin tocar nada
 ```
 
 Con `/N` eliges la variante (Nextor 2.1.4 o 3, menú en castellano o en inglés), la baja a la SD, la comprueba, pregunta, la graba y relee la flash entera para comprobarla otra vez. Después: **apagar y encender**. La conexión es **TLS con el certificado validado**, con el firmware del C6 de la v3.8, que trae las autoridades de certificación; con uno anterior funciona igual, sin validar, y lo dice.

@@ -145,6 +145,7 @@ MXUPDATE file.UPD         flashes that file
 MXUPDATE /C file.UPD      only checks it (header and CRCs); the flash is not touched
 MXUPDATE /N               downloads the latest version and flashes it
 MXUPDATE /N /R            the full one (core, pack and the OPL4 waves) and back to factory settings
+MXUPDATE /H   /?          help: the commands, without touching anything
 ```
 
 With `/N` you pick the variant (Nextor 2.1.4 or 3, menu in Spanish or English), it downloads it to the SD card, checks it, asks, writes it and reads the whole flash back to check it again. Then: **switch off and on**. The connection is **TLS with the certificate validated** — with the v3.8 C6 firmware, which carries the certificate authorities; with an older one it still works, unvalidated, and says so.

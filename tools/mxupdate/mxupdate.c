@@ -1,7 +1,7 @@
 //=============================================================================
 // mxupdate.c - MXUPDATE.COM: actualiza el core del MSXimus 60K/138K (V3.8) y del MSXnano (2.1.1) desde el propio MSX
 //
-//   MXUPDATE [fichero.UPD] [/C] [/EN] [/ES]
+//   MXUPDATE [fichero.UPD] [/C] [/EN] [/ES]        MXUPDATE /H o /?: la ayuda de las ordenes (sin tocar la flash)
 //   Sin fichero: el de la placa en el directorio actual (MSXIMUS.UPD en el 60K, MSX138K.UPD en el 138K, MSXNANO.UPD
 //   en el MSXnano) o, si no esta, el MSXIMUS.UPD (el nombre que busca "Instalar actualizacion" del menu) si es de
 //   esta placa; si tampoco, pregunta si bajar la ultima version por la red (como /N). Con /C y sin fichero,
@@ -35,7 +35,7 @@
 #include "msxgl.h"
 #include "network.h"
 
-#define MXU_VERSION "1.1"         // la de MXUPDATE; la de la web: mxupdate/manifiesto.txt
+#define MXU_VERSION "1.2"         // la de MXUPDATE; la de la web: mxupdate/manifiesto.txt
 // la version en UN solo sitio, el cartel: de aqui se compara con la de la web y esto es lo que se busca en el .COM
 // bajado (si no coincidieran, una version mal publicada se bajaria una y otra vez)
 static const c8 g_cartel[] = "MXUPDATE " MXU_VERSION " - ";
@@ -58,7 +58,7 @@ __sfr __at(0x4E) P_INFO;
 
 #define JIFFY (*(volatile u16*)0xFC9E)
 
-static bool g_en, g_solo_comprobar, g_red, g_ajustes, g_aviso, g_sin_nombre;
+static bool g_en, g_solo_comprobar, g_red, g_ajustes, g_aviso, g_sin_nombre, g_ayuda;
 static c8  g_srv[48];          // /S: servidor (vacio = msx.barcelona)
 static u16 g_puerto;
 #define T(es, en) (g_en ? (en) : (es))
@@ -301,7 +301,7 @@ static void Opciones(void)
 	// el arranque de MSXgl para DOS NO pone a cero las variables: lo que no se inicializa aqui conserva lo que
 	// dejo la ejecucion anterior (visto en openMSX: un /C se colaba en la siguiente orden)
 	g_ruta[0] = 0; g_srv[0] = 0; g_puerto = 80;
-	g_solo_comprobar = FALSE; g_red = FALSE; g_ajustes = FALSE; g_aviso = FALSE;
+	g_solo_comprobar = FALSE; g_red = FALSE; g_ajustes = FALSE; g_aviso = FALSE; g_ayuda = FALSE;
 	while (i < n) {
 		while (i < n && s[i] == ' ') i++;
 		if (i >= n) break;
@@ -312,6 +312,7 @@ static void Opciones(void)
 			if (a == 'C') g_solo_comprobar = TRUE;
 			if (a == 'N') g_red = TRUE;
 			if (a == 'R') g_ajustes = TRUE;
+			if (a == 'H' || s[i + 1] == '?') g_ayuda = TRUE;
 			if (a == 'S' && s[i + 2] == ':') {
 				i += 3; k = 0;
 				while (i < n && s[i] != ' ' && s[i] != ':' && k < sizeof g_srv - 1) g_srv[k++] = s[i++];
@@ -770,6 +771,7 @@ void main(void)
 	Opciones();
 
 	Pr(g_cartel); Pr(T("actualizar el core\r\n", "core update\r\n"));
+	if (g_ayuda) { Pr(T("MXUPDATE [fichero.UPD] [/N] [/R] [/C]\r\n sin fichero: el de la placa\r\n (MSXIMUS.UPD, MSX138K.UPD o\r\n MSXNANO.UPD); si no esta, lo baja\r\n/N  baja la ultima version y la graba\r\n/R  completa (core, pack y ondas) y\r\n    vuelve a los ajustes de fabrica\r\n/C  solo comprueba el fichero\r\n/S:servidor[:puerto]  otro servidor\r\n/ES /EN  castellano / ingles\r\n/H /?    esta ayuda\r\nPor red, antes se actualiza el mismo.", "MXUPDATE [file.UPD] [/N] [/R] [/C]\r\n no file: this board's own\r\n (MSXIMUS.UPD, MSX138K.UPD or\r\n MSXNANO.UPD); if missing, downloads it\r\n/N  downloads the latest and flashes it\r\n/R  full (core, pack and waves) and\r\n    back to factory settings\r\n/C  only checks the file\r\n/S:server[:port]  another server\r\n/ES /EN  Spanish / English\r\n/H /?    this help\r\nOnline, it first updates itself.")); Fin(0); }   // /H o /?: en cualquier MSX con DOS 2, sin tocar nada
 	CrcIniciaTablas();
 	if (g_solo_comprobar) {
 		id_flash = 0;
