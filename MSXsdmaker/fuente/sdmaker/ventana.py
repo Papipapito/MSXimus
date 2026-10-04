@@ -4,9 +4,10 @@ import queue
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from . import VERSION, contenido, dispositivos, particiones, proceso
+from . import VERSION, contenido, dispositivos, novedades, particiones, proceso
 from .dispositivos import formato_tamano
 
 ESQUEMAS = [("fat16-2g", "FAT16 de 2 GB"), ("fat16-4g", "FAT16 de 4 GB"), ("fat32", "Una FAT32 (toda la tarjeta)")]
@@ -34,6 +35,19 @@ class Ventana:
         self._construir()
         self.actualizar_tarjetas()
         self.raiz.after(100, self._leer_cola)
+        threading.Thread(target=self._novedades, daemon=True).start()   # sin red no pasa nada
+
+    # ------------------------------------------------------------------ version nueva en GitHub
+    def _novedades(self):
+        n = novedades.hay_nueva()
+        if n:
+            self.raiz.after(0, self._avisar_novedad, *n)
+
+    def _avisar_novedad(self, version, url):
+        self.escribir_log("Hay una versión nueva de MSX SD Maker, la %s (esta es la %s): %s" % (version, VERSION, url))
+        if messagebox.askyesno("MSX SD Maker", "Hay una versión nueva de MSX SD Maker, la %s (esta es la %s).\n\n"
+                               "¿Abrir la página de descarga?" % (version, VERSION)):
+            webbrowser.open(url)
 
     # ------------------------------------------------------------------ interfaz
     def _construir(self):

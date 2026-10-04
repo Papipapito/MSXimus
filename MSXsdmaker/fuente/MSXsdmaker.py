@@ -3,6 +3,7 @@ de Nextor) o una FAT32, sistema (Nextor 2.1.4, Nextor 3 o MSX-DOS) y programas (
 
   MSXsdmaker                     abre la ventana
   MSXsdmaker listar              tarjetas que se pueden preparar (Windows)
+  MSXsdmaker version             esta version y la ultima publicada en GitHub
   MSXsdmaker imagen F.img --tamano 8G [opciones]     crea una imagen (para probar, o para grabarla con Rufus/dd)
   MSXsdmaker tarjeta N [opciones] --si               prepara el disco N de "listar" (BORRA TODO)
 opciones: --esquema fat16-2g|fat16-4g|fat32  --n 3  --resto  --sistema nextor214|nextor3|msxdos|ninguno
@@ -12,7 +13,7 @@ con Nextor 3: --sin-yenslash (no pone YENSLASH ON)  --bufinsert (modo insercion)
 import argparse
 import sys
 
-from sdmaker import contenido, dispositivos, particiones, proceso
+from sdmaker import VERSION, contenido, dispositivos, novedades, particiones, proceso
 
 
 def _tam(texto):
@@ -78,6 +79,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="orden", required=True)
     sub.add_parser("listar")
+    sub.add_parser("version")
     ai = sub.add_parser("imagen")
     ai.add_argument("fichero")
     ai.add_argument("--tamano", required=True, help="p.ej. 8G, 256M")
@@ -91,6 +93,10 @@ def main():
         for t in dispositivos.listar_tarjetas():
             print("disco %d: %s, %s (%s), unidades %s" % (t["numero"], t["modelo"],
                   dispositivos.formato_tamano(t["bytes"]), t["bus"], " ".join(t["letras"]) or "-"))
+        return 0
+    if a.orden == "version":
+        u = novedades.ultima()
+        print("MSX SD Maker %s; la ultima publicada: %s" % (VERSION, "%s (%s)" % u if u else "no se sabe (sin red?)"))
         return 0
     if a.orden == "imagen":
         dev = dispositivos.Imagen(a.fichero, _tam(a.tamano) // 512)

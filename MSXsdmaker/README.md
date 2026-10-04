@@ -1,4 +1,4 @@
-# MSX SD Maker 1.2 — preparing the SD card
+# MSX SD Maker 1.3 — preparing the SD card
 
 *[Versión en castellano](LEEME.md)*
 
@@ -47,6 +47,8 @@ Nothing to install: it is a single file, `MSXsdmaker.exe`. The program itself is
 2. Put the card in the reader.
 3. Double-click `MSXsdmaker.exe`.
 4. Windows asks whether to allow it to make changes to the device: answer **Yes**. It needs this because it writes the whole card, partition table included.
+
+**New versions**: when it opens, the program checks GitHub for a newer MSX SD Maker; if there is one, it says so and offers to open the download page. Without internet nothing happens.
 
 **If Windows shows "Windows protected your PC"** (SmartScreen): click **More info** and then **Run anyway**. It appears because the program is not digitally signed.
 

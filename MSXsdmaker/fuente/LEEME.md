@@ -19,6 +19,8 @@ El `AUTOEXEC.BAT` se genera con lo elegido: `PATH`, alias de SofaRun y una líne
 
 Al acabar se relee todo lo escrito: la tabla de particiones y cada fichero por CRC.
 
+Al abrirse mira en GitHub la última release de SD_Maker (`sdmaker/novedades.py`); si es mayor que la suya, lo dice y ofrece abrir la página de descarga. `python MSXsdmaker.py version` enseña las dos.
+
 🚨 La primera vez, pruébalo con una tarjeta que no tenga nada que importe: borra la tarjeta entera.
 
 ## Cómo reparte la tarjeta

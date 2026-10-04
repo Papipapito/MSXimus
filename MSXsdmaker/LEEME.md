@@ -1,4 +1,4 @@
-# MSX SD Maker 1.2 — preparar la tarjeta SD
+# MSX SD Maker 1.3 — preparar la tarjeta SD
 
 *[English version](README.md)*
 
@@ -47,6 +47,8 @@ No hay nada que instalar: es un solo fichero, `MSXsdmaker.exe`.
 2. Mete la tarjeta en el lector.
 3. Haz doble clic en `MSXsdmaker.exe`.
 4. Windows pregunta si permites que haga cambios en el equipo: responde **Sí**. Hace falta porque el programa escribe la tarjeta entera, tabla de particiones incluida.
+
+**Versiones nuevas**: al abrirse, el programa mira en GitHub si hay una versión más nueva de MSX SD Maker; si la hay, lo dice y ofrece abrir la página de descarga. Sin internet no pasa nada.
 
 **Si Windows muestra «Windows protegió su PC»** (SmartScreen): pulsa **Más información** y después **Ejecutar de todas formas**. Sale porque el programa no está firmado digitalmente.
 
