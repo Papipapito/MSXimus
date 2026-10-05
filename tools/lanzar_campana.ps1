@@ -51,7 +51,7 @@ param(
     [Parameter(Mandatory=$true)][string]   $Campana,
     [Parameter(Mandatory=$true)][int[]]    $Dados,
     [switch] $Slim,
-    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSX_up_v3',
+    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSXimus',
     [string] $Scratch = "$env:LOCALAPPDATA\Temp\claude\campanas",
     [string] $Gowin   = 'C:\Gowin\Gowin_V1.9.12.03_x64\IDE\bin\gw_sh.exe'
 )

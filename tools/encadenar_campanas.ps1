@@ -29,7 +29,7 @@ param(
     # JSON con la lista: [{"Nombre":"v36n","Dados":[3847,...],"Variante":"po1"}, ...]
     # (un fichero, porque una lista de hashtables no sobrevive a Start-Process)
     [Parameter(Mandatory=$true)][string] $Json,
-    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSX_up_v3',
+    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSXimus',
     [string] $Scratch = "$env:LOCALAPPDATA\Temp\claude\campanas",
     [int]    $PollSeg = 120,
     # 17/09 noche: no parar al primer GATE OK (para dejar candidatos de varias campanas)
