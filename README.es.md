@@ -135,6 +135,8 @@ Desde la v3.8 el MSXimus se actualiza **solo**: el core y el pack de BIOS se gra
 | `MXUPDATE fichero.UPD` | Graba un fichero `.UPD` de la SD | MSX-DOS 2 o Nextor |
 | Ajustes → **Instalar actualización** | Graba el `MSXIMUS.UPD` de la raíz de la SD | Nada más: sin DOS |
 
+**Los arreglos llegan solo por aquí.** GitHub lleva las versiones grandes (3.8, 3.9...); los arreglos (3.8.1, 3.8.2...) se publican solo para `MXUPDATE /N`. Se graba una vez la release de GitHub y con `MXUPDATE /N` se llega a la última.
+
 `MXUPDATE.COM` va en la release y, en una tarjeta hecha con [MSX SD Maker](https://github.com/Papipapito/SD_Maker), en la carpeta `FPGA` (en el `PATH`). Reconoce la placa sola, habla el idioma del menú y **se actualiza solo**: antes de buscar un core nuevo en internet mira si hay un MXUPDATE más nuevo; si lo hay, lo baja, lo comprueba, se sustituye y sigue con el nuevo.
 
 ```
@@ -269,6 +271,10 @@ tools/           Testbenches y utilidades de validación
   mxupdate/      MXUPDATE.COM (MSXgl + UNAPI) y su banco Z80
   mxupd.py       Hace los .UPD y el manifiesto de la actualización
 ```
+
+## Lo nuevo de la v3.8.1 (solo por la actualización)
+
+- Los registros de slot del wavetable del OPL4 se releen bien a la primera por el puerto 7Fh (antes, la primera lectura devolvía a menudo el registro leído justo antes). La música no cambia. Se instala con `MXUPDATE /N`.
 
 ## Lo nuevo de la v3.8
 

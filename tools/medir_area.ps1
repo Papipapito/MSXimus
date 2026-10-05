@@ -25,7 +25,7 @@ param(
     # Sirve para comprobar que el dado PERTURBA el netlist: dos sintesis con
     # dados distintos tienen que dar LUTs distintas en u_dbguart.
     [int] $Dado = 0,
-    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSX_up_v3',
+    [string] $Root    = 'C:\Users\alber\proyectosAI\msx\MSXimus',
     [string] $Scratch = "$env:LOCALAPPDATA\Temp\claude\area",
     [string] $Gowin   = 'C:\Gowin\Gowin_V1.9.12.03_x64\IDE\bin\gw_sh.exe'
 )

@@ -1,0 +1,22 @@
+MSXimus 60K - 05/10/2026 - v3.8.1: arreglo del OPL4 (solo por la actualizacion de msx.barcelona)
+===================================================================================================
+
+Los registros de slot del wavetable del OPL4 se releen bien a la primera por 7Fh (antes la primera lectura devolvia a
+menudo el registro leido justo antes). La musica no cambia; solo le importa al software que relee registros de slot.
+
+QUE FLASHEAR (si se hace con el PC; lo normal es MXUPDATE /N desde el MSX)
+  MSXimus_v3.8.1.fs        (md5 431cc7ecf6f0)  core, 0x000000 (Gowin Programmer, flash externa)
+  MSXimus_v3.8.1_jtag.bin  (md5 8dd8d67d4af2)  el mismo core en binario (openFPGALoader / programadores)
+  El pack y las ondas no cambian: los de la 3.8.0b4 (packs 840a9752c2f9 / cc0ad4a3bfab / b2e678a72172 /
+  352a92d912ad en 0x400000; yrw801.bin 42af93619160 en 0x500000).
+
+Core: dado 5309 (campana v381), FPGA_PATCH 1, peor setup +1,386 ns, CLS 98 %, holds solo en la DDR3.
+
+PUBLICADA 05/10 en https://msx.barcelona/wp-content/ota/tang60k/ (las cuatro variantes y sus completas, 3.8.1).
+Sin release en GitHub: los arreglos (tercer digito) van solo por la red; se graba la release grande de GitHub y
+con MXUPDATE /N se llega a la ultima. En la web se quedan los 3.8.0b4 como version anterior; los 3.8.0b3 sobran y se
+pueden quitar con ota_subir.py tang60k --purgar.
+
+PROBAR EN PLACA
+  MXUPDATE /N -> instala la 3.8.1 -> Ajustes y MXUPDATE dicen 3.8.1. MoonSound: la musica de siempre igual. Si se quiere
+  ver el arreglo: escribir valores distintos en 50h-5Bh por 7Eh/7Fh y releerlos una sola vez cada uno.
