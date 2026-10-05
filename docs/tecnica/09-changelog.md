@@ -134,6 +134,15 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## OPL4: la relectura de los registros de slot (5 de octubre; en la rama `V3.8`, sin core nuevo)
+
+Arreglo de un defecto que se vio en simulación y nunca en placa, traído de la Zynq el mismo día. Al leer por 7Fh un registro de slot del wavetable, la primera lectura devolvía a menudo el valor del registro leído justo antes, también respetando /WAIT; leído dos veces seguidas, la segunda salía bien. El chip real devuelve lo escrito. Las escrituras, el estado, el identificador (02h) y el dato de memoria (06h) no estaban afectados: la música no cambia, solo le importa al software que relea registros de slot.
+
+- **Causa**, en el motor (`fpga/opl4wave/YMF278B.sv`), desde que esos registros pasaron a BSRAM en la v3.1: `REG_Q` se cargaba dos CE después del flanco de RD, cuando `rt_cpu_q` aún guardaba la lectura anterior, y el remuestreo que debía corregirlo (`REG_RD_DELAY == 2'b10`) llegaba entre 3 y 10 CE después del flanco, con `opl4_pcm.v` capturando al sexto. Fallaban siempre las lecturas en que la CYCLE1 del motor caía al cuarto CE o más tarde sin un hueco de CE por medio: 5 de cada 8 fases en los grupos de la BSRAM (08h-1Fh, 50h-7Fh, 98h-F7h). En FNUM y LFO (20h-4Fh, 80h-97h), otra carrera más rara: un 1 % de las lecturas devolvía el dato de otro slot.
+- **Arreglo**, solo en el motor y sin añadir latencia: `REG_Q` se carga en el mismo CE de siempre, pero con el dato de esa lectura (`rt_cpu_d`, y `fl_cpu_d` para FNUM/LFO: 9 registros nuevos). `opl4_pcm.v` no cambia y /WAIT dura lo mismo (343 ns de mínimo y 370 de media desde que el Z80 baja RD).
+- **Banco nuevo** `tools/opl4wave_sim/tb_slotrd.v` (`run_slotrd.sh`): con el motor de antes, unas 1.200 de 4.200 lecturas únicas distintas de lo escrito por semilla; con el arreglo, 0 en las tres semillas. `run_sim.sh` y `tb_regrd.sv` siguen en verde y los volcados de PCM de `run_pitch.sh` y `run_pan.sh` salen bit a bit iguales (el motor, `opl4_pcm.v` y los bancos son los mismos ficheros que en la Zynq, donde se midió). De paso, `run_pan.sh` deja de apuntar a la carpeta `MSX_up`.
+- **Sin core nuevo ni campaña**: va en el próximo dado de la V3.8. En síntesis sola (`medir_area.ps1`) la BSRAM no se mueve (105 antes y después) y el bloque `uopl4pcm` gana 27 LUT y 10 registros; si cierra tiempos lo dirá la campaña.
+
 ## MXUPDATE 1.2 (4 de octubre): la ayuda con /H y /?
 
 - `MXUPDATE /H` o `/?`: las órdenes en 40 columnas, en el idioma del menú; no toca la flash ni necesita el puente. md5 `de975760`, publicada en msx.barcelona (las 1.1 se la bajan solas). Banco: 29 casos bien.

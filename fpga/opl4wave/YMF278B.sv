@@ -860,21 +860,23 @@ module YMF278B
 					if (REG_A == 8'h05) begin MEM_RREQ <= 1; BUSY2 <= 1; end
 				end
 				if (REG_RD_DELAY == 2'b01) begin
-					// era v3: WTN/LEVEL/PAN salen de la BSRAM unica igual
-					// que RATE/AM — el valor bueno se remuestrea en
-					// DELAY==10 (ver mas abajo)
-					if (REG_WTN_SEL) REG_Q <= rt_cpu_q;
-					else if (REG_FNUM0_SEL) REG_Q <= REG_FNUM_Q[15:8];
-					else if (REG_FNUM1_SEL) REG_Q <= REG_FNUM_Q[7:0];
-					else if (REG_LEVEL_SEL) REG_Q <= rt_cpu_q;
-					else if (REG_PAN_SEL) REG_Q <= rt_cpu_q;
-					else if (REG_LFO_SEL) REG_Q <= REG_LFO_Q;
-					// era v3: los cuatro salen de la BSRAM unica; el dato
-					// bueno se remuestrea un CE mas tarde (ver abajo)
-					else if (REG_RATE0_SEL) REG_Q <= rt_cpu_q;
-					else if (REG_RATE1_SEL) REG_Q <= rt_cpu_q;
-					else if (REG_RATE2_SEL) REG_Q <= rt_cpu_q;
-					else if (REG_AM_SEL) REG_Q <= rt_cpu_q;
+					// Registros de slot: el dato sale de una RAM de lectura
+					// SINCRONA que corre a CLK (no a CE) y cuyo puerto la CPU
+					// solo tiene mientras dura REG_RD. rt_cpu_d / fl_cpu_d
+					// (mas abajo) dan el dato de ESTA lectura sea cual sea la
+					// fase: asi REG_Q se carga bien a la primera, aqui, y el
+					// pegamento (opl4_pcm, captura al 6o CE) nunca ve el de la
+					// lectura anterior. tb_slotrd lo guarda.
+					if (REG_WTN_SEL) REG_Q <= rt_cpu_d;
+					else if (REG_FNUM0_SEL) REG_Q <= fl_cpu_d;
+					else if (REG_FNUM1_SEL) REG_Q <= fl_cpu_d;
+					else if (REG_LEVEL_SEL) REG_Q <= rt_cpu_d;
+					else if (REG_PAN_SEL) REG_Q <= rt_cpu_d;
+					else if (REG_LFO_SEL) REG_Q <= fl_cpu_d;
+					else if (REG_RATE0_SEL) REG_Q <= rt_cpu_d;
+					else if (REG_RATE1_SEL) REG_Q <= rt_cpu_d;
+					else if (REG_RATE2_SEL) REG_Q <= rt_cpu_d;
+					else if (REG_AM_SEL) REG_Q <= rt_cpu_d;
 					else begin
 						case (REG_A)
 							8'h00: REG_Q <= TEST0;
@@ -896,14 +898,12 @@ module YMF278B
 						if (REG_A == 8'h06) begin MEM_RREQ <= 1; BUSY2 <= 1; MEMADDR <= MEMADDR + 22'd1; end
 					end
 				end
-				// ERA v3: el grupo RATE/AM ya no es un array de lectura
-				// asincrona, sino BSRAM: su dato tarda DOS clk (peticion +
-				// captura) desde REG_RD, y la ventana DELAY==01 solo da uno
-				// garantizado. Se remuestrea en DELAY==10, un CE despues —
-				// sobra margen (el consumidor es el Z80 leyendo el puerto).
-				// Sin esto, el readback devuelve el valor de la lectura
-				// ANTERIOR (cazado por tb_regrd: 144/144 mal).
-				if (REG_RD_DELAY == 2'b10 && rt_sel) REG_Q <= rt_cpu_q;
+				// (La era v3 remuestreaba aqui el grupo de la BSRAM con
+				// DELAY==10 "un CE despues". DELAY==10 no llega un CE
+				// despues de DELAY==01, sino dos CE despues de la CYCLE1
+				// que borra REG_RD: hasta 10 CE tras el flanco de RD, y el
+				// pegamento captura al 6o => 5 de cada 8 fases devolvian
+				// la lectura ANTERIOR. Ya no hace falta: ver rt_cpu_d.)
 
 				//Memory access
 				if (CYCLE1_CE) begin
@@ -1059,6 +1059,22 @@ module YMF278B
 	wire       REG_LFO_LOAD  = (OP3.LOAD_POS == 4'h7);
 	bit [ 7:0] REG_LFO_Q;
 	OPL4_REG_RAM #(5,8) REG_LFO  (CLK,     RST ?     SLOT : OP3.LOAD ? OP3.SLOT : REG_A[4:0]-5'h00,     RST ? '0 : OP3.LOAD ? MEM_D : REG_D,     RST ? 1'b1 : OP3.LOAD ? (REG_LFO_LOAD & SLOT0_CE) : (REG_WR & REG_LFO_SEL & CYCLE1_CE), (REG_RD ? REG_A[4:0]-5'h00 : LFO_RA ), REG_LFO_Q);
+
+	// Readback de FNUM/LFO por CPU. La salida de estas RAM solo es la de la
+	// CPU mientras dura REG_RD, y si la CYCLE1 que lo borra cae justo en el
+	// CE siguiente al flanco de RD y despues hay un clk sin CE, la carga de
+	// REG_Q llegaba con el puerto ya devuelto al barrido (~1 % de las
+	// lecturas devolvian el FNUM o el LFO de OTRO slot). fl_cpu_on marca que la
+	// salida de AHORA es de la CPU; fl_cpu_q la retiene cuando deja de serlo.
+	bit       fl_cpu_on;
+	bit [7:0] fl_cpu_q;
+	wire [7:0] fl_rq = REG_FNUM0_SEL ? REG_FNUM_Q[15:8]
+	                 : REG_FNUM1_SEL ? REG_FNUM_Q[7:0] : REG_LFO_Q;
+	always_ff @(posedge CLK) begin
+		fl_cpu_on <= REG_RD;
+		if (fl_cpu_on) fl_cpu_q <= fl_rq;
+	end
+	wire [7:0] fl_cpu_d = fl_cpu_on ? fl_rq : fl_cpu_q;
 	
 	wire       REG_RATE0_SEL = (REG_A >= 8'h98 && REG_A <= 8'hAF);
 	wire       REG_RATE1_SEL = (REG_A >= 8'hB0 && REG_A <= 8'hC7);
@@ -1081,10 +1097,12 @@ module YMF278B
 	//  - escrituras: RST (limpieza, un campo por clk ciclando) > LOAD de
 	//    cabecera (un campo por SLOT0_CE, LOAD_POS 8..11) > CPU. Nunca dos
 	//    a la vez (los SEL son rangos disjuntos).
-	//  - readback: REG_RD roba UN ciclo del puerto de lectura (el barrido
-	//    se para ese ciclo; tiene ~17 clk de margen para 4 campos) y el
-	//    dato aterriza en rt_cpu_q, que alimenta el mux de REG_Q. El
-	//    muestreo del readback va con REG_RD_DELAY, varios CE despues.
+	//  - readback: REG_RD roba el puerto de lectura mientras dura (el
+	//    barrido se para; tiene ~17 clk de margen para 4 campos). El dato
+	//    esta en rt_rq un clk despues (rt_cpu_on lo marca) y se retiene en
+	//    rt_cpu_q al siguiente. REG_Q se carga dos CE tras el flanco de RD
+	//    con rt_cpu_d, que escoge entre los dos: dos CE pueden ser solo
+	//    dos clk, y entonces rt_cpu_q todavia guarda la lectura ANTERIOR.
 	// =====================================================================
 	// SIETE campos en UNA BSRAM 256x8 {campo[2:0], slot[4:0]}: RATE0/1/2,
 	// AM, WTN, LEVEL y PAN. Los tres ultimos entran GRATIS en BSRAM (256x8
@@ -1195,6 +1213,9 @@ module YMF278B
 			else                 rt_swp <= rt_swp + 3'd1;
 		end
 	end
+
+	// dato del readback de CPU valido desde un clk despues de subir REG_RD
+	wire [7:0] rt_cpu_d = rt_cpu_on ? rt_rq : rt_cpu_q;
 
 	wire [7:0] REG_RATE0_Q = rt_q[RT_R0];
 	wire [7:0] REG_RATE1_Q = rt_q[RT_R1];

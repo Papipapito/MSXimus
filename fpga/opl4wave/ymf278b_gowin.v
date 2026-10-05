@@ -912,8 +912,14 @@ module YMF278B (
 	wire REG_RATE0_SEL = (REG_A >= 8'h98) && (REG_A <= 8'haf);
 	wire REG_RATE1_SEL = (REG_A >= 8'hb0) && (REG_A <= 8'hc7);
 	wire REG_RATE2_SEL = (REG_A >= 8'hc8) && (REG_A <= 8'hdf);
+	reg fl_cpu_on = 0;
+	reg [7:0] fl_cpu_q = 0;
+	wire [7:0] fl_rq = (REG_FNUM0_SEL ? REG_FNUM_Q[15:8] : (REG_FNUM1_SEL ? REG_FNUM_Q[7:0] : REG_LFO_Q));
+	wire [7:0] fl_cpu_d = (fl_cpu_on ? fl_rq : fl_cpu_q);
+	reg rt_cpu_on = 0;
 	reg [7:0] rt_cpu_q = 0;
-	wire rt_sel = (((((REG_RATE0_SEL | REG_RATE1_SEL) | REG_RATE2_SEL) | REG_AM_SEL) | REG_WTN_SEL) | REG_LEVEL_SEL) | REG_PAN_SEL;
+	reg [7:0] rt_rq = 0;
+	wire [7:0] rt_cpu_d = (rt_cpu_on ? rt_rq : rt_cpu_q);
 	reg WR_N_OLD = 0;
 	reg RD_N_OLD = 0;
 	reg CS_N_OLD = 0;
@@ -1024,25 +1030,25 @@ module YMF278B (
 			end
 			if (REG_RD_DELAY == 2'b01) begin
 				if (REG_WTN_SEL)
-					REG_Q <= rt_cpu_q;
+					REG_Q <= rt_cpu_d;
 				else if (REG_FNUM0_SEL)
-					REG_Q <= REG_FNUM_Q[15:8];
+					REG_Q <= fl_cpu_d;
 				else if (REG_FNUM1_SEL)
-					REG_Q <= REG_FNUM_Q[7:0];
+					REG_Q <= fl_cpu_d;
 				else if (REG_LEVEL_SEL)
-					REG_Q <= rt_cpu_q;
+					REG_Q <= rt_cpu_d;
 				else if (REG_PAN_SEL)
-					REG_Q <= rt_cpu_q;
+					REG_Q <= rt_cpu_d;
 				else if (REG_LFO_SEL)
-					REG_Q <= REG_LFO_Q;
+					REG_Q <= fl_cpu_d;
 				else if (REG_RATE0_SEL)
-					REG_Q <= rt_cpu_q;
+					REG_Q <= rt_cpu_d;
 				else if (REG_RATE1_SEL)
-					REG_Q <= rt_cpu_q;
+					REG_Q <= rt_cpu_d;
 				else if (REG_RATE2_SEL)
-					REG_Q <= rt_cpu_q;
+					REG_Q <= rt_cpu_d;
 				else if (REG_AM_SEL)
-					REG_Q <= rt_cpu_q;
+					REG_Q <= rt_cpu_d;
 				else begin
 					case (REG_A)
 						8'h00: REG_Q <= TEST0;
@@ -1063,8 +1069,6 @@ module YMF278B (
 					end
 				end
 			end
-			if ((REG_RD_DELAY == 2'b10) && rt_sel)
-				REG_Q <= rt_cpu_q;
 			if (CYCLE1_CE) begin
 				if (MEM_RD && !MEMMODE[0])
 					MEM_D <= MDI;
@@ -1212,8 +1216,14 @@ module YMF278B (
 		.RDADDR((REG_RD ? REG_A[4:0] - 5'h00 : LFO_RA)),
 		.Q(REG_LFO_Q)
 	);
+	always @(posedge CLK) begin
+		fl_cpu_on <= REG_RD;
+		if (fl_cpu_on)
+			fl_cpu_q <= fl_rq;
+	end
 	wire [2:0] rt_fld = (REG_RATE0_SEL ? RT_R0 : (REG_RATE1_SEL ? RT_R1 : (REG_RATE2_SEL ? RT_R2 : (REG_AM_SEL ? RT_AM : (REG_WTN_SEL ? RT_WT : (REG_LEVEL_SEL ? RT_LV : RT_PN))))));
 	wire [4:0] rt_idx = (REG_RATE0_SEL ? REG_A[4:0] - 5'h18 : (REG_RATE1_SEL ? REG_A[4:0] - 5'h10 : (REG_RATE2_SEL ? REG_A[4:0] - 5'h08 : (REG_AM_SEL ? REG_A[4:0] - 5'h00 : (REG_WTN_SEL ? REG_A[4:0] - 5'h08 : (REG_LEVEL_SEL ? REG_A[4:0] - 5'h10 : REG_A[4:0] - 5'h08))))));
+	wire rt_sel = (((((REG_RATE0_SEL | REG_RATE1_SEL) | REG_RATE2_SEL) | REG_AM_SEL) | REG_WTN_SEL) | REG_LEVEL_SEL) | REG_PAN_SEL;
 	reg [2:0] rt_rstf = 0;
 	wire rt_rst_we = (rt_rstf == RT_WT ? OP4[8] : RST);
 	wire [7:0] rt_rst_ad = (rt_rstf == RT_WT ? {RT_WT, OP4[13-:5]} : {rt_rstf, SLOT});
@@ -1249,8 +1259,6 @@ module YMF278B (
 	reg [2:0] rt_cap = 0;
 	reg rt_swp_on = 0;
 	reg rt_cap_on = 0;
-	reg rt_cpu_on = 0;
-	reg [7:0] rt_rq = 0;
 	initial begin
 		rt_cpuw_p = 1'b0;
 		rt_cpuw_ad = 1'sb0;

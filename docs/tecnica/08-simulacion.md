@@ -65,7 +65,7 @@ La colección más grande, porque ahí se cazaron los errores de integración de
 
 ### Audio: `tools/opl3_sim/` y `tools/opl4wave_sim/`
 
-El OPL3 se simula con Verilator desde C++: `run_vgm.sh` reproduce un VGM contra el core y saca un WAV, y `tb_opl3_storm` bombardea el interfaz de host. `opl4wave_sim` guarda los volcados con que se depuró el motor PCM y su caché.
+El OPL3 se simula con Verilator desde C++: `run_vgm.sh` reproduce un VGM contra el core y saca un WAV, y `tb_opl3_storm` bombardea el interfaz de host. `opl4wave_sim` guarda los volcados con que se depuró el motor PCM y su caché. `run_slotrd.sh` (`tb_slotrd.v`) comprueba que los registros de slot del wavetable se releen bien **a la primera** por 7Fh, a través de `opl4_pcm.v` y con un Z80 que respeta /WAIT: los diez grupos (08h-F7h) por 24 slots con la fase del acceso barrida por semilla, en reposo y con seis slots sonando; lleva sondas dentro del motor y mide cuánto dura /WAIT en cada IN 7Fh.
 
 ### El USB: `tools/usb_sim/`
 
