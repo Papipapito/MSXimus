@@ -158,9 +158,10 @@ module vdp_color_palette (
 	reg			[4:0]	ff_yjk_b;
 	reg					ff_yjk_rgb_en;
     wire        [8:0]   w_display_color;
-	reg			[7:0]	ff_display_color_sprite;
-	reg			[1:0]	ff_display_color_sprite_transparent;
-	reg					ff_display_color_sprite_en;
+	wire		[7:0]	ff_display_color_sprite;
+	wire		[1:0]	ff_display_color_sprite_transparent;
+	wire				ff_display_color_sprite_en;
+	wire		[10:0]	w_sprite_q;
 
 	// --------------------------------------------------------------------
 	//	Palette initializer
@@ -282,18 +283,37 @@ module vdp_color_palette (
 		end
 	end
 
+	//	MSXimus 27/09/2026 = upstream 86361d8 (HRA, "Bugfix left side of MSX2+ logo"): el permiso de sprite
+	//	usaba el modo de pantalla activo RETRASADO una celda (16 px) y recortaba los sprites del borde izquierdo.
+	//	MSXimus 02/11/2026 (Z1.3.2b10): en YJK (SCREEN 10/11/12) el fondo sale con delay4 (4 celdas tarde) y el sprite salia sin
+	//	retardo: 4 celdas ANTES que el fondo, y ademas el mux de salida lo tapaba con el RGB YJK. El sprite se captura en una cadena
+	//	de 5 etapas (indice de color, mezcla y permiso) y se lee la 0 (como siempre) o la 4 con reg_yjk_mode, la misma celda que
+	//	ff_y / ff_yjk_en.
+	//	MSXimus 60K/138K (port de la Z1.3.2b10): en Gowin no hay SRL16E, y la cadena de lectura dinamica de la Zynq quedaria a la
+	//	merced de la inferencia (la SSRAM esta retirada en el GW5AT-60B). Aqui son 5 etapas de FF explicitas por bit (+44 FF netos
+	//	frente al FF unico de antes) y un mux 2:1 de toma estatica (reg_yjk_mode) a la salida. Mismo comportamiento ciclo a ciclo.
+	wire	[10:0]	w_sprite_d = { display_color_sprite_en & display_color_screen_mode_en, display_color_sprite_transparent, display_color_sprite };
+	reg		[10:0]	ff_sprite_s0;
+	reg		[10:0]	ff_sprite_s1;
+	reg		[10:0]	ff_sprite_s2;
+	reg		[10:0]	ff_sprite_s3;
+	reg		[10:0]	ff_sprite_s4;
 	always @( posedge clk ) begin
 		if( screen_pos_x[3:0] == 4'd0 ) begin
-			//	MSXimus 27/09/2026 = upstream 86361d8 (HRA, "Bugfix left side of MSX2+ logo"): el permiso de sprite
-			//	usaba el modo de pantalla activo RETRASADO una celda (16 px) y recortaba los sprites del borde izquierdo.
-			ff_display_color_sprite					<= display_color_sprite;
-			ff_display_color_sprite_transparent		<= display_color_sprite_transparent;
-			ff_display_color_sprite_en				<= display_color_sprite_en & display_color_screen_mode_en;
+			ff_sprite_s0 <= w_sprite_d;
+			ff_sprite_s1 <= ff_sprite_s0;
+			ff_sprite_s2 <= ff_sprite_s1;
+			ff_sprite_s3 <= ff_sprite_s2;
+			ff_sprite_s4 <= ff_sprite_s3;
 		end
 		else begin
 			//	hold
 		end
 	end
+	assign w_sprite_q = reg_yjk_mode ? ff_sprite_s4 : ff_sprite_s0;
+	assign ff_display_color_sprite				= w_sprite_q[7:0];
+	assign ff_display_color_sprite_transparent	= w_sprite_q[9:8];
+	assign ff_display_color_sprite_en			= w_sprite_q[10];
 
 	// --------------------------------------------------------------------
 	//	Latch YJK color (screen_pos_x = 0)
@@ -363,7 +383,9 @@ module vdp_color_palette (
 	// --------------------------------------------------------------------
 	//	Palette RAM Read Signal ( screen_pos_x = 0 )
 	// --------------------------------------------------------------------
-	assign w_display_color		= reg_yjk_mode ? ff_display_color_delay3: ff_display_color_delay0;
+	//	MSXimus 01/11/2026 = upstream HRA bee8f7e (v0.93): en YJK el punto se toma con delay4, la misma celda que
+	//	ff_y / ff_yjk_en (con delay3 el color de paleta de SCREEN 10/11 y el del borde iban una celda adelantados).
+	assign w_display_color		= reg_yjk_mode ? ff_display_color_delay4: ff_display_color_delay0;
 
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
@@ -376,6 +398,12 @@ module vdp_color_palette (
 				if( reg_ext_palette_mode ) begin
 					//	映像期間の場合、256palette モードならそのまま渡しつつ、palette になる。
 					ff_display_color	<= w_display_color[8] ? w_display_color[7:0] : reg_backdrop_color;
+					ff_display_color_oe	<= 1'b1;
+				end
+				else if( reg_yjk_mode && reg_yae_mode && w_display_color[8] ) begin
+					//	MSXimus 01/11/2026 = upstream HRA bee8f7e: SCREEN 10/11, pixel con A = 1 (y borde): los 4 bits altos
+					//	del byte son el numero de paleta (libro del V9958), no un color de 256.
+					ff_display_color	<= { 4'd0, w_display_color[7:4] };
 					ff_display_color_oe	<= 1'b1;
 				end
 				else if( w_display_color[8] ) begin
@@ -516,9 +544,17 @@ module vdp_color_palette (
 
 	always @( posedge clk ) begin
 		if( screen_pos_x[3:0] == 4'd2 || (w_high_resolution && screen_pos_x[3:0] == 4'd10) ) begin
-			ff_display_r16	<= w_display_r16;
-			ff_display_g16	<= w_display_g16;
-			ff_display_b16	<= w_display_b16;
+			if( reg_yjk_mode && (!reg_yae_mode || !ff_yjk_rgb_en) ) begin
+				//	MSXimus 02/11/2026: pixel YJK (SCREEN 12, o SCREEN 10/11 con A = 0): el fondo es el RGB YJK
+				ff_display_r16	<= ff_yjk_r;
+				ff_display_g16	<= ff_yjk_g;
+				ff_display_b16	<= ff_yjk_b;
+			end
+			else begin
+				ff_display_r16	<= w_display_r16;
+				ff_display_g16	<= w_display_g16;
+				ff_display_b16	<= w_display_b16;
+			end
 		end
 		else if( screen_pos_x[3:0] == 4'd3 || (w_high_resolution && screen_pos_x[3:0] == 4'd11) ) begin
 			if( reg_sprite_mode3 ) begin
@@ -585,13 +621,15 @@ module vdp_color_palette (
 	// --------------------------------------------------------------------
 	//	RGB Color Conversion ( screen_pos_x = 4 )
 	// --------------------------------------------------------------------
-	assign w_display_r_pre = (!reg_ext_palette_mode && w_256colors_mode) ? { ff_display_color256[4:2], ff_display_color256[4:3] } : ff_display_r16;
-	assign w_display_g_pre = (!reg_ext_palette_mode && w_256colors_mode) ? { ff_display_color256[7:5], ff_display_color256[7:6] } : ff_display_g16;
-	assign w_display_b_pre = (!reg_ext_palette_mode && w_256colors_mode) ? { ff_display_color256[1:0], ff_display_color256[1] & ff_display_color256[0], ff_display_color256[1:0] } : ff_display_b16;
+	//	MSXimus 01/11/2026 = upstream HRA bee8f7e: la conversion de 256 colores no se aplica en YJK (SCREEN 10/11/12)
+	assign w_display_r_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode) ? { ff_display_color256[4:2], ff_display_color256[4:3] } : ff_display_r16;
+	assign w_display_g_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode) ? { ff_display_color256[7:5], ff_display_color256[7:6] } : ff_display_g16;
+	assign w_display_b_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode) ? { ff_display_color256[1:0], ff_display_color256[1] & ff_display_color256[0], ff_display_color256[1:0] } : ff_display_b16;
 
-	assign w_display_r = (reg_yjk_mode && (!reg_yae_mode || !ff_yjk_rgb_en)) ? ff_yjk_r : w_display_r_pre;
-	assign w_display_g = (reg_yjk_mode && (!reg_yae_mode || !ff_yjk_rgb_en)) ? ff_yjk_g : w_display_g_pre;
-	assign w_display_b = (reg_yjk_mode && (!reg_yae_mode || !ff_yjk_rgb_en)) ? ff_yjk_b : w_display_b_pre;
+	//	MSXimus 02/11/2026: el RGB YJK ya viene en ff_display_r/g/b16 (celda 2, arriba), debajo del sprite: aqui no hay mux de YJK
+	assign w_display_r = w_display_r_pre;
+	assign w_display_g = w_display_g_pre;
+	assign w_display_b = w_display_b_pre;
 
 	always @( posedge clk ) begin
 		ff_rgb_load	<= (screen_pos_x[3:0] == 4'd3) || (w_high_resolution && screen_pos_x[3:0] == 4'd11);

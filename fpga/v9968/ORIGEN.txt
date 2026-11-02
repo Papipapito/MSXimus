@@ -1,11 +1,22 @@
 Core V9968 de Takayuki Hara (HRA!) — hra1129/V9968_Cartridge
-Revision fijada: 5978d18 (2026-07-08)
+Base: RTL de HRA hasta 4410365 (30/09/2026). Lo no portado, con su motivo, en las secciones de abajo.
+  El gancho de geo3d de vdp.v (puertos ext_cmd_*, HRA 3e81e92, 03/10/2026) NO va en esta rama, a proposito:
+  geo3d esta en la rama geo3d del 138K y en la Zynq.
+Ultima revision del upstream: 18/10/2026, contra 122cdd1 (13/10/2026). Nada mas que portar; desde 4410365 solo:
+    3e81e92           geo3d (en esta rama no va; ver arriba)
+    9aceef9, dceec5a  opciones de rutado de su placa y readme de geo3d
+    55966fb           manual: LockExtReg (puerto #4 bit 7) a 0 para poder escribir R#20/R#21
+    f327563           manual (HR/VR de S#2 en logica positiva) y el comentario de R#20 de vdp_cpu_interface.v,
+                      [S16][CEIE][FIL][EPAL][SP3][ILNS][SVNS][HS], el mismo que aqui
+    122cdd1           placa 3rd (.cst y esquemas)
 Licencia: BSD-like no comercial de HRA! (cabeceras de cada fichero) —
 redistribucion con avisos intactos; publicacion gratuita OK, venta NO.
 Ficheros parcheados para el MSXimus (marcados "MSXimus:" en el codigo):
   - vdp_vram_interface.v  (routing de respuestas por TAG con ECO, latencia libre)
   - vdp.v                 (plumbing de vram_tag/vram_rtag al top del core)
-El resto, INTACTO. Regen/diff contra upstream: proyectosAI/msx/V9968_Cartridge
+No son los unicos: de los 21 .v solo vdp_color_palette_ram, vdp_sprite_divide_table, vdp_video_double_buffer y
+vdp_video_out_bilinear son iguales a 4410365; los demas parches, en las secciones de abajo.
+Regen/diff contra upstream: proyectosAI/msx/V9968_Cartridge
 
 ################################################################################
 [CORRECCION 2026-07-26] EL SENTIDO DE LA MIGRACION ESTABA INVERTIDO EN ESTE DOC
@@ -82,8 +93,8 @@ EL CAMBIO DE R#20/R#21 (0683e7e) — y por que hay dos DEVCON.COM:
       R#20[5]=flat_interlace   R#20[6]=command_end_interrupt_enable
       R#21[0]=v9958_mode
       reg_ext_command_mode = ~ff_v9958_mode ;  reg_vram256k_mode = ~ff_v9958_mode
-  ⚠️ EL COMENTARIO "R#20 = [S16][EVR][ECOM][EPAL][SCOL][ILNS][SVNS][HS]" NO SE
-  ACTUALIZO EN EL UPSTREAM: en el arbol nuevo MIENTE. En el nuestro aun es cierto.
+  Nombres de los bits de R#20 desde HRA f327563 (10/10/2026), los mismos en vdp_cpu_interface.v:
+      R#20 = [S16][CEIE][FIL][EPAL][SP3][ILNS][SVNS][HS]
   Los dos DEVCON.COM difieren en UN byte, y es exactamente ese (tabla reg/valor,
   entrada "14"=R#20): 0xFF = RTL VIEJA (th9958, la nuestra), 0x9F = RTL NUEVA.
   devcon.c NUNCA cambio: HRA parcheo el binario a mano. Por eso el .c dice 0xFF.
@@ -854,15 +865,83 @@ CAMPANA _166 (rc5), dados 1181/1187/1193:
      (~543 CLS) segun project_syn_rsc.xml:69/78.
 ================================================================================
 
+================================================================================
+27/09/2026 (V3.7.1, b5aee3e y 6602840) — cambio PROPIO del MSXimus en este directorio (no viene de HRA):
+- vdp_command.v: w_byte_mode (registrado como ff_byte_mode en 6602840). Los comandos rapidos (HMMV/HMMM/YMMM/HMMC)
+  avanzan 1 byte por paso en TODO modo que no sea SCREEN 5/6/7 (antes solo en SCREEN 8): en SCREEN 2 con R#25 CMD=1
+  el paso de 2 copiaba un byte si y otro no. SCREEN 5-8 bit a bit como antes (tools/v9968_sim/g2cmd_check.py,
+  60 casos). Sustituido el 30/09 por el ff_pixel_step de HRA (4410365, abajo).
+- vdp.v: el gancho de geo3d de la Zynq (ext_cmd_*) NO va en esta rama.
 ################################################################################
-[2026-09-30] V3.7.6: UPSTREAM DE HRA 44e93ec -> 4410365 (3 arreglos del 29/09), igual que la Zynq Z1.2.1.
+[2026-09-27] V3.7.1 (b5aee3e): UPSTREAM DE HRA ceeecd7 -> 44e93ec (12 commits del 09-27/09), igual que la Zynq.
+################################################################################
+PORTADOS:
+  86361d8  vdp_color_palette.v: el permiso de sprite usaba el modo de pantalla activo retrasado una celda (16 px)
+           -> sprites recortados en el borde izquierdo de la zona activa.
+  9917548  vdp_timing_control_ssg.v: R#26/R#27 se latchean en CADA linea justo antes del primer pixel visible
+           (issue #5); aqui la condicion se evalua un ciclo antes y se registra -> mismo instante.
+  9917548  vdp_sprite_makeup_pixel.v: la colision salta UNA vez por linea.
+NO PORTADOS: e64f55a/31e4464/cbe1528 (overmap 5S/9S), 965bc05 (A17 en modo V58), 88132d2 (cache VRAM compartida)
+  y fda3f26 (escalador bilineal). Los motivos y los bancos, en el ORIGEN.txt de la Zynq.
+================================================================================
+################################################################################
+[2026-09-30] V3.7.6 (aa9e3c5): UPSTREAM DE HRA 44e93ec -> 4410365 (3 arreglos del 29/09), igual que la Zynq Z1.2.1.
 ################################################################################
   05f9806  vdp_cpu_interface.v: el par del puerto 1 a medias se cancela con CUALQUIER lectura y con una escritura
-           al puerto 0 (antes solo con la lectura de status, nuestro _185). Paleta V9938: el 1er byte comparte el
-           latch con los puertos 1 y 3. Banco: tools/v9968_sim/tb_port1_latch.sv (el suyo, 12 pruebas).
-  ef12ee3  vdp_command.v: w_sy_overflow; LMMM/HMMM/YMMM con DIY acaban cuando el ORIGEN llega a Y = 0.
-  4410365  vdp_command.v: ff_pixel_step registrado al escribir R#46 = su arreglo de nuestra issue #10; sustituye a
-           nuestro ff_byte_mode de la 3.7.1 (mismo resultado, mas FG4 como SCREEN 5).
-  Ficheros identicos a los de la Zynq (MSXimus_zynq fpga/v9968, commit 05cfa53). Detalle y lo NO portado (overmap
-  5S/9S, cache compartida, escalador) en el ORIGEN.txt de la Zynq.
+           al puerto 0 (antes solo con la lectura de status, nuestro _185; Fleet Commander II). Paleta V9938: el
+           1er byte comparte el latch de datos con los puertos 1 y 3.
+  ef12ee3  vdp_command.v: w_sy_overflow; con DIY = 1, LMMM/HMMM/YMMM acaban tambien cuando el ORIGEN llega a Y = 0.
+  4410365  vdp_command.v: ff_pixel_step, el paso de pixel registrado al escribir R#46 = su arreglo de nuestra issue
+           #10; sustituye a nuestro ff_byte_mode de la V3.7.1 (mismo resultado, salvo FG4, que va como SCREEN 5).
+YA ESTABA: 6acdb4d (R#4) y el comentario de R#21.
+Ficheros identicos a los de la Zynq (MSXimus_zynq fpga/v9968, RTL de su 05cfa53) salvo vdp.v, sin el gancho de geo3d.
+Los bancos de este porte (tb_port1_latch.sv de HRA, g2cmd_check.py check_diy) y la regresion estan en la Zynq.
+================================================================================
+
+################################################################################
+[2026-11-02] V3.8.5 (candidato, SIN build): DE LA ZYNQ Z1.3.2b9/b10 SOLO LO DEL V9968 QUE SIRVE EN GOWIN.
+################################################################################
+Pedido de Albert: refrescar el 60K y el 138K con los arreglos del V9968 de la Zynq. Orden de la Zynq: bee8f7e de HRA (v0.93,
+01/11) y su parche propio de sprites en SCREEN 10/11/12 (ORIGEN.txt de MSXimus_zynq_beta, secciones del 01 y 02/11/2026).
+PORTADO (un solo fichero de RTL: vdp_color_palette.v; el resto del V9968 de esta rama ya era el de la Zynq Z1.3):
+  bee8f7e  (1) en YJK (SCREEN 10/11/12) el punto se toma con ff_display_color_delay4 y no con delay3 (la misma celda que
+               ff_y / ff_yjk_en: antes el color de paleta de SCREEN 10/11 y el del borde iban una celda adelantados);
+           (2) SCREEN 10/11 (YJK + YAE) con A = 1 y el borde: ff_display_color <= {4'd0, color[7:4]} por la paleta (los 4 bits
+               altos del byte son el numero de paleta, libro del V9958), no un color de 256;
+           (3) w_display_r/g/b_pre no aplican la conversion de 256 colores con reg_yjk_mode.
+  PROPIO (Zynq Z1.3.2b10): sprites en SCREEN 10, 11 y 12. Hasta ahora el RGB YJK tapaba al sprite (en SCREEN 12 no se veia
+           nunca) y, sobre los puntos con A = 1, salia 4 celdas antes que el fondo. El sprite se captura en una cadena de 5
+           etapas por bit (indice de color, mezcla y permiso) y se lee la 0 (como siempre) o la 4 con reg_yjk_mode; en la celda 2
+           ff_display_r/g/b16 recibe el RGB YJK y el sprite lo pisa (modos 1 y 2) o lo mezcla (modo 3, TP) en la celda 3.
+  ADAPTACION A GOWIN (unica diferencia con el fichero de la Zynq): la cadena de la Zynq es un shift register de lectura
+           dinamica que Vivado infiere como SRL16E. Aqui son 5 etapas de FF explicitas (ff_sprite_s0..s4, 11 bits) y un mux 2:1
+           de toma estatica a la salida, con el mismo estilo que la cadena ff_display_color_delay0..4 que ya hay en el fichero:
+           +44 FF netos (55 - los 11 del FF unico anterior). GowinSynthesis 1.9.12.03 sobre el modulo solo (V3.8.4 -> nuevo):
+           REG 165 -> 209, LUT 261 -> 299, ALU 125 -> 121, BSRAM 1 -> 1; ni SSRAM ni ROM16. Con el CLS al 98 % de la v3.8.4 en el 60K,
+           unos 40 FF y 40 LUT mas no son nada, pero si estorban al rutado: de ahi la campana de dados.
+  vdp_cpu_interface.v: solo el comentario de R#20, ya como en el 138K y en la Zynq (HRA f327563).
+BANCOS (los de la Zynq, tools/v9968_sim; HRA no tiene banco de la paleta), todos en WSL:
+  run_palette_yjk.sh     paleta a solas contra un modelo del libro del V9958: con el RTL de la V3.8.4, 12 fallos (A = 1 de SCREEN
+                         10/11, sprites en 10/11/12, modo 3); con el nuevo, TB_OK.
+  run_palette_yjk_ab.sh  433.211 ciclos con estimulo aleatorio en los 10 modos: identico a la b9 de la Zynq (ea53294) donde no
+                         debe cambiar nada, y CERO ciclos distintos de la b10 de la Zynq (la del SRL): el porte es el mismo
+                         comportamiento ciclo a ciclo.
+  run_sprite_yjk.sh      VDP completo (Verilator): sprites de 8x8 sobre un fondo G7 en SCREEN 8 (referencia), 10/11 y 12. Nuevo:
+                         los dos sprites visibles, en su columna, color propio (TB_OK). V3.8.4: SCREEN 12 sin sprites y SCREEN 10/11
+                         sin lineas de fondo (TB_FAIL). El volcado del frame de SCREEN 8 sale BYTE A BYTE igual con el RTL viejo y
+                         el nuevo (692 lineas): fuera de YJK no cambia nada. tb_sprite_yjk_vdp.sv va sin los puertos ext_cmd_*.
+NO PORTADO, y por que:
+  3d55af4  HMMV rapido de las filas rellenas de geo3d (vdp_command.v, vdp.v): esta rama no lleva geo3d (ni el gancho ext_cmd_* de
+           vdp.v). Va con la rama geo3d del 138K si se retoma.
+  vdp.v    hires512 (4:3 + Scale3x de la beta): es del escalador de la Zynq; el 60K/138K tienen su video720.
+  8a37b33, 4695305  geometria del escalador de la Tang de HRA (denominador, zona activa de vdp_video_out.v): cada puente HDMI tiene
+           el suyo; sin revisar contra video720, como en la Zynq.
+  5927e0f, f0f4610  lectura adelantada de VRAM y WAIT (bus_write_done): la Zynq lo estudia aparte.
+  bee8f7e  (parte de geo3d_bus.v, hold de Gowin): no hay geo3d aqui.
+ABIERTO EN LA ZYNQ (no es de esta sesion, pero afecta al V9968 que compartimos): su plan Z1.2.8 pide probar en una build aparte el
+  revertir el TR=1 en reposo de S#2 (nuestro _183) con regresion Fleet / V9968DM; y la issue #7 de HRA (LMMC de Dragon Slayer
+  Family) sigue sin respuesta. Aqui no se toca ninguno.
+ESTADO: simulado, SIN build de Gowin y SIN probar en placa (la b9/b10 de la Zynq tampoco esta probada en placa). El 138K recibe el
+  mismo fichero. Antes de llamarlo v3.8.5: una campana de dados con el gate (el cambio toca el camino sprite -> mezcla -> paleta
+  del reloj del VDP) y MiG / un demo en SCREEN 10-12 en el 60K.
 ================================================================================

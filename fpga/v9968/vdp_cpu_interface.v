@@ -775,12 +775,10 @@ module vdp_cpu_interface (
 			//	devuelve S#1, los comandos extendidos y el direccionamiento de
 			//	256K. Eso libera R#20[5] y R#20[6], que pasan a llevar el
 			//	entrelazado plano y la interrupcion de fin de comando.
-			//	⚠️ El comentario de cabecera de R#20 del upstream NO se actualizo
-			//	y por eso alli MIENTE; aqui va corregido.
 			//	⚠️ Requiere el byte 14 de DEVCON.COM a 0x9F (era 0xFF) y el
 			//	offset 0x377 de V9968DM.COM. Sin eso las dos herramientas de
 			//	diagnostico de HRA programan el VDP con el mapa viejo.
-			8'd20:	//	R#20 = [S16][CEIE][ILN][EPAL][SCOL][ILNS][SVNS][HS]
+			8'd20:	//	R#20 = [S16][CEIE][FIL][EPAL][SP3][ILNS][SVNS][HS]
 				begin
 					if( !ff_lock_extregs ) begin	//	gen C: solo desbloqueado por el puerto #4
 						ff_command_high_speed_mode <= ff_1st_byte[0];

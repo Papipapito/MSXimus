@@ -136,6 +136,17 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
+## Candidato v3.8.5 (2 de noviembre, solo RTL, sin build): los sprites y la paleta del YJK, de la Zynq
+
+**Sin core nuevo ni probado en placa**: la línea está cerrada en la v3.8.4 y esto es un candidato, como dice el estado de arriba. Se trae de la Zynq Z1.3.2b9 y b10 (tampoco probadas en placa) lo del V9968 que sirve en Gowin; el 138K recibe el mismo fichero. El detalle, en `fpga/v9968/ORIGEN.txt`.
+
+- **SCREEN 10 y 11: los puntos con A = 1** (los 4 bits altos del byte son el número de paleta) salían con un color de 256 y una celda adelantados; ahora salen con su color de paleta y en su sitio. En YJK el punto se toma con `delay4` y la conversión de 256 colores ya no se aplica. SCREEN 8 y 12 no cambian. (HRA!, v0.93, `bee8f7e`.)
+- **SCREEN 10, 11 y 12: los sprites se ven y caen donde deben.** Antes un sprite sobre un píxel YJK quedaba tapado por el color YJK (en SCREEN 12 no se veía nunca) y, sobre los puntos con A = 1, salía 4 celdas antes que el fondo. Ahora se dibuja sobre cualquier píxel con su color de la paleta de 16 colores; los sprites con mezcla (modo 3, TP) se mezclan con el YJK del fondo. Parche propio de la Zynq (Z1.3.2b10).
+- **Adaptado a Gowin**: la cadena de captura del sprite es de 5 etapas de FF explícitas por bit (+44 FF y +38 LUT medidos en la síntesis del módulo solo; sin RAM nueva), no el SRL16E que infiere Vivado. Lo toca `vdp_color_palette.v` y nada más; el comentario de R#20 de `vdp_cpu_interface.v` se pone como el del 138K.
+- **Bancos** (WSL; los de la Zynq en `tools/v9968_sim`): `run_palette_yjk.sh` (la V3.8.4 falla 12 pruebas, el nuevo pasa), `run_palette_yjk_ab.sh` (433.211 ciclos idénticos a la b9 donde no debe cambiar nada y 0 ciclos distintos de la b10 de la Zynq) y `run_sprite_yjk.sh` (VDP completo: con la V3.8.4 faltan los sprites de SCREEN 12 y el fondo de SCREEN 10/11; con el nuevo salen en su columna). El frame de SCREEN 8 sale idéntico byte a byte.
+- **No portado**: el relleno rápido de geo3d (esta rama no lleva geo3d), el 4:3 con Scale3x y la geometría del escalador de HRA!.
+- **Antes de llamarlo v3.8.5**: una campaña de dados con el gate (toca el camino sprite → mezcla → paleta del reloj del VDP y el CLS está al 98 %) y una prueba en placa con un demo en SCREEN 10-12.
+
 ## v3.8.4 (15 de octubre, publicada en msx.barcelona): DAMP, pseudo-reverb y el ruido de «Dutch Moonsound Veterans»
 
 Core: **dado 5471** (campaña `v384`: 5437 fuera por setup, −0,002 ns; 5443 sin rutar, 113 redes; 5441 y 5449 pasan el gate pero con +0,060 y +0,311 ns de peor setup), peor setup +0,823 ns, CLS 98 %, holds todos positivos (mínimo +0,047 ns). `files/20261015/MSXimus_v3.8.4.fs` (2a3ed287102a) y `_jtag.bin` (21b340d74e51); packs y ondas, los de la 3.8.0b4. Publicada el mismo día en msx.barcelona (`MXUPDATE /N`), sin release en GitHub; en la web quedan la 3.8.4 y la 3.8.3. Sin probar en placa: lo primero, «Dutch Moonsound Veterans HDD» parte 2 (ESPACIO en los créditos: el fundido sin ruido), MoonBlaster Wave con cortes de nota (DAMP) y Surrec (la cola de reverb de DANCE).
