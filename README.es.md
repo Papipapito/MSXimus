@@ -121,7 +121,7 @@ Con el menú encendido tienes el navegador de la tarjeta, el lanzador de ROM y D
 
 > Montar un `.dsk` reescribe sectores de un fichero **que ya existe**: no crea entradas de directorio ni asigna clústeres.
 
-Después, mete una microSD con tus ROMs y discos y listo. La mejor forma de prepararla es **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)**, que tiene su propio repositorio (en [`MSXsdmaker/`](MSXsdmaker/LEEME.md) hay una copia con sus instrucciones): un programa para Windows que parte la tarjeta como lo hace Nextor, copia Nextor y una colección de programas (SofaRun, Multi Mente…) y escribe el `AUTOEXEC.BAT`. Para Nextor 3 la release trae además una imagen de tarjeta ya hecha, `MSXimus_SD_Nextor3-beta2_1800MB.zip` (1800 MB, cabe en cualquier tarjeta de 2 GB o mayor): se graba con balenaEtcher o Rufus.
+Después, mete una microSD con tus ROMs y discos y listo. La mejor forma de prepararla es **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)**, un programa para Windows y macOS que parte la tarjeta como lo hace Nextor, copia Nextor y una colección de programas (SofaRun, Multi Mente…) y escribe el `AUTOEXEC.BAT`. Para Nextor 3 la release trae además una imagen de tarjeta ya hecha, `MSXimus_SD_Nextor3-beta2_1800MB.zip` (1800 MB, cabe en cualquier tarjeta de 2 GB o mayor): se graba con balenaEtcher o Rufus.
 
 > **Sobre las microSD:** usa una tarjeta **de marca y Clase 10** (Samsung, SanDisk, Kingston...), formateada en **FAT16**. Las tarjetas baratas sin marca leen bien pero rechazan o pierden escrituras en ráfagas sostenidas — lo medimos en placa: una sin marca fallaba escrituras incluso con pausas, y una Samsung EVO+ iba perfecta con el mismo código y la misma geometría. Si las descargas o los guardados fallan, sospecha de la tarjeta primero.
 
@@ -260,7 +260,6 @@ El proyecto de Bambu Studio, los STL, los ajustes de impresión y las notas de m
 ```
 carcasa/         La carcasa imprimible en 3D (3MF, STL, montaje)
 docs/            Manual, referencia técnica, histórico, logo, fotos
-MSXsdmaker/      MSX SD Maker: prepara la tarjeta SD (programa para Windows + instrucciones)
 fpga/            top.v, build.tcl
   v9968/         El VDP V9968 (+ ORIGEN.txt: procedencia y parches locales)
   video720/      Puente HDMI y escalador
@@ -307,7 +306,7 @@ Tres arreglos del V9968 de HRA!, los mismos que lleva el MSXimus Z (Z1.2.1). Sol
 - **LMMM, HMMM y YMMM con DIY** (copiando hacia arriba) acaban cuando el **origen** llega a la línea 0, no solo el destino.
 - **El paso de píxel de los comandos** se toma al escribir R#46. Es la versión de HRA! de nuestro arreglo de SCREEN 2 de la v3.7.1, y cubre también FG4.
 - Ajustes dice `3.7.6` (puerto 29h).
-- **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)** (con su propio repositorio; una copia en [`MSXsdmaker/`](MSXsdmaker/LEEME.md)), un programa para Windows que prepara la tarjeta SD: particiones FAT16 de 2 o 4 GB como las hace el FDISK de Nextor, o una FAT32; Nextor 2.1.4, Nextor 3 o MSX-DOS; SofaRun, Multi Mente, utilidades y red; y el `AUTOEXEC.BAT` que monta las demás particiones.
+- **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)**, un programa para Windows y macOS que prepara la tarjeta SD: particiones FAT16 de 2 o 4 GB como las hace el FDISK de Nextor, o una FAT32; Nextor 2.1.4, Nextor 3 o MSX-DOS; SofaRun, Multi Mente, utilidades y red; y el `AUTOEXEC.BAT` que monta las demás particiones.
 
 ## Lo nuevo de la v3.7.5
 

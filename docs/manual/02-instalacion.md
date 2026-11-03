@@ -47,7 +47,7 @@ Un mismo pack sirve para cualquier core desde la versión 3.5c: el menú y el dr
 
 En una placa recién grabada la máquina arranca en el navegador de la tarjeta. Quien prefiera que arranque directamente en el MSX, como un ordenador de siempre: **S** durante el logo, desmarcar **Menú al arrancar** y **Save & Restart**. Es un ajuste guardado en la flash, sobrevive a los apagados, y se vuelve a activar marcándolo. El [capítulo 04](04-menu.md) cuenta el menú entero.
 
-Con eso, una microSD con ROMs y discos, y ya está. El [capítulo 03](03-tarjeta-sd.md) explica cómo prepararla; la forma más fácil es [MSX SD Maker](../../MSXsdmaker/LEEME.md).
+Con eso, una microSD con ROMs y discos, y ya está. El [capítulo 03](03-tarjeta-sd.md) explica cómo prepararla; la forma más fácil es [MSX SD Maker](https://github.com/Papipapito/SD_Maker).
 
 ## 2. El panel F12: el BL616 (opcional)
 

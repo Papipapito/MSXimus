@@ -121,7 +121,7 @@ With the menu on you get the card browser, the ROM and DSK launcher and — if y
 
 > Mounting a `.dsk` rewrites sectors of a file that **already exists**: it never creates directory entries or allocates clusters.
 
-After that, insert a microSD with your ROMs and disk images and you're done. The best way to prepare it is **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)**, which has its own repository (a copy with its guide is in [`MSXsdmaker/`](MSXsdmaker/README.md)): a Windows program that partitions the card the way Nextor does, installs Nextor and a set of programs (SofaRun, Multi Mente…) and writes the `AUTOEXEC.BAT`. For Nextor 3 the release also has a ready-made card image, `MSXimus_SD_Nextor3-beta2_1800MB.zip` (1800 MB, fits any 2 GB card or larger): write it with balenaEtcher or Rufus.
+After that, insert a microSD with your ROMs and disk images and you're done. The best way to prepare it is **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)**, a Windows and macOS program that partitions the card the way Nextor does, installs Nextor and a set of programs (SofaRun, Multi Mente…) and writes the `AUTOEXEC.BAT`. For Nextor 3 the release also has a ready-made card image, `MSXimus_SD_Nextor3-beta2_1800MB.zip` (1800 MB, fits any 2 GB card or larger): write it with balenaEtcher or Rufus.
 
 > **About microSD cards:** use a **name-brand, Class 10** card (Samsung, SanDisk, Kingston...), formatted **FAT16**. Cheap no-name cards read fine but reject or lose sector writes under sustained bursts — we measured it on the bench: a no-name card kept failing writes even when paced, while a Samsung EVO+ was flawless with the exact same code and geometry. If downloads or saves act up, suspect the card first.
 
@@ -260,7 +260,6 @@ The Bambu Studio project, the STLs, the print settings and the assembly notes ar
 ```
 carcasa/         The 3D-printable case (3MF, STLs, assembly)
 docs/            Manual, technical reference, history, logo, photos
-MSXsdmaker/      MSX SD Maker: prepares the SD card (Windows program + instructions)
 fpga/            top.v, build.tcl
   v9968/         The V9968 VDP (+ ORIGEN.txt: provenance and local patches)
   video720/      HDMI bridge and scaler
@@ -307,7 +306,7 @@ Three fixes from HRA!'s V9968, the same ones as in the MSXimus Z (Z1.2.1). Only 
 - **LMMM, HMMM and YMMM with DIY** (copying upwards) stop when the **source** reaches line 0, not only the destination.
 - **The command pixel step** is taken when R#46 is written. It is HRA!'s version of our SCREEN 2 fix from v3.7.1, and it also covers FG4.
 - Settings shows `3.7.6` (port 29h).
-- **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)** (its own repository; a copy in [`MSXsdmaker/`](MSXsdmaker/README.md)), a Windows program that prepares the SD card: 2 or 4 GB FAT16 partitions laid out as Nextor's FDISK does, or one FAT32; Nextor 2.1.4, Nextor 3 or MSX-DOS; SofaRun, Multi Mente, utilities and networking; and the `AUTOEXEC.BAT` that mounts the other partitions.
+- **[MSX SD Maker](https://github.com/Papipapito/SD_Maker)**, a Windows and macOS program that prepares the SD card: 2 or 4 GB FAT16 partitions laid out as Nextor's FDISK does, or one FAT32; Nextor 2.1.4, Nextor 3 or MSX-DOS; SofaRun, Multi Mente, utilities and networking; and the `AUTOEXEC.BAT` that mounts the other partitions.
 
 ## What's new in v3.7.5
 

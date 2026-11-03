@@ -1,8 +1,0 @@
-build/
-dist/
-__pycache__/
-*.img
-ruvector.db
-# el pack de KdL (lleva ROMs con derechos de terceros): solo el LEEME
-OCM-SDBIOS/*
-!OCM-SDBIOS/LEEME.txt
