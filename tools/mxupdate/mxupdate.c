@@ -427,7 +427,9 @@ static bool Http(const Placa* pl, const c8* nombre, u8 fh)
 	i = Pega(g_hdr, i, nombre);
 	i = Pega(g_hdr, i, " HTTP/1.0\r\nHost: ");
 	i = Pega(g_hdr, i, g_srv[0] ? g_srv : g_web);
-	i = Pega(g_hdr, i, "\r\nConnection: close\r\n\r\n");
+	i = Pega(g_hdr, i, "\r\nUser-Agent: MXUPDATE/" MXU_VERSION " (");
+	i = Pega(g_hdr, i, pl->nombre);
+	i = Pega(g_hdr, i, ")\r\nConnection: close\r\n\r\n");
 	if (!Net_Send(g_cx, (const u8*)g_hdr, i)) { Net_Abort(g_cx); return FALSE; }
 	g_hdr_n = 0; g_man_n = 0;
 	t0 = JIFFY;
