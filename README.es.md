@@ -39,7 +39,7 @@ Eso es un cambio en los cimientos, no en la superficie, y merecía número propi
 
 **Entrada** · Teclado USB directo sin hub, con F1–F10 físicas · gamepads USB mapeados a joystick MSX · ratón USB como ratón MSX
 
-**En pantalla** · **Panel de estado en F12** opcional, en color, pintado sobre el MSX por el BL616 que la placa ya lleva
+**En pantalla** · **Panel de estado en F12**, en color, pintado sobre el MSX por el BL616 que la placa ya lleva
 
 **Actualizaciones** · Desde el propio MSX, sin PC: `MXUPDATE /N` baja la última versión de internet y la graba; también vale un fichero `.UPD` en la SD
 
@@ -58,13 +58,15 @@ Eso es un cambio en los cimientos, no en la superficie, y merecía número propi
 | Opcional | Teclado y gamepad **USB** | Directos a los USB-A de la placa, sin hub |
 | Opcional | **Ratón USB**, con cable | Directo a la placa. ⚠️ Un receptor **inalámbrico** no vale: se presenta como dispositivo compuesto |
 | Opcional | **ESP32-C6** (Waveshare C6-LCD-1.3) | Para el **WiFi**, con pantalla opcional de información |
-| Opcional | *Nada que comprar* — el **BL616** de la propia placa | Habilita el panel de estado de F12. Hay que grabarle el firmware una vez |
+| **Obligatorio** | *Nada que comprar* — el **BL616** de la propia placa | Hay que grabarle el firmware del MSXimus **antes que nada**: de fábrica lleva el de Sipeed y es lo que sale al encender. También da el panel de estado de F12 |
 
 El ventilador no hace falta para funcionar. Si lo pones, el core lo controla solo: mide la temperatura del chip con un termómetro interno y solo sopla cuando toca.
 
 ## Instalación
 
-Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
+> **Son dos pasos obligatorios, en este orden.** **Paso 1:** el firmware del BL616 ([Grabar el BL616](#grabar-el-bl616), con BLDevCube): de fábrica la Console lleva el firmware de Sipeed (de NES y otras cosas) y, si no se lo cambias, es lo que sale al encender, no el MSXimus. **Paso 2:** el core, el pack y las ondas en la flash SPI, con el Gowin Programmer (lo que sigue).
+
+**Paso 2 — la flash SPI.** Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
@@ -72,7 +74,7 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 | 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.bin` | **`0x500000`** | No, y **ya no va en la release**: con el core en marcha, `MXUPDATE /N` ofrece bajar las ondas del OPL4 de msx.barcelona y las graba (o `MXUPDATE /O` cuando quieras). Solo a mano si ya tienes tu `yrw801.bin` (como `.bin`: el Programmer de Gowin no acepta `.rom`) |
 
-Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **ESP32-C6** (WiFi) y el del **BL616** (el panel de F12). Cada una tiene su sección más abajo.
+Hay dos piezas más que no van a esa flash: el firmware del **BL616** (el **paso 1**, obligatorio) y el del **ESP32-C6** (WiFi, opcional). Cada una tiene su sección más abajo.
 
 **Esto solo hace falta una vez.** Desde la v3.8, las siguientes actualizaciones se hacen desde el propio MSX: ver [Actualizar desde el MSX](#actualizar-desde-el-msx).
 
@@ -82,7 +84,7 @@ Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **E
 |---|---|
 | Los tres ficheros de arriba | [**Gowin Programmer**](https://www.gowinsemi.com/en/support/download_eda/) (el que viene con el IDE 1.9.12 va bien) |
 | ESP32-C6 (WiFi) | [**esptool-js**](https://espressif.github.io/esptool-js/) en el navegador — sin instalar nada — o `esptool` |
-| BL616 (panel de F12) | [**Bouffalo Lab Dev Cube**](https://github.com/bouffalolab/bouffalo_sdk) (BLDevCube) |
+| BL616 (paso 1) | [**Bouffalo Lab Dev Cube**](https://github.com/bouffalolab/bouffalo_sdk) (BLDevCube) |
 
 ### Cómo grabarlo
 
@@ -93,6 +95,8 @@ Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **E
 5. **Apaga y enciende la placa.** Un reset **no** basta: la DDR3 necesita recalibrar desde frío y con un reset caliente puede quedarse colgada.
 
 > Si al arrancar ves la pantalla azul y nada más, casi siempre es (a) el pack en la dirección equivocada, o (b) que no has hecho el ciclo de apagado.
+>
+> Si lo que sale no es el MSXimus sino el firmware de fábrica de la Console (el de Sipeed), falta el paso 1: el BL616.
 
 ### Sobre el pack de BIOS
 
@@ -157,9 +161,9 @@ Todo se comprueba **antes de borrar nada** y la flash se relee al final. Si algo
 
 Tiempos, porque todo lo hace el Z80: solo el pack, 1,5 minutos; core y pack, 9 minutos; la completa, 15 minutos; más la descarga. Todo lo demás está en el manual: [`docs/manual/11-actualizar.md`](docs/manual/11-actualizar.md).
 
-## El panel de estado — F12 (opcional)
+## El BL616 y el panel de estado — F12
 
-La Console 60K lleva un segundo chip que probablemente no hayas usado nunca: un microcontrolador **BL616**, conectado a la FPGA de fábrica. Dale un firmware y te pinta un panel de estado directamente sobre la imagen del MSX.
+La Console 60K lleva un segundo chip: un microcontrolador **BL616**, conectado a la FPGA de fábrica. **Hay que grabarle el firmware del MSXimus antes que nada**: de serie lleva el de Sipeed (de NES y otras cosas) y es lo que sale al encender, no el MSXimus. Con el del MSXimus, además, te pinta un panel de estado directamente sobre la imagen del MSX.
 
 Pulsas **F12** y el MSX se congela y sale el panel, en color. Lo pulsas otra vez (o ESC) y la partida sigue exactamente donde estaba. Es de **solo lectura** — no hay menú, ni cursor, ni nada que romper. Enseña lo que el core dice de sí mismo, en el idioma del menú:
 
@@ -188,7 +192,7 @@ Y no te cuesta nada en hardware: **ni cables, ni soldar, ni módulo**. El enlace
 
 ### Grabar el BL616
 
-La release lo trae todo en un ZIP, **`bl616_msximus_v3.8_60k.zip`**: dos imágenes que **conviven** — la de fábrica de Sipeed se queda donde está — y el `.ini` que las graba:
+**Paso 1, antes que el core.** La release lo trae todo en un ZIP, **`bl616_msximus_v3.8_60k.zip`**: dos imágenes que **conviven** — la de fábrica de Sipeed se queda donde está — y el `.ini` que las graba:
 
 | Fichero | Dirección |
 |---|---|
@@ -198,11 +202,11 @@ La release lo trae todo en un ZIP, **`bl616_msximus_v3.8_60k.zip`**: dos imágen
 1. **Mantén pulsado el botón BOOT mientras enchufas el USB.** Eso mete el chip en modo ISP.
 2. Aparece un **puerto COM nuevo** — ese es el BL616. (Listar los puertos antes y después de enchufar es la forma fácil de saber cuál.)
 3. Descomprime el ZIP en una carpeta, abre **BLDevCube** y carga su **`flash_prog_cfg.ini`**: ya trae las dos imágenes con sus direcciones, así que no hay que teclearlas.
-4. Desenchufa, vuelve a enchufar y haz un ciclo de apagado de la placa.
+4. Sigue con el **paso 2**: el core, el pack y las ondas con el Gowin Programmer ([Instalación](#instalación)).
 
 El modo ISP vive en la ROM del chip, no en su flash, así que funciona pase lo que pase con lo que hayas escrito. **Es la marcha atrás que nunca falla**: por aquí no puedes dejar la placa inservible.
 
-Y si prefieres no grabarlo, no lo grabes: el MSX funciona exactamente igual, simplemente no tendrás el panel de F12.
+No te lo saltes: sin este paso, al encender sale el firmware de fábrica de la Console (el de Sipeed) y no el MSXimus.
 
 ## Conexión del ESP32-C6 (WiFi)
 

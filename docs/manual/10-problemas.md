@@ -6,6 +6,7 @@ Por síntoma, qué mirar. Casi todo lo que hay aquí ha pasado de verdad durante
 
 | Síntoma | Causa probable | Qué hacer |
 |---|---|---|
+| Al encender no sale el MSXimus sino el firmware de fábrica de la Console (el de Sipeed: NES y otras cosas) | Al BL616 no se le ha grabado el firmware del MSXimus (paso 1 de la instalación) | Grabar `bl616_msximus_v3.8_60k.zip` con BLDevCube ([capítulo 02](02-instalacion.md)); después, el core con el Gowin Programmer |
 | Pantalla azul y nada más | El pack no está en 0x400000, o falta apagar y encender tras grabar | Regrabar el pack en la dirección exacta y **apagar y encender**, no reset |
 | Pantalla negra, sin señal HDMI | La DDR3 no calibró tras un reset en caliente | Apagar y encender |
 | Pantalla negra (o negra y luego el menú sin logo) al encender **desde un cargador**, pero arranca bien desde el USB del PC; el LED de la SD (U12) parpadea solo y va más rápido con F11 | La DDR3 de la VRAM no ha calibrado: cada intento de calibración sale bien con una probabilidad que depende del core (del dado, capítulo 07 de la técnica) y de la alimentación. El MSX corre por debajo, sin vídeo | Esperar: desde la v3.7b el core reintenta con ventanas cada vez más largas y, si sigue sin calibrar, con el PLL reiniciado; el arranque espera hasta 10 s. Probar otro cargador o una batería USB (algunos cargadores USB-C hacen caer VBUS un instante al negociar). Si un core concreto falla siempre, es su dado: otro `.fs`. Desde BASIC `PRINT INP(&H2C) AND 127` dice los intentos que fallaron |
