@@ -70,7 +70,7 @@ Everything goes into the board's **SPI flash**, at three different addresses:
 |---|---|---|---|
 | 1 | `MSXimus_v3.8.0b4.fs` | **`0x000000`** | Yes — this is the core |
 | 2 | BIOS pack (`pack_bios_msximus*.bin`) | **`0x400000`** | Yes — the MSX won't boot without it |
-| 3 | `yrw801.bin` | **`0x500000`** | No — only for MoonSound/OPL4 (the wave ROM is shipped as `.bin`: Gowin's Programmer does not accept `.rom`; rename a `yrw801.rom` if that is what you have) |
+| 3 | `yrw801.bin` | **`0x500000`** | No, and it is **no longer in the release**: once the core runs, `MXUPDATE /N` offers to download the OPL4 waves from msx.barcelona and flashes them (or `MXUPDATE /O` any time). By hand only if you already have your own `yrw801.bin` (as `.bin`: Gowin's Programmer does not accept `.rom`) |
 
 Two more pieces are **optional** and do not live in that flash: the **ESP32-C6** firmware (WiFi) and the **BL616** firmware (the F12 panel). Each has its own section below.
 
@@ -96,7 +96,7 @@ Two more pieces are **optional** and do not live in that flash: the **ESP32-C6**
 
 ### About the BIOS pack
 
-The release ships **everything you need**: the core, the BIOS pack, the OPL4's `yrw801.bin` and the firmwares. Download, flash, and it boots.
+The release ships **everything you need to boot**: the core, the BIOS pack and the firmwares. The OPL4's waves are not in it: [MXUPDATE](#updating-from-the-msx) downloads them. Download, flash, and it boots.
 
 There are **four builds of the same pack**: the menu in Spanish or in English, and the disk kernel inside:
 
@@ -109,7 +109,7 @@ There are **four builds of the same pack**: the menu in Spanish or in English, a
 
 If you would rather build the pack from your own ROMs, there's the [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), which assembles the file from them, Nextor included.
 
-Without `yrw801.bin` the core works just the same; you simply won't have MoonSound.
+Without the OPL4 waves (`yrw801.bin`) the core works just the same; you simply won't have MoonSound's wavetable. Once the core runs, `MXUPDATE /N` offers to download them when it finishes, and `MXUPDATE /O` does it any time.
 
 ### One BIOS, and the menu is a setting
 
@@ -147,6 +147,7 @@ MXUPDATE file.UPD         flashes that file
 MXUPDATE /C file.UPD      only checks it (header and CRCs); the flash is not touched
 MXUPDATE /N               downloads the latest version and flashes it
 MXUPDATE /N /R            the full one (core, pack and the OPL4 waves) and back to factory settings
+MXUPDATE /O               only the OPL4 waves (YRW801): downloads and flashes them
 MXUPDATE /H   /?          help: the commands, without touching anything
 ```
 

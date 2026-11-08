@@ -70,7 +70,7 @@ Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 |---|---|---|---|
 | 1 | `MSXimus_v3.8.0b4.fs` | **`0x000000`** | Sí — es el core |
 | 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
-| 3 | `yrw801.bin` | **`0x500000`** | No — solo para MoonSound/OPL4 (la ROM de ondas va como `.bin`: el Programmer de Gowin no acepta `.rom`; si tienes una `yrw801.rom`, cámbiale la extensión) |
+| 3 | `yrw801.bin` | **`0x500000`** | No, y **ya no va en la release**: con el core en marcha, `MXUPDATE /N` ofrece bajar las ondas del OPL4 de msx.barcelona y las graba (o `MXUPDATE /O` cuando quieras). Solo a mano si ya tienes tu `yrw801.bin` (como `.bin`: el Programmer de Gowin no acepta `.rom`) |
 
 Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **ESP32-C6** (WiFi) y el del **BL616** (el panel de F12). Cada una tiene su sección más abajo.
 
@@ -96,7 +96,7 @@ Hay dos piezas más, **opcionales**, que no van a esa flash: el firmware del **E
 
 ### Sobre el pack de BIOS
 
-La release trae **todo lo necesario**: el core, el pack de BIOS, la `yrw801.bin` del OPL4 y los firmwares. Descargas, grabas y arranca.
+La release trae **todo lo necesario para arrancar**: el core, el pack de BIOS y los firmwares. Las ondas del OPL4 no van en ella: las baja [MXUPDATE](#actualizar-desde-el-msx). Descargas, grabas y arranca.
 
 Hay **cuatro versiones del mismo pack**: el menú en castellano o en inglés, y el kernel de disco que llevan dentro:
 
@@ -109,7 +109,7 @@ Hay **cuatro versiones del mismo pack**: el menú en castellano o en inglés, y 
 
 Si prefieres montarte el pack con tus propias ROMs, está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con ellas, Nextor incluido.
 
-Sin la `yrw801.bin` el core funciona igual; simplemente no tendrás MoonSound.
+Sin las ondas del OPL4 (`yrw801.bin`) el core funciona igual; simplemente no tendrás la tabla de ondas del MoonSound. Con el core en marcha, `MXUPDATE /N` ofrece bajarlas al acabar, y `MXUPDATE /O` lo hace cuando quieras.
 
 ### Una sola BIOS, y el menú es un ajuste
 
@@ -147,6 +147,7 @@ MXUPDATE fichero.UPD      graba ese fichero
 MXUPDATE /C fichero.UPD   solo lo comprueba (cabecera y CRC); no toca la flash
 MXUPDATE /N               baja la ultima version y la graba
 MXUPDATE /N /R            la completa (core, pack y ondas del OPL4) y ajustes de fabrica
+MXUPDATE /O               solo las ondas del OPL4 (YRW801): las baja y las graba
 MXUPDATE /H   /?          la ayuda: las ordenes, sin tocar nada
 ```
 

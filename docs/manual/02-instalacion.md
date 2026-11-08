@@ -10,9 +10,9 @@ Tres ficheros, cada uno a una dirección distinta de la misma flash:
 |---|---|---|
 | El core: `MSXimus_v3.8.0b4.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
 | El pack de BIOS, `pack_bios_msximus*.bin` | **0x400000** | Sí, sin él la máquina no arranca |
-| `yrw801.bin`, la ROM de ondas del MoonSound (va como `.bin` porque el Programmer de Gowin no coge `.rom`; si tienes un `yrw801.rom`, renómbralo) | **0x500000** | No, solo para tener el OPL4 completo |
+| `yrw801.bin`, la ROM de ondas del MoonSound (va como `.bin` porque el Programmer de Gowin no coge `.rom`; si tienes un `yrw801.rom`, renómbralo) | **0x500000** | No, y **ya no va en la release**: con el core en marcha, `MXUPDATE /N` ofrece bajarla de msx.barcelona y grabarla (o `MXUPDATE /O` cuando quieras; [capítulo 11](11-actualizar.md)). A mano solo si ya tienes tu `yrw801.bin` |
 
-La release trae los tres, más los firmwares del C6 y del BL616. Con `yrw801.bin` sin grabar todo funciona igual, salvo la tabla de ondas del MoonSound.
+La release trae el core y el pack, más los firmwares del C6 y del BL616. Las ondas del OPL4 (`yrw801.bin`) ya no van en ella: las baja `MXUPDATE` ([capítulo 11](11-actualizar.md)). Sin ellas todo funciona igual, salvo la tabla de ondas del MoonSound.
 
 **Herramienta**: el [Gowin Programmer](https://www.gowinsemi.com/en/support/download_eda/), gratuito. El que viene con el IDE 1.9.12 va bien.
 

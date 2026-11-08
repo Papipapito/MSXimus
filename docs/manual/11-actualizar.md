@@ -1,24 +1,26 @@
 # 11. Actualizar desde el MSX
 
-Desde la V3.8 el MSXimus se actualiza **sin PC**: el core y el pack de BIOS se graban en la flash de la placa desde el propio MSX. Hay tres caminos:
+Desde la V3.8 el MSXimus se actualiza **sin PC**: el core y el pack de BIOS se graban en la flash de la placa desde el propio MSX. Hay cuatro caminos:
 
 | Camino | Qué hace | Hace falta |
 |---|---|---|
 | `MXUPDATE /N` | Baja la última versión de internet ([msx.barcelona](https://msx.barcelona)) y la graba | MSX-DOS 2 o Nextor, el ESP32-C6 con WiFi |
+| `MXUPDATE /O` | Baja solo las ondas del OPL4 (la ROM YRW801, 2 MB) de internet y las graba | MSX-DOS 2 o Nextor, el ESP32-C6 con WiFi |
 | `MXUPDATE fichero.UPD` | Graba un fichero `.UPD` que tienes en la SD | MSX-DOS 2 o Nextor |
 | Ajustes → **Instalar actualización** | Graba el `MSXIMUS.UPD` de la raíz de la SD | Nada más: no hace falta arrancar MSX-DOS |
 
-Los tres hacen las mismas comprobaciones y graban igual. La única condición es que en la placa ya haya un **core V3.8 o posterior**, el primero que lleva el *puente de la flash* (el dispositivo que deja escribir en ella desde el MSX). La primera V3.8 se graba una vez con el PC, como siempre ([capítulo 02](02-instalacion.md)); desde ahí, ya no hace falta.
+Los cuatro hacen las mismas comprobaciones y graban igual. La única condición es que en la placa ya haya un **core V3.8 o posterior**, el primero que lleva el *puente de la flash* (el dispositivo que deja escribir en ella desde el MSX). La primera V3.8 se graba una vez con el PC, como siempre ([capítulo 02](02-instalacion.md)); desde ahí, ya no hace falta.
 
 > La MSXimus Z (la versión para la ZYNQ MINI) se actualiza de otra forma: **F12 y U**, desde el panel del propio OSD. Lo de este capítulo es para la Tang Console 60K.
 
 ## 1. Qué es un `.UPD`
 
-Un fichero `.UPD` lleva lo que hay que grabar en la flash, por trozos: el core (en 0x000000), el pack de BIOS (en 0x400000) y, en las actualizaciones completas, las ondas del OPL4 (en 0x500000). Cada trozo lleva su CRC-32. Se pueden hacer de tres tipos:
+Un fichero `.UPD` lleva lo que hay que grabar en la flash, por trozos: el core (en 0x000000), el pack de BIOS (en 0x400000) y, en las actualizaciones completas, las ondas del OPL4 (en 0x500000). Cada trozo lleva su CRC-32. Se pueden hacer de cuatro tipos:
 
 - **Normal**: core y pack. Es lo que baja `MXUPDATE /N`.
 - **Solo el pack**: para cambiar de idioma del menú o de versión de Nextor en un minuto y medio, sin tocar el core.
 - **Completa**: core, pack y ondas del OPL4. Es lo que baja `MXUPDATE /N /R`: todo desde cero.
+- **Solo las ondas**: la ROM de ondas del OPL4 (YRW801, 2 MB, en 0x500000), sin core ni pack. Es lo que baja `MXUPDATE /O` (1.4).
 
 Los **ajustes** que guardas con *Save & Restart* (en 0x480000) **nunca** van en un `.UPD`: una actualización los conserva. Solo `/R` los borra a propósito.
 
@@ -34,12 +36,13 @@ MXUPDATE fichero.UPD      graba ese fichero
 MXUPDATE /C fichero.UPD   solo lo comprueba (cabecera y CRC); no toca la flash
 MXUPDATE /N               baja la ultima version de internet y la graba
 MXUPDATE /N /R            la completa (core, pack y ondas) y vuelve a los ajustes de fabrica
+MXUPDATE /O               baja solo las ondas del OPL4 (YRW801) y las graba; no toca el core ni el pack
 MXUPDATE /EN   /ES        en ingles / en castellano
 MXUPDATE /N /S:192.168.1.10:8000    desde un servidor propio en vez de msx.barcelona
 MXUPDATE /H   /?        la ayuda: las ordenes, sin tocar nada (vale en cualquier MSX con DOS 2)
 ```
 
-**Se actualiza solo.** Cada vez que va a internet (`/N`, o cuando no encuentra el fichero y le dices que lo baje), MXUPDATE mira primero si en msx.barcelona hay una versión suya más nueva. Si la hay, la baja junto a sí mismo, comprueba que es la que dice la web, se sustituye y se vuelve a lanzar con la misma orden: `MXUPDATE 1.3 en la web: actualizando MXUPDATE...` y `MXUPDATE actualizado: se vuelve a lanzar.` Tú no tienes que hacer nada. La versión que llevas sale arriba al lanzarlo (`MXUPDATE 1.2 - actualizar el core`).
+**Se actualiza solo.** Cada vez que va a internet (`/N`, o cuando no encuentra el fichero y le dices que lo baje), MXUPDATE mira primero si en msx.barcelona hay una versión suya más nueva. Si la hay, la baja junto a sí mismo, comprueba que es la que dice la web, se sustituye y se vuelve a lanzar con la misma orden: `MXUPDATE 1.3 en la web: actualizando MXUPDATE...` y `MXUPDATE actualizado: se vuelve a lanzar.` Tú no tienes que hacer nada. La versión que llevas sale arriba al lanzarlo (`MXUPDATE 1.4 - actualizar el core`).
 
 ### 2.1. Por internet: `MXUPDATE /N`
 
@@ -50,6 +53,8 @@ MXUPDATE /H   /?        la ayuda: las ordenes, sin tocar nada (vale en cualquier
 5. La baja a la SD con el nombre de la placa (`MSXIMUS.UPD` en el 60K), la comprueba entera y pregunta `Fichero correcto. Grabar en la flash? (S/N)`.
 6. **S**: `Grabando. NO APAGUES EL MSX.` Al acabar relee la flash y comprueba los CRC otra vez.
 7. `Listo. Apaga y vuelve a encender el MSXimus.` El core nuevo entra al encender.
+
+Si la placa no tiene las ondas del OPL4 (una recién grabada) y el servidor las ofrece, antes del `Listo` pregunta si bajarlas ([apartado 2.4](#24-las-ondas-del-opl4-moonsound-o)).
 
 La conexión con msx.barcelona es **cifrada (TLS) y con el certificado validado**. Para validarlo, el ESP32-C6 tiene que llevar el firmware de la v3.8, que trae las autoridades de certificación de serie. Con un firmware anterior funciona igual, pero sin validar el certificado, y lo dice: `Aviso: certificado sin validar.`. En claro, sin cifrar, no va nunca. El certificado de la web se renueva cada año y no hace falta volver a grabar el C6: lo que lleva el firmware son las autoridades, que duran hasta 2046.
 
@@ -64,6 +69,15 @@ Copia el `.UPD` a la SD (desde el PC, o lo deja ahí `MXUPDATE /N` si contestas 
 ### 2.3. Todo desde cero: `/R`
 
 `MXUPDATE /N /R` baja la variante **completa** (unos 5 MB: core, pack y las ondas del OPL4) y, al acabar de grabar, **borra los ajustes**: la máquina arranca con los de fábrica, como recién grabada. Sirve para dejarla como nueva o si unos ajustes guardados dan guerra.
+
+### 2.4. Las ondas del OPL4 (MoonSound): `/O`
+
+La ROM de ondas del MoonSound (la YRW801, 2 MB) **no va en la release**: la baja de msx.barcelona el propio MXUPDATE (1.4). Hay dos formas:
+
+- **Solo las ondas**: `MXUPDATE /O`. Baja `ONDAS.UPD` (2 MB), lo comprueba, pregunta `Fichero correcto. Grabar en la flash? (S/N)` y lo graba en 0x500000. No toca el core, el pack ni los ajustes. Unos 5 minutos.
+- **Al acabar un `/N`**: si las ondas no están en la flash (una placa recién grabada: están en blanco) y el servidor las ofrece, después de grabar el core y el pack pregunta `Bajarlas e instalarlas ahora? (S/N)`. Con **S** las baja y las graba en la misma sesión; con **N** lo deja y puedes hacerlo cuando quieras con `/O`. Si las ondas ya están, no pregunta.
+
+Las ondas pasan a la memoria del OPL4 al arrancar: hay que apagar y encender. Sin ellas el OPL4 tiene la FM, pero no los instrumentos de la tabla de ondas. La completa (`/N /R`) las lleva ya dentro.
 
 ## 3. Desde Ajustes: «Instalar actualización»
 
@@ -86,6 +100,7 @@ El Z80 hace todo el trabajo, a 3,58 MHz:
 | Solo el pack | 1,5 minutos | lo que tarde en bajar 0,5 MB |
 | Core y pack | 9 minutos | 3 MB |
 | Completa (con las ondas) | 15 minutos | 5 MB |
+| Solo las ondas (`/O`) | unos 5 minutos | 2 MB |
 
 **No apagues la placa mientras graba.**
 
@@ -99,6 +114,7 @@ El Z80 hace todo el trabajo, a 3,58 MHz:
 | `La descarga se ha cortado. No se ha tocado nada.` | Se fue la red a medias | Repetir `MXUPDATE /N` |
 | `Sin conexion con el servidor de actualizaciones.` | No hay red, o el ESP no llega | Mirar la WiFi con la W del menú |
 | `Sin actualizaciones para esta placa (HTTP 404).` | El servidor no tiene nada para tu placa | — |
+| `El servidor no ofrece las ondas del OPL4 de esta placa.` | La web (o el servidor propio de `/S:`) no tiene las ondas para tu placa | — |
 | `No hay red (UNAPI)` | No hay ESP32 o no está configurado | La W del menú |
 | `No se ha podido actualizar MXUPDATE: sigue este.` | No ha podido bajar o comprobar el MXUPDATE nuevo | Nada: sigue con el que tienes. El nuevo está también en la release y en MSX SD Maker |
 | `La flash no ha quedado bien.` | Al releer, algo no coincide | **No apagues**: el core de antes sigue en marcha hasta apagar. Repite `MXUPDATE`, o graba con el PC |
