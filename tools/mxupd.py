@@ -35,6 +35,8 @@ manifiesto.txt que lee MXUPDATE /N:
     notas=...                      (opcional, solo cosas para el usuario)
     imagen=<variante> <fichero> <tamano>
     completa=<variante> <fichero> <tamano>   (con --onda: core + pack + ondas; los que baja MXUPDATE /N /R)
+    ondas=<variante> <fichero> <tamano>      (con --onda: solo las ondas del OPL4; MXUPDATE /O, y lo que ofrece /N si las
+                                              ondas estan en blanco en la flash; 1.4)
 """
 import argparse
 import glob
@@ -180,6 +182,12 @@ def publicar(a):
                                 bitstream=a.bitstream, pack=os.path.join(a.packs, carpeta, pack % maq), onda=None)
         crear(a2)
         man.append("imagen=%s %s %d" % (var, nombre, os.path.getsize(a2.o)))
+    if a.onda:                                                  # las ondas solas, para MXUPDATE /O (y la oferta de /N)
+        nombre = "%s_ondas.upd" % a.version.replace(".", "")
+        a2 = argparse.Namespace(o=os.path.join(dst, nombre), placa=a.placa, version=a.version, variante="ondas",
+                                bitstream=None, pack=None, onda=a.onda)
+        crear(a2)
+        man.append("ondas=ondas %s %d" % (nombre, os.path.getsize(a2.o)))
     if a.onda:                                                  # los completos, para MXUPDATE /N /R
         for var, carpeta, pack, corto in VARIANTES:
             carpeta = n3 if carpeta == "NEXTOR3" else carpeta

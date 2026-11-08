@@ -21,6 +21,9 @@
 //   /R = actualizacion COMPLETA, todo desde cero: con /N baja la variante "completa" (core + pack + ondas del OPL4) y al
 //        acabar borra el sector de los ajustes (0x480000 en el 60K, 0x580000 en el 138K). Sin la firma "AB" el core
 //        arranca con los de fabrica (los mismos que el rescate con S2).
+//   /O = solo las ondas del OPL4 (YRW801, 2 MB): baja la linea "ondas=" del manifiesto a ONDAS.UPD y la graba; el core y
+//        el pack no se tocan (1.4). Con /N, al acabar de grabar, si el manifiesto ofrece las ondas y en la flash estan en
+//        blanco (no se grabaron nunca), pregunta si bajarlas: asi la release no tiene que llevar la YRW801.
 //
 // Graba en la flash SPI de la FPGA lo que trae un .UPD (tools/mxupd.py: el bitstream y/o el pack de la BIOS) a
 // traves del puente de la flash del core (fpga/src/flash_bridge.v, dispositivo de E/S conmutada 4Dh). Orden:
@@ -37,7 +40,7 @@
 #include "msxgl.h"
 #include "network.h"
 
-#define MXU_VERSION "1.3"         // la de MXUPDATE; la de la web: mxupdate/manifiesto.txt
+#define MXU_VERSION "1.4"         // la de MXUPDATE; la de la web: mxupdate/manifiesto.txt
 // la version en UN solo sitio, el cartel: de aqui se compara con la de la web y esto es lo que se busca en el .COM
 // bajado (si no coincidieran, una version mal publicada se bajaria una y otra vez)
 static const c8 g_cartel[] = "MXUPDATE " MXU_VERSION " - ";
@@ -60,9 +63,11 @@ __sfr __at(0x4E) P_INFO;
 
 #define JIFFY (*(volatile u16*)0xFC9E)
 
-static bool g_en, g_solo_comprobar, g_red, g_ajustes, g_aviso, g_sin_nombre, g_ayuda;
+static bool g_en, g_solo_comprobar, g_red, g_ajustes, g_aviso, g_sin_nombre, g_ayuda, g_ondas, g_auto;
 static c8  g_srv[48];          // /S: servidor (vacio = msx.barcelona)
 static u16 g_puerto;
+static c8  g_ond_f[24];        // la linea "ondas=" del manifiesto: el .UPD de las ondas del OPL4 y su tamano (0 = no hay)
+static u32 g_ond_t;
 #define T(es, en) (g_en ? (en) : (es))
 
 //-----------------------------------------------------------------------------
@@ -304,6 +309,7 @@ static void Opciones(void)
 	// dejo la ejecucion anterior (visto en openMSX: un /C se colaba en la siguiente orden)
 	g_ruta[0] = 0; g_srv[0] = 0; g_puerto = 80;
 	g_solo_comprobar = FALSE; g_red = FALSE; g_ajustes = FALSE; g_aviso = FALSE; g_ayuda = FALSE;
+	g_ondas = FALSE; g_auto = FALSE; g_ond_f[0] = 0; g_ond_t = 0;
 	while (i < n) {
 		while (i < n && s[i] == ' ') i++;
 		if (i >= n) break;
@@ -314,6 +320,7 @@ static void Opciones(void)
 			if (a == 'C') g_solo_comprobar = TRUE;
 			if (a == 'N') g_red = TRUE;
 			if (a == 'R') g_ajustes = TRUE;
+			if (a == 'O') { g_ondas = TRUE; g_red = TRUE; }       // solo las ondas del OPL4, por la red
 			if (a == 'H' || s[i + 1] == '?') g_ayuda = TRUE;
 			if (a == 'S' && s[i + 2] == ':') {
 				i += 3; k = 0;
@@ -481,7 +488,7 @@ static bool LeeManifiesto(const c8* placa)
 {
 	c8* l = g_man;
 	bool cab = FALSE, placa_ok = FALSE;
-	g_nimg = 0; g_ver_srv[0] = 0; g_notas[0] = 0;
+	g_nimg = 0; g_ver_srv[0] = 0; g_notas[0] = 0; g_ond_f[0] = 0; g_ond_t = 0;
 	while (*l) {
 		c8* f = l;
 		u8 k;
@@ -493,6 +500,16 @@ static bool LeeManifiesto(const c8* placa)
 		else if (Prefijo(l, "placa=")) placa_ok = Igual(l + 6, placa);
 		else if (Prefijo(l, "version=")) { for (k = 0; k < 15 && l[8 + k]; k++) g_ver_srv[k] = l[8 + k]; g_ver_srv[k] = 0; }
 		else if (Prefijo(l, "notas=")) { for (k = 0; k < 63 && l[6 + k]; k++) g_notas[k] = l[6 + k]; g_notas[k] = 0; }
+		else if (Prefijo(l, "ondas=")) {                // ondas=<variante> <fichero> <tamano>: las ondas del OPL4 solas
+			c8* q = l + 6;
+			while (*q && *q != ' ') q++;                // la variante no hace falta
+			while (*q == ' ') q++;
+			for (k = 0; k < 23 && *q && *q != ' '; k++) g_ond_f[k] = *q++;
+			g_ond_f[k] = 0;
+			while (*q == ' ') q++;
+			while (*q >= '0' && *q <= '9') g_ond_t = g_ond_t * 10 + (*q++ - '0');
+			if (!g_ond_f[0]) g_ond_t = 0;
+		}
 		else if (g_nimg < 4 && (g_ajustes ? Prefijo(l, "completa=") : Prefijo(l, "imagen="))) {   // /R: core + pack + ondas
 			Imagen* im = &g_img[g_nimg];
 			c8* q = l + (g_ajustes ? 9 : 7);
@@ -508,7 +525,7 @@ static bool LeeManifiesto(const c8* placa)
 		}
 		l = f;
 	}
-	return cab && placa_ok && g_ver_srv[0] && g_nimg;
+	return cab && placa_ok && g_ver_srv[0] && (g_nimg || g_ond_t);      // quien llama mira cual de las dos necesita
 }
 
 static bool Contiene(const c8* s, const c8* t)
@@ -672,7 +689,9 @@ static void AutoActualiza(void)
 	c8* nom;
 	c8* p;
 	bool ok;
-	if (!Http(&g_mxu, "manifiesto.txt", 0xFF) || !LeeManifiesto(g_mxu.nombre) || !Mayor(g_ver_srv, g_cartel + 9)) return;
+	g_auto = TRUE;                                  // una sola vez por ejecucion (la oferta de las ondas vuelve a Red)
+	if (!Http(&g_mxu, "manifiesto.txt", 0xFF) || !LeeManifiesto(g_mxu.nombre) || !g_nimg ||
+	    !Mayor(g_ver_srv, g_cartel + 9)) return;
 	Pr(T("MXUPDATE ", "MXUPDATE ")); Pr(g_ver_srv); Pr(T(" en la web: actualizando MXUPDATE...\r\n",
 	   " on the web: updating MXUPDATE...\r\n"));
 	if (Programa(g_prog) || !g_prog[0]) goto no;
@@ -699,9 +718,10 @@ no:
 static bool Red(const Placa* pl)
 {
 	u8 i, elegida = 0, fh;
+	const c8* bajar;
 	c8 c;
 	if (Net_Init() != NET_OK) { Pr(T("No hay red (UNAPI): configura el WiFi con la W del menu.", "No network (UNAPI): set up the WiFi with W in the menu.")); return FALSE; }
-	AutoActualiza();                            // si hay un MXUPDATE mayor, se sustituye y se relanza (no vuelve)
+	if (!g_auto) AutoActualiza();               // si hay un MXUPDATE mayor, se sustituye y se relanza (no vuelve)
 	Pr(T("Preguntando al servidor...\r\n", "Asking the server...\r\n"));
 	g_http[0] = 0;
 	if (!Http(pl, "manifiesto.txt", 0xFF) || !LeeManifiesto(pl->nombre)) {
@@ -709,8 +729,17 @@ static bool Red(const Placa* pl)
 		else Pr(T("Sin conexion con el servidor de actualizaciones.", "Cannot reach the update server."));
 		return FALSE;
 	}
+	if (g_ondas ? !g_ond_t : !g_nimg) {
+		Pr(T("El servidor no ofrece ", "The server does not offer "));
+		Pr(g_ondas ? T("las ondas del OPL4 de esta placa.", "the OPL4 waves for this board.") : T("imagenes para esta placa.", "images for this board."));
+		return FALSE;
+	}
 	Pr(T("Version en el servidor: ", "Version on the server: ")); Pr(g_ver_srv); Pr("\r\n");
 	if (g_notas[0]) { Pr("  "); Pr(g_notas); Pr("\r\n"); }
+	if (g_ondas) {                              // solo las ondas del OPL4: ni variantes ni aviso de Nextor
+		Pr(T("Ondas del OPL4 (YRW801): ", "OPL4 waves (YRW801): ")); PrN(g_ond_t / 1024); Pr(" KB\r\n");
+		bajar = g_ond_f;
+	} else {
 	if (g_ajustes) Pr(T("Completas (core + pack + ondas del OPL4) y\r\nlos ajustes a los de fabrica:\r\n",
 	                    "Full images (core + pack + OPL4 waves) and\r\nfactory settings:\r\n"));
 	for (i = 0; i < g_nimg; i++) {
@@ -732,10 +761,12 @@ static bool Red(const Placa* pl)
 	     ",\r\nMSX-DOS will not boot (MSX SD Maker prepares it). Go on? (Y/N) "));
 	c = DOS_CharInput() & 0xDF;
 	if (c != 'S' && c != 'Y') return FALSE;
-	Pr(T("\r\nDescargando ", "\r\nDownloading ")); Pr(g_img[elegida - 1].fich); Pr(T(" en ", " to ")); Pr(g_ruta); Pr("\r\n");
+	bajar = g_img[elegida - 1].fich;
+	}
+	Pr(T("\r\nDescargando ", "\r\nDownloading ")); Pr(bajar); Pr(T(" en ", " to ")); Pr(g_ruta); Pr("\r\n");
 	fh = CreaEscritura(g_ruta);
 	if (fh == 0xFF) { Pr(T("No se puede crear ", "Cannot create ")); Pr(g_ruta); return FALSE; }
-	i = Http(pl, g_img[elegida - 1].fich, fh);
+	i = Http(pl, bajar, fh);
 	DOS_CloseHandle(fh);
 	if (!i) { Pr(T("\r\nLa descarga se ha cortado. No se ha tocado nada.", "\r\nThe download was interrupted. Nothing was changed.")); return FALSE; }
 	Pr("\r\n");
@@ -756,6 +787,18 @@ static bool DeLaPlaca(const c8* ruta, const Placa* pl)
 	return ok;
 }
 
+// las ondas del OPL4 (pack + 1 MB) estan en blanco: la primera pagina de la flash, todo FF (la YRW801 no empieza por FF)
+static bool OndasVacias(const Placa* pl)
+{
+	u16 k;
+	bool vacias = TRUE;
+	if (!LeeEmpieza(((u32)pl->pack << 16) + 0x100000UL)) return FALSE;
+	if (!LeeBloque(g_buf, 256)) { LeePara(); return FALSE; }
+	LeePara();
+	for (k = 0; k < 256; k++) if (g_buf[k] != 0xFF) vacias = FALSE;
+	return vacias;
+}
+
 static void NoResponde(void) { Pr(T("La flash no responde.", "The flash does not answer.")); Fin(1); }
 
 //-----------------------------------------------------------------------------
@@ -773,7 +816,7 @@ void main(void)
 	Opciones();
 
 	Pr(g_cartel); Pr(T("actualizar el core\r\n", "core update\r\n"));
-	if (g_ayuda) { Pr(T("MXUPDATE [fichero.UPD] [/N] [/R] [/C]\r\n sin fichero: el de la placa\r\n (MSXIMUS.UPD, MSX138K.UPD o\r\n MSXNANO.UPD); si no esta, lo baja\r\n/N  baja la ultima version y la graba\r\n/R  completa (core, pack y ondas) y\r\n    vuelve a los ajustes de fabrica\r\n/C  solo comprueba el fichero\r\n/S:servidor[:puerto]  otro servidor\r\n/ES /EN  castellano / ingles\r\n/H /?    esta ayuda\r\nPor red, antes se actualiza el mismo.", "MXUPDATE [file.UPD] [/N] [/R] [/C]\r\n no file: this board's own\r\n (MSXIMUS.UPD, MSX138K.UPD or\r\n MSXNANO.UPD); if missing, downloads it\r\n/N  downloads the latest and flashes it\r\n/R  full (core, pack and waves) and\r\n    back to factory settings\r\n/C  only checks the file\r\n/S:server[:port]  another server\r\n/ES /EN  Spanish / English\r\n/H /?    this help\r\nOnline, it first updates itself.")); Fin(0); }   // /H o /?: en cualquier MSX con DOS 2, sin tocar nada
+	if (g_ayuda) { Pr(T("MXUPDATE [fichero.UPD] [/N] [/O] [/R] [/C]\r\n sin fichero: el de la placa\r\n (MSXIMUS.UPD, MSX138K.UPD o\r\n MSXNANO.UPD); si no esta, lo baja\r\n/N  baja la ultima version y la graba\r\n/O  solo las ondas del OPL4 (YRW801)\r\n/R  completa (core, pack y ondas) y\r\n    vuelve a los ajustes de fabrica\r\n/C  solo comprueba el fichero\r\n/S:servidor[:puerto]  otro servidor\r\n/ES /EN  castellano / ingles\r\n/H /?    esta ayuda\r\nPor red, antes se actualiza el mismo.", "MXUPDATE [file.UPD] [/N] [/O] [/R] [/C]\r\n no file: this board's own\r\n (MSXIMUS.UPD, MSX138K.UPD or\r\n MSXNANO.UPD); if missing, downloads it\r\n/N  downloads the latest and flashes it\r\n/O  only the OPL4 waves (YRW801)\r\n/R  full (core, pack and waves) and\r\n    back to factory settings\r\n/C  only checks the file\r\n/S:server[:port]  another server\r\n/ES /EN  Spanish / English\r\n/H /?    this help\r\nOnline, it first updates itself.")); Fin(0); }   // /H o /?: en cualquier MSX con DOS 2, sin tocar nada
 	CrcIniciaTablas();
 	if (g_solo_comprobar) {
 		id_flash = 0;
@@ -806,7 +849,7 @@ void main(void)
 	if (!pl) { Pr(T("\r\nNo reconozco la placa.", "\r\nUnknown board.")); Fin(1); }
 	Pr(" ("); Pr(pl->nombre); Pr(")\r\n");
 	if (g_sin_nombre) {
-		PonRuta(pl->fich);
+		PonRuta(g_ondas ? "ONDAS.UPD" : pl->fich);
 		if (!g_red && !Existe(g_ruta) && pl != &g_placas[0] && DeLaPlaca(g_placas[0].fich, pl))
 			PonRuta(g_placas[0].fich);              // el MSXIMUS.UPD del menu, si es de esta placa
 		if (!g_red && !Existe(g_ruta)) {           // sin fichero de esta placa: ofrecer la ultima de la web
@@ -930,8 +973,24 @@ fichero:
 		for (i = 0; i < 16; i++) if (g_buf[i] != 0xFF) goto mal_flash;
 		Pr(T("\r\nAjustes borrados: arrancara con los de fabrica.", "\r\nSettings erased: it will start with factory settings."));
 	}
-	Pr(T("\r\nListo. Apaga y vuelve a encender el MSXimus para\r\nentrar con el core nuevo.",
-	     "\r\nDone. Switch the MSXimus off and on again to start\r\nthe new core."));
+	// 1.4: tras grabar, si el manifiesto ofrece las ondas del OPL4 y en la flash estan en blanco, ofrecerlas (una sola vuelta)
+	if (g_red && !g_ondas && !g_ajustes && g_ond_t && OndasVacias(pl)) {
+		c8 c;
+		Pr(T("\r\nGrabado.\r\nEl OPL4 (MoonSound) no tiene las ondas (YRW801).\r\nBajarlas e instalarlas ahora? (S/N) ",
+		     "\r\nWritten.\r\nThe OPL4 (MoonSound) has no waves (YRW801).\r\nDownload and install them now? (Y/N) "));
+		c = DOS_CharInput() & 0xDF;
+		Pr("\r\n");
+		if (c == 'S' || c == 'Y') {
+			g_ondas = TRUE;
+			PonRuta("ONDAS.UPD");
+			if (Red(pl)) goto fichero;              // otra vuelta: ahora con el .UPD de las ondas
+			g_ondas = FALSE;                        // no se han bajado; lo grabado ya esta bien
+		}
+	}
+	if (g_ondas) Pr(T("\r\nListo. Apaga y vuelve a encender el MSXimus para\r\nentrar con lo nuevo.",
+	                  "\r\nDone. Switch the MSXimus off and on again to start\r\nwith the new files."));
+	else Pr(T("\r\nListo. Apaga y vuelve a encender el MSXimus para\r\nentrar con el core nuevo.",
+	          "\r\nDone. Switch the MSXimus off and on again to start\r\nthe new core."));
 	Fin(0);
 
 mal_fichero:

@@ -338,6 +338,8 @@ def main():
     u138 = upd_mxupd(tmp, "core.upd", "console138k", ruta_bs138, ruta_pack138)
     u138full = upd_mxupd(tmp, "full.upd", "console138k", ruta_bs138, ruta_pack138, ruta_onda138)
     u138pack = upd_mxupd(tmp, "pack.upd", "console138k", pack=ruta_pack138)
+    u138ondas = upd_mxupd(tmp, "ondas.upd", "console138k", onda=ruta_onda138, variante="ondas")    # 1.4: solo las ondas
+    u60ondas = upd_mxupd(tmp, "ondas60.upd", "console60k", onda=ruta_onda138, variante="ondas")
     d0, t0, _, o0 = segmentos(u138)[0]
     bs138 = u138[o0:o0 + t0]
     pk138 = open(ruta_pack138, "rb").read()
@@ -477,12 +479,53 @@ def main():
         ]
     # la 138K en la web (tang138k/), con los .UPD de mxupd.py: /N /R baja el completo y lo graba en 0, 0x500000 y 0x600000
     man138 = ("MSXIMUS-UPD 1\nplaca=console138k\nversion=3.8.4\nimagen=nextor214 384_n214_es.upd %d\n"
-              "completa=nextor214 384_n214_es_full.upd %d\n" % (len(u138), len(u138full))).encode()
+              "ondas=ondas 384_ondas.upd %d\ncompleta=nextor214 384_n214_es_full.upd %d\n"
+              % (len(u138), len(u138ondas), len(u138full))).encode()
     w138 = {"/wp-content/ota/tang138k/manifiesto.txt": man138, "/wp-content/ota/tang138k/384_n214_es.upd": u138,
-            "/wp-content/ota/tang138k/384_n214_es_full.upd": u138full}
+            "/wp-content/ota/tang138k/384_n214_es_full.upd": u138full, "/wp-content/ota/tang138k/384_ondas.upd": u138ondas}
+    w138_sin = dict(w138)                                 # el mismo manifiesto, sin la linea ondas=
+    w138_sin["/wp-content/ota/tang138k/manifiesto.txt"] = b"".join(
+        l + b"\n" for l in man138.split(b"\n") if l and not l.startswith(b"ondas="))
+    man60 = ("MSXIMUS-UPD 1\nplaca=console60k\nversion=3.8.4\nimagen=nextor214 384_n214_es.upd %d\n"
+             "ondas=ondas 384_ondas.upd %d\n" % (len(u60), len(u60ondas))).encode()
+    w60 = {"/wp-content/ota/tang60k/manifiesto.txt": man60, "/wp-content/ota/tang60k/384_n214_es.upd": u60,
+           "/wp-content/ota/tang60k/384_ondas.upd": u60ondas}
+    c138_sin = lambda: flash(bs_138, 0x500000, 0x580000, 0x800000, None)    # recien grabada: las ondas en blanco
+    c60_sin = lambda: flash(bs_60, 0x400000, 0x480000, 0x800000, None)
+
+    def sin_oferta(d):                                    # no se ofrece lo que no hace falta
+        return ["ha ofrecido las ondas"] if "no tiene las ondas" in d.texto() else []
+    def con_oferta(d):
+        return [] if "no tiene las ondas" in d.texto() else ["no ha ofrecido las ondas"]
+    def baja_ondas(d):                                    # /O deja ONDAS.UPD y no pregunta por variantes ni por Nextor
+        mal = [] if any("ONDAS.UPD" in str(k).upper() for k in d.f) else ["no esta ONDAS.UPD"]
+        return mal + (["pregunta por Nextor"] if "Nextor" in d.texto() else [])
     red += [
         ("red 138K: /N /R (completa de tang138k/: ondas en 0x600000, borra 0x580000)", c138, {}, "/N /R", {},
          "\rSS", 0x38, "Ajustes borrados", lambda f: esperado(f, u138full, 0x580000), Web(dict(w138)), "valida"),
+        # ---- 1.4: las ondas del OPL4 solas, por la red ----
+        ("red 138K: /O solo las ondas (ONDAS.UPD a 0x600000; core, pack y ajustes intactos)", c138_sin, {}, "/O", {},
+         "S", 0x38, "Listo", lambda f: esperado(f, u138ondas), Web(dict(w138)), "valida", baja_ondas),
+        ("red 138K: /O con las ondas ya grabadas: las sustituye", c138, {}, "/O", {},
+         "S", 0x38, "Listo", lambda f: esperado(f, u138ondas), Web(dict(w138)), "valida"),
+        ("red 138K: /O, contesta que no", c138_sin, {}, "/O", {}, "N", 0x38, "No se ha tocado nada", None,
+         Web(dict(w138)), "valida"),
+        ("red 138K: /O y el manifiesto no ofrece ondas", c138_sin, {}, "/O", {}, "", 0x38, "no ofrece las ondas", None,
+         Web(dict(w138_sin)), "valida"),
+        ("red 138K: /N con las ondas en blanco: core + pack y luego, si, las ondas", c138_sin, {}, "/N", {},
+         "\rSSSS", 0x38, "Listo", lambda f: esperado(esperado(f, u138), u138ondas), Web(dict(w138)), "valida",
+         con_oferta),
+        ("red 138K: /N con las ondas en blanco: core + pack y las ondas, no", c138_sin, {}, "/N", {},
+         "\rSSN", 0x38, "Listo", lambda f: esperado(f, u138), Web(dict(w138)), "valida", con_oferta),
+        ("red 138K: /N con las ondas ya grabadas: no las ofrece", c138, {}, "/N", {},
+         "\rSS", 0x38, "Listo", lambda f: esperado(f, u138), Web(dict(w138)), "valida", sin_oferta),
+        ("red 138K: /N /R con las ondas en blanco: la completa ya las lleva, sin oferta", c138_sin, {}, "/N /R", {},
+         "\rSS", 0x38, "Ajustes borrados", lambda f: esperado(f, u138full, 0x580000), Web(dict(w138)), "valida",
+         sin_oferta),
+        ("red 138K: /N con las ondas en blanco pero el manifiesto no las ofrece: no pregunta", c138_sin, {}, "/N", {},
+         "\rSS", 0x38, "Listo", lambda f: esperado(f, u138), Web(dict(w138_sin)), "valida", sin_oferta),
+        ("red 60K: /O solo las ondas (0x500000)", c60_sin, {}, "/O", {}, "S", 0x38, "Listo",
+         lambda f: esperado(f, u60ondas), Web(dict(w60)), "valida"),
     ]
     for x in red:
         casos.append(x)
