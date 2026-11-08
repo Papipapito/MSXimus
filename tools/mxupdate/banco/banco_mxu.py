@@ -556,6 +556,15 @@ def main():
                 fallos.append("el aviso sale %d veces" % txt.count("certificado sin validar"))
             if any(x[3] not in (None, "msx.barcelona") for x in ap_):
                 fallos.append("SNI equivocado: %s" % ap_)
+            # 1.5: toda peticion (manifiesto, .UPD, YRW801 y autoactualizacion) va en HTTP/1.0 con
+            # "User-Agent: MXUPDATE/<version> (<placa>)"; la placa es la de la carpeta pedida
+            ver_ = re.search(rb"MXUPDATE ([0-9.]+) - ", com).group(1).decode()
+            for lin_, host_, tls_, ua_ in web.pedidas:
+                carp_ = lin_.split()[1].split("/")[-2]
+                if ua_ != "MXUPDATE/%s (%s)" % (ver_, {"tang60k": "console60k", "tang138k": "console138k"}.get(carp_, carp_)):
+                    fallos.append("User-Agent de %r: %r" % (lin_, ua_))
+                if not lin_.endswith(" HTTP/1.0"):
+                    fallos.append("la peticion no es HTTP/1.0: %r" % lin_)
         if espera not in txt:
             fallos.append("falta en pantalla: %r" % espera)
         if ok:

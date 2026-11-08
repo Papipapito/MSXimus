@@ -20,7 +20,7 @@ class Web:
         self.tls = tls
         self.corta = corta                # ruta cuya respuesta se corta a la mitad
         self.aperturas = []               # (ip, puerto, flags, nombre SNI, aceptada)
-        self.pedidas = []
+        self.pedidas = []                 # (peticion, Host, tls, User-Agent)
 
 
 class Conexion:
@@ -37,7 +37,7 @@ class Conexion:
         linea = self.peticion.split(b"\r\n")[0].decode()
         cab = dict(l.split(": ", 1) for l in self.peticion.decode().split("\r\n")[1:] if ": " in l)
         ruta = linea.split()[1]
-        self.web.pedidas.append((linea, cab.get("Host"), self.tls))
+        self.web.pedidas.append((linea, cab.get("Host"), self.tls, cab.get("User-Agent")))
         if ruta in self.web.paginas:
             cuerpo = self.web.paginas[ruta]
             r = b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n" % len(cuerpo)

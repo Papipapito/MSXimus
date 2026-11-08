@@ -116,7 +116,7 @@ El CRC-32 en ensamblador cuesta unos 135 estados por byte. Tiempos a 3,58 MHz: e
 ### Por internet (`/N`)
 
 - A `msx.barcelona`, puerto 443, **TLS validando el certificado**. Si el ESP no puede validarlo (firmware sin autoridades de certificación), el mismo `TCP_OPEN` sin el bit de verificar, y avisa una vez: `Aviso: certificado sin validar.`. **En claro, nunca**: una versión anterior caía a HTTP:80 sin decir nada.
-- HTTP/1.0 sin User-Agent: el IONOS de msx.barcelona sirve los estáticos con `Content-Length` y sin *chunked*.
+- HTTP/1.0 con `User-Agent: MXUPDATE/<version> (<placa>)` (1.5; la placa es `console60k`, `console138k`, `msxnano` o `mxupdate` en la autoactualización): el IONOS de msx.barcelona sirve los estáticos con `Content-Length` y sin *chunked*. El User-Agent lo llevan todas las peticiones (manifiesto, `.UPD`, ondas y autoactualización) y permite contar en el log del servidor qué versión y qué placa se actualizan.
 - `Sin actualizaciones para esta placa (HTTP 404)` se distingue de `Sin conexion con el servidor`.
 - `/S:ip[:puerto]` va a un servidor propio, en claro, con la misma estructura de carpetas: el de desarrollo es `fpga/zynq/ota/ota_servidor.py` del repo MSXimus_zynq.
 

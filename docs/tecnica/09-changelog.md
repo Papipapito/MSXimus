@@ -210,6 +210,12 @@ Arreglo de un defecto que se vio en simulación y nunca en placa, traído de la 
 - **Core v3.8.1** (`FPGA_PATCH = 1`): campaña `v381`, dados 5303, 5309, 5323, 5333 y 5347. **Dado 5309**: gate bien, peor setup +1,386 ns (`cpu1/RD` → `dpram1`, clk_54m → clk_27m), CLS 29260/29952 (98 %), sin holds fuera de la DDR3. 5323 fuera (-0,135 ns en el `IStatus` del T80) y 5347 fuera (-1,4 ns en el shim del V9968); 5303 y 5333 se pararon rutando, ya no hacían falta. `files/20261005/MSXimus_v3.8.1.fs` (431cc7ecf6f0) y `_jtag.bin` (8dd8d67d4af2). Packs y ondas, los de la 3.8.0b4.
 - **Publicada solo en msx.barcelona** (`MXUPDATE /N`, las cuatro variantes y sus completas), sin release en GitHub: desde el 5 de octubre GitHub lleva solo las versiones grandes y los arreglos (tercer dígito) llegan por la actualización desde el MSX. Sin probar en placa.
 
+## MXUPDATE 1.5 (noviembre): User-Agent con la versión y la placa
+
+- Todas las peticiones HTTP (manifiesto, `.UPD`, ondas del OPL4 y autoactualización) llevan `User-Agent: MXUPDATE/1.5 (console60k)` (`console138k`, `msxnano`; `mxupdate` al autoactualizarse). Sigue en HTTP/1.0 con `Connection: close`, así que el IONOS responde igual que antes (`Content-Length`, sin *chunked*) y los CRC no cambian.
+- Es la 1.4 (las ondas del OPL4 / YRW801 por la red con `/O` y tras un `/N`) más ese cambio; sin cambios en la flash ni en el formato de los `.UPD`.
+- Banco: los casos de siempre más la comprobación del User-Agent y de HTTP/1.0 en cada petición, la de la YRW801 y la de la autoactualización incluidas.
+
 ## MXUPDATE 1.2 (4 de octubre): la ayuda con /H y /?
 
 - `MXUPDATE /H` o `/?`: las órdenes en 40 columnas, en el idioma del menú; no toca la flash ni necesita el puente. md5 `de975760`, publicada en msx.barcelona (las 1.1 se la bajan solas). Banco: 29 casos bien.
