@@ -64,7 +64,24 @@ The fan is not needed for operation. If you fit one, the core drives it by itsel
 
 ## Installation
 
-> **Two mandatory steps, in this order.** **Step 1:** the BL616 firmware ([Flashing the BL616](#flashing-the-bl616), with BLDevCube): from the factory the Console carries Sipeed's own firmware (NES and other things) and, unless you replace it, that is what you get at power-on — not the MSXimus. **Step 2:** the core, the pack and the waves into the SPI flash, with the Gowin Programmer (what follows).
+### From zero to running, step by step
+
+For a Console 60K fresh out of the box, or to bring one back to a clean state. Steps **1 and 2 are done with the PC, once**; from step 3 on everything is done from the MSX itself, no PC.
+
+**What you need.** The board and a USB-C cable; a Windows PC; a good-brand Class 10 microSD; and, for the MSX to download things from the internet, the ESP32-C6 module with its firmware ([Wiring the ESP32-C6](#wiring-the-esp32-c6-wifi)) and a 2.4 GHz WiFi network. From the GitHub release: `bl616_msximus_v3.8_60k.zip`, `MSXimus_v3.8.0b4.fs`, `pack_bios_msximus.bin` and `MXUPDATE.COM`. **You do not need the OPL4 waves (`yrw801.bin`):** `MXUPDATE` downloads them.
+
+1. **The BL616 firmware** (mandatory, and first). Hold **BOOT** while plugging in the USB, open **BLDevCube**, load the ZIP's `flash_prog_cfg.ini` and flash. Without it, power-on gives Sipeed's factory firmware, not the MSXimus. [Details](#flashing-the-bl616).
+2. **The core and the pack into the SPI flash**, with the **Gowin Programmer**: the `.fs` at `0x000000` and `pack_bios_msximus.bin` at `0x400000`, both to the external SPI flash (*exFlash* operations). Then **power-cycle** the board: a reset is not enough. The MSXimus should come up; if something else does, see [How to flash](#how-to-flash). That ends the PC part.
+3. **The SD card.** Prepare it with [MSX SD Maker](https://github.com/Papipapito/SD_Maker): it partitions it the way Nextor does, copies the system and puts `MXUPDATE.COM` in the `FPGA` folder, which is on the `PATH`. Put it in the board and power on: the machine boots MSX-DOS (if the card browser shows up, press **ESC**; [chapter 06](docs/manual/06-msxdos-nextor.md)). Without MSX SD Maker, any FAT16 SD with Nextor (`NEXTOR.SYS` and `COMMAND2.COM` in the root) and `MXUPDATE.COM` copied over will do.
+4. **WiFi.** In the card browser, or during the logo, press **W**, go to *Scan/Join Access Points*, pick your network and type the password. It is stored in the module: it connects by itself at power-on ([chapter 07](docs/manual/07-wifi-file-hunter.md)).
+5. **`MXUPDATE /N`**, from MSX-DOS. It first updates itself and relaunches. Then it says which core you have and which one is on msx.barcelona, and asks for the variant: **1** is the usual one (Nextor 2.1.4, Spanish menu); 2 to 4 switch to Nextor 3 or the English menu and need an SD prepared for it. It downloads the file, checks it and asks `Fichero correcto. Grabar en la flash? (S/N)` (file OK, flash it?): **S**, and **do not power off** (about 9 minutes). Because a freshly flashed board has no OPL4 waves, when done it asks `Bajarlas e instalarlas ahora? (S/N)` (download and install them now?): **S** (about 5 more minutes). When it says `Listo`, **power-cycle**.
+6. **That's it.** Core and pack up to date, and the MoonSound with its waves. From here on, `MXUPDATE /N` whenever you want to catch up, and `MXUPDATE /O` if you ever need the waves again (if you already have the latest version and only the waves are missing, `MXUPDATE /O` alone is enough).
+
+If something doesn't go as described, [Updating from the MSX](#updating-from-the-msx) and [manual chapter 11](docs/manual/11-actualizar.md) explain every message.
+
+### The flash files, in detail
+
+> **Two mandatory steps, in this order.** **Step 1:** the BL616 firmware ([Flashing the BL616](#flashing-the-bl616), with BLDevCube): from the factory the Console carries Sipeed's own firmware (NES and other things) and, unless you replace it, that is what you get at power-on — not the MSXimus. **Step 2:** the core and the pack into the SPI flash, with the Gowin Programmer (what follows).
 
 **Step 2 — the SPI flash.** Everything goes into the board's **SPI flash**, at three different addresses:
 

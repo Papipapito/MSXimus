@@ -64,7 +64,24 @@ El ventilador no hace falta para funcionar. Si lo pones, el core lo controla sol
 
 ## Instalación
 
-> **Son dos pasos obligatorios, en este orden.** **Paso 1:** el firmware del BL616 ([Grabar el BL616](#grabar-el-bl616), con BLDevCube): de fábrica la Console lleva el firmware de Sipeed (de NES y otras cosas) y, si no se lo cambias, es lo que sale al encender, no el MSXimus. **Paso 2:** el core, el pack y las ondas en la flash SPI, con el Gowin Programmer (lo que sigue).
+### De cero a funcionando, paso a paso
+
+Para una Console 60K recién sacada de la caja, o para dejarla como nueva. Los pasos **1 y 2 se hacen con el PC, una sola vez**; del 3 en adelante todo va desde el propio MSX, sin PC.
+
+**Qué necesitas.** La placa y un cable USB-C; un PC con Windows; una microSD de marca y Clase 10; y, para que el MSX baje cosas de internet, el módulo ESP32-C6 con su firmware ([Conexión del ESP32-C6](#conexión-del-esp32-c6-wifi)) y una red WiFi de 2,4 GHz. De la release de GitHub: `bl616_msximus_v3.8_60k.zip`, `MSXimus_v3.8.0b4.fs`, `pack_bios_msximus.bin` y `MXUPDATE.COM`. **Las ondas del OPL4 (`yrw801.bin`) no hacen falta:** las baja `MXUPDATE`.
+
+1. **El firmware del BL616** (obligatorio, y el primero). Mantén pulsado **BOOT** mientras enchufas el USB, abre **BLDevCube**, carga el `flash_prog_cfg.ini` del ZIP y graba. Sin esto, al encender sale el firmware de fábrica de Sipeed, no el MSXimus. [Detalle](#grabar-el-bl616).
+2. **El core y el pack en la flash SPI**, con el **Gowin Programmer**: el `.fs` en `0x000000` y `pack_bios_msximus.bin` en `0x400000`, los dos a la flash SPI externa (operaciones *exFlash*). Después, **apaga y enciende** la placa: un reset no basta. Tiene que salir el MSXimus; si sale otra cosa, mira [Cómo grabarlo](#cómo-grabarlo). Con esto se acaba el PC.
+3. **La tarjeta SD.** Prepárala con [MSX SD Maker](https://github.com/Papipapito/SD_Maker): la parte como Nextor, copia el sistema y deja `MXUPDATE.COM` en la carpeta `FPGA`, que está en el `PATH`. Ponla en la placa y enciende: la máquina arranca MSX-DOS (si sale el navegador de la tarjeta, **ESC**; [capítulo 06](docs/manual/06-msxdos-nextor.md)). Sin MSX SD Maker te vale cualquier SD FAT16 con Nextor (`NEXTOR.SYS` y `COMMAND2.COM` en la raíz) y el `MXUPDATE.COM` copiado.
+4. **La WiFi.** En el navegador de la tarjeta, o durante el logo, pulsa **W**, entra en *Scan/Join Access Points*, elige tu red y escribe la contraseña. Queda guardada en el módulo: al encender se conecta sola ([capítulo 07](docs/manual/07-wifi-file-hunter.md)).
+5. **`MXUPDATE /N`**, desde MSX-DOS. Primero se pone al día él mismo y se relanza. Después dice qué core tienes y cuál hay en msx.barcelona, y pide la variante: la **1** es la de siempre (Nextor 2.1.4, menú en castellano); la 2 a la 4 cambian a Nextor 3 o al menú en inglés y piden una SD preparada para ello. Baja el fichero, lo comprueba y pregunta `Fichero correcto. Grabar en la flash? (S/N)`: **S**, y **no apagues** (unos 9 minutos). Como la placa recién grabada no tiene las ondas del OPL4, al acabar pregunta `Bajarlas e instalarlas ahora? (S/N)`: **S** (unos 5 minutos más). Cuando diga `Listo`, **apaga y enciende**.
+6. **Ya está.** Core y pack al día y el MoonSound con sus ondas. A partir de aquí, `MXUPDATE /N` cuando quieras ponerte al día y `MXUPDATE /O` si alguna vez hay que volver a poner las ondas (si ya tienes la última versión y solo te faltan ellas, basta `MXUPDATE /O`).
+
+Si algo no sale como aquí, [Actualizar desde el MSX](#actualizar-desde-el-msx) y el [capítulo 11 del manual](docs/manual/11-actualizar.md) explican cada mensaje.
+
+### Los ficheros de la flash, con detalle
+
+> **Son dos pasos obligatorios, en este orden.** **Paso 1:** el firmware del BL616 ([Grabar el BL616](#grabar-el-bl616), con BLDevCube): de fábrica la Console lleva el firmware de Sipeed (de NES y otras cosas) y, si no se lo cambias, es lo que sale al encender, no el MSXimus. **Paso 2:** el core y el pack en la flash SPI, con el Gowin Programmer (lo que sigue).
 
 **Paso 2 — la flash SPI.** Todo va a la **flash SPI** de la placa, en tres direcciones distintas:
 
