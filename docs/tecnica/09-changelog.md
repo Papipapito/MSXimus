@@ -2,7 +2,7 @@
 
 Versión a versión, qué cambió, qué dado se entregó y con qué hashes. Sale de los LEEME de cada entrega en `files/<fecha>/`, que quedan fuera de git, y de las notas de `mi_release/`. Las versiones publicadas en GitHub llevan tag; las intermedias son entregas internas probadas en placa.
 
-Los hashes son md5, los ocho primeros dígitos salvo donde se indica. El "dado" es el número primo con que se sembró el place and route ([capítulo 07](07-sintesis-campanas.md)); el margen es el peor setup del informe de temporización.
+Los hashes son md5, los ocho primeros dígitos salvo donde se indica. El "dado" es el número primo con que se sembró el place and route; el margen es el peor setup del informe de temporización.
 
 **Estado de la línea (16/10/2026): cerrada en la v3.8.4.** La v3.8.4 está validada en placa (MoonBlaster Wave, MiG, Surrec y la parte 2 de «Dutch Moonsound Veterans HDD», los casos que habían enseñado los defectos de las 3.8.x) y es la última versión prevista del Console 60K; las 3.8.1 a 3.8.4 solo existen como actualización por red (`MXUPDATE /N`) y la release de GitHub se queda en la v3.8.0b4. Los motores (OPL4, OPLL, T80, V9968) siguen evolucionando en la línea MSXimus Z (Zynq), que es la referencia; cada arreglo que la Zynq valide se apuntará como candidato aquí, pero solo un fallo grave en placa reabriría la línea. El 138K sigue al día con el mismo código en su repositorio, sin build.
 
@@ -136,7 +136,7 @@ Del firmware del BL616, ya que se tocó: el `bl616_v3.1.bin` publicado el 26 de 
 
 Core: dado 3623, 2667d28b, margen 0,756 ns (clk_86, dentro del shim del V9968); holds solo la DDR3. Campaña v36h, cuatro dados: 3613 y 3607 fuera de gate (-0,05 y -1,87 ns en el motor del OPL4), 3617 con una red sin rutar. Sin respaldo. En la semana, once dados para tres útiles: al 98 % de CLS la campaña de tres ya no basta, y la de cuatro tampoco sobra.
 
-## v3.8.4 (15 de octubre, publicada en msx.barcelona): DAMP, pseudo-reverb y el ruido de «Dutch Moonsound Veterans»
+## v3.8.4 (15 de octubre, publicada en msx.barcelona; release de GitHub el 10 de noviembre, con los packs de Nextor 3.0 final): DAMP, pseudo-reverb y el ruido de «Dutch Moonsound Veterans»
 
 Core: **dado 5471** (campaña `v384`: 5437 fuera por setup, −0,002 ns; 5443 sin rutar, 113 redes; 5441 y 5449 pasan el gate pero con +0,060 y +0,311 ns de peor setup), peor setup +0,823 ns, CLS 98 %, holds todos positivos (mínimo +0,047 ns). `files/20261015/MSXimus_v3.8.4.fs` (2a3ed287102a) y `_jtag.bin` (21b340d74e51); packs y ondas, los de la 3.8.0b4. Publicada el mismo día en msx.barcelona (`MXUPDATE /N`), sin release en GitHub; en la web quedan la 3.8.4 y la 3.8.3. Sin probar en placa: lo primero, «Dutch Moonsound Veterans HDD» parte 2 (ESPACIO en los créditos: el fundido sin ruido), MoonBlaster Wave con cortes de nota (DAMP) y Surrec (la cola de reverb de DANCE).
 

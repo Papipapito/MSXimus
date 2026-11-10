@@ -5,7 +5,7 @@ redistribucion con avisos intactos; publicacion gratuita OK, venta NO.
 Ficheros parcheados para el MSXimus (marcados "MSXimus:" en el codigo):
   - vdp_vram_interface.v  (routing de respuestas por TAG con ECO, latencia libre)
   - vdp.v                 (plumbing de vram_tag/vram_rtag al top del core)
-El resto, INTACTO. Regen/diff contra upstream: proyectosAI/msx/V9968_Cartridge
+El resto, INTACTO. Regen/diff contra upstream: un clon de hra1129/V9968_Cartridge
 
 ################################################################################
 [CORRECCION 2026-07-26] EL SENTIDO DE LA MIGRACION ESTABA INVERTIDO EN ESTE DOC
@@ -49,7 +49,7 @@ snapshot th9958). Verificados uno a uno contra el repo:
                         DEVCON.COM  offset 14882 (0x3A22): 0xFF -> 0x9F
                         V9968DM.COM offset   888 (0x0378): 0xFF -> 0x9F
                       NO hay que parchear nada: los binarios del upstream VIVO
-                      (clon proyectosAI/msx/V9968_Cartridge) YA traen 0x9F, y
+                      (clon un clon de hra1129/V9968_Cartridge) YA traen 0x9F, y
                       difieren del arbol th9958 en ESE UNICO byte cada uno.
                       ⚠️ HALLAZGO: el V9968DM.COM que Albert ya tenia en
                       files/v9968_tests/ es BYTE-IDENTICO al del upstream vivo,
@@ -114,7 +114,7 @@ PARCHE 3 (_120f, 2026-07-19) - vdp_command.v: comparadores de ventana LRMM
 
 ============================================================================
 [MIGRACION th9958 — PLAN, 2026-07-21] Directiva de Albert: pasar al arbol
-th9958 de hra1129/TangCartMSX (clon en proyectosAI/msx/TangCartMSX, ruta
+th9958 de hra1129/TangCartMSX (clon en hra1129/TangCartMSX, ruta
 RTL/tangnano20k_vdp_cartridge_rev2_step1/src/th9958) y re-aplicar nuestros
 parches. Los 21 .v tienen los MISMOS nombres. Rama: th9958.
 

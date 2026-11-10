@@ -3,7 +3,7 @@
 <h1 align="center">MSXimus</h1>
 <p align="center"><b>Un MSX2+ completo, en una Tang Console 60K — ahora con el VDP V9968</b></p>
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.8.0b4-blue">
+  <img alt="version" src="https://img.shields.io/badge/versi%C3%B3n-v3.8.4-blue">
   <img alt="fpga" src="https://img.shields.io/badge/FPGA-Gowin%20GW5AT--60-green">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-GPLv3-orange">
 </p>
@@ -68,7 +68,7 @@ El ventilador no hace falta para funcionar. Si lo pones, el core lo controla sol
 
 Para una Console 60K recién sacada de la caja, o para dejarla como nueva. Los pasos **1 y 2 se hacen con el PC, una sola vez**; del 3 en adelante todo va desde el propio MSX, sin PC.
 
-**Qué necesitas.** La placa y un cable USB-C; un PC con Windows; una microSD de marca y Clase 10; y, para que el MSX baje cosas de internet, el módulo ESP32-C6 con su firmware ([Conexión del ESP32-C6](#conexión-del-esp32-c6-wifi)) y una red WiFi de 2,4 GHz. De la release de GitHub: `bl616_msximus_v3.8_60k.zip`, `MSXimus_v3.8.0b4.fs`, `pack_bios_msximus.bin` y `MXUPDATE.COM`. **Las ondas del OPL4 (`yrw801.bin`) no hacen falta:** las baja `MXUPDATE`.
+**Qué necesitas.** La placa y un cable USB-C; un PC con Windows; una microSD de marca y Clase 10; y, para que el MSX baje cosas de internet, el módulo ESP32-C6 con su firmware ([Conexión del ESP32-C6](#conexión-del-esp32-c6-wifi)) y una red WiFi de 2,4 GHz. De la release de GitHub: `bl616_msximus_v3.8_60k.zip`, `MSXimus_v3.8.4.fs`, `pack_bios_msximus.bin` y `MXUPDATE.COM`. **Las ondas del OPL4 (`yrw801.bin`) no hacen falta:** las baja `MXUPDATE`.
 
 1. **El firmware del BL616** (obligatorio, y el primero). Mantén pulsado **BOOT** mientras enchufas el USB, abre **BLDevCube**, carga el `flash_prog_cfg.ini` del ZIP y graba. Sin esto, al encender sale el firmware de fábrica de Sipeed, no el MSXimus. [Detalle](#grabar-el-bl616).
 2. **El core y el pack en la flash SPI**, con el **Gowin Programmer**: el `.fs` en `0x000000` y `pack_bios_msximus.bin` en `0x400000`, los dos a la flash SPI externa (operaciones *exFlash*). Después, **apaga y enciende** la placa: un reset no basta. Tiene que salir el MSXimus; si sale otra cosa, mira [Cómo grabarlo](#cómo-grabarlo). Con esto se acaba el PC.
@@ -87,7 +87,7 @@ Si algo no sale como aquí, [Actualizar desde el MSX](#actualizar-desde-el-msx) 
 
 | # | Fichero | Dirección | ¿Obligatorio? |
 |---|---|---|---|
-| 1 | `MSXimus_v3.8.0b4.fs` | **`0x000000`** | Sí — es el core |
+| 1 | `MSXimus_v3.8.4.fs` | **`0x000000`** | Sí — es el core |
 | 2 | Pack de BIOS (`pack_bios_msximus*.bin`) | **`0x400000`** | Sí — sin él no arranca el MSX |
 | 3 | `yrw801.bin` | **`0x500000`** | No, y **ya no va en la release**: con el core en marcha, `MXUPDATE /N` ofrece bajar las ondas del OPL4 de msx.barcelona y las graba (o `MXUPDATE /O` cuando quieras). Solo a mano si ya tienes tu `yrw801.bin` (como `.bin`: el Programmer de Gowin no acepta `.rom`) |
 
@@ -125,8 +125,8 @@ Hay **cuatro versiones del mismo pack**: el menú en castellano o en inglés, y 
 |---|---|---|
 | `pack_bios_msximus.bin` | castellano | **2.1.4** — la estable |
 | `pack_bios_msximus_en.bin` | inglés | **2.1.4** — la estable |
-| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 2** — para probar la beta |
-| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 2** — para probar la beta |
+| `pack_bios_msximus_nextor3.bin` | castellano | **3.0** — Nextor 3 |
+| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0** — Nextor 3 |
 
 Si prefieres montarte el pack con tus propias ROMs, está el [**MSXnano Pack Builder**](https://github.com/Papipapito/MSXnano), que arma el fichero con ellas, Nextor incluido.
 
@@ -275,7 +275,7 @@ El proyecto de Bambu Studio, los STL, los ajustes de impresión y las notas de m
 
 ## Estado
 
-**La v3.8.4 (16/10/2026) cierra la línea Console 60K.** Es el core v3.8 con las cuatro actualizaciones por red 3.8.1 a 3.8.4 (el OPL4 como el chip real: relectura de registros, F8 y NEW2, margen del motor wave, fundidos, envolvente, pan, DAMP y pseudo-reverb, y el ruido de *Dutch Moonsound Veterans* resuelto), validada en placa el 16/10/2026 con las demos y discos de MoonSound que habían enseñado los defectos. Las 3.8.x se instalan con `MXUPDATE /N` desde msx.barcelona; la release de GitHub se queda en la v3.8.0b4 (misma base del core, packs con Nextor 3.0 beta 2). No hay más versiones previstas del 60K: los motores siguen evolucionando en la línea MSXimus Z (Zynq) y solo un fallo grave reabriría esta. La v3.8.0b3 se validó en placa el 02/10/2026 (puente de la flash, `MXUPDATE /N` con el certificado validado, `/R`), la v3.7.6 el 30/09/2026 y la v3.7.5 antes que ella (imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
+**La v3.8.4 (16/10/2026) cierra la línea Console 60K.** Es el core v3.8 con las cuatro actualizaciones por red 3.8.1 a 3.8.4 (el OPL4 como el chip real: relectura de registros, F8 y NEW2, margen del motor wave, fundidos, envolvente, pan, DAMP y pseudo-reverb, y el ruido de *Dutch Moonsound Veterans* resuelto), validada en placa el 16/10/2026 con las demos y discos de MoonSound que habían enseñado los defectos. Las 3.8.x se instalan con `MXUPDATE /N` desde msx.barcelona; desde el 10/11/2026 es también la release de GitHub (v3.8.4, con los packs de Nextor 3.0 final). No hay más versiones previstas del 60K: los motores siguen evolucionando en la línea MSXimus Z (Zynq) y solo un fallo grave reabriría esta. La v3.8.0b3 se validó en placa el 02/10/2026 (puente de la flash, `MXUPDATE /N` con el certificado validado, `/R`), la v3.7.6 el 30/09/2026 y la v3.7.5 antes que ella (imagen desde el primer encendido, el navegador de la SD ordenado, un mando USB genérico). La base de la v3.7 se validó con la batería de tests del V9968 de HRA!, las demos DEVCON, Metal Gear 2, Aleste 2 y el catálogo MSX2+ habitual. El V9968 está alineado con la **última revisión publicada** por HRA!; su procedencia y cada parche local están documentados en [`fpga/v9968/ORIGEN.txt`](fpga/v9968/ORIGEN.txt).
 
 ## Estructura del repositorio
 
@@ -293,7 +293,7 @@ tools/           Testbenches y utilidades de validación
   mxupd.py       Hace los .UPD y el manifiesto de la actualización
 ```
 
-## Lo nuevo de la v3.8.4 (solo por la actualización)
+## Lo nuevo de la v3.8.4 (release de GitHub desde el 10/11/2026)
 
 - El motor wave del OPL4 implementa DAMP y la pseudo-reverb como el chip (los cortes de nota de MoonBlaster Wave callan en 11 ms y las colas de reverb caen a la tasa correcta), desaparece el ruido de 2,7 s al cargar canciones en la demo *Dutch Moonsound Veterans HDD* (una voz ociosa con TL=7Fh y trémolo envolvía a plena escala; afectaba a la 3.8.2 y la 3.8.3), las relecturas por `7Fh` ya no perturban a las otras voces, el reset del LFO actúa sobre su voz, DL va a 3 dB por paso, NEW2 se puede apagar, el modo de acceso a memoria calla como en el chip y la relectura del FM sigue al latch de dirección único. Se instala con `MXUPDATE /N`.
 

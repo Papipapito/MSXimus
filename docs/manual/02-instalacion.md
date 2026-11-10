@@ -6,7 +6,7 @@ Qué hay que grabar en la placa y con qué herramienta. Son **dos pasos obligato
 
 Para una Console 60K recién sacada de la caja, o para dejarla como nueva. Los pasos 1 y 2 se hacen con el PC, **una sola vez**; del 3 en adelante todo va desde el propio MSX.
 
-**Qué necesitas.** La placa y un cable USB-C; un PC con Windows; una microSD de marca y Clase 10; y, para que el MSX baje cosas de internet, el módulo ESP32-C6 con su firmware (sección 3) y una red WiFi de 2,4 GHz. De la release de GitHub: `bl616_msximus_v3.8_60k.zip`, `MSXimus_v3.8.0b4.fs`, `pack_bios_msximus.bin` y `MXUPDATE.COM`. **Las ondas del OPL4 (`yrw801.bin`) no hacen falta:** las baja `MXUPDATE`.
+**Qué necesitas.** La placa y un cable USB-C; un PC con Windows; una microSD de marca y Clase 10; y, para que el MSX baje cosas de internet, el módulo ESP32-C6 con su firmware (sección 3) y una red WiFi de 2,4 GHz. De la release de GitHub: `bl616_msximus_v3.8_60k.zip`, `MSXimus_v3.8.4.fs`, `pack_bios_msximus.bin` y `MXUPDATE.COM`. **Las ondas del OPL4 (`yrw801.bin`) no hacen falta:** las baja `MXUPDATE`.
 
 | # | Qué | Con qué | Dónde se explica |
 |---|---|---|---|
@@ -26,7 +26,7 @@ Tres ficheros, cada uno a una dirección distinta de la misma flash:
 
 | Fichero | Dirección | Obligatorio |
 |---|---|---|
-| El core: `MSXimus_v3.8.0b4.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
+| El core: `MSXimus_v3.8.4.fs` en la release (en las entregas de `files/<fecha>/` se llama `msximus_v3.x_dadoNNNN.fs`) | **0x000000** | Sí |
 | El pack de BIOS, `pack_bios_msximus*.bin` | **0x400000** | Sí, sin él la máquina no arranca |
 | `yrw801.bin`, la ROM de ondas del MoonSound (va como `.bin` porque el Programmer de Gowin no coge `.rom`; si tienes un `yrw801.rom`, renómbralo) | **0x500000** | No, y **ya no va en la release**: con el core en marcha, `MXUPDATE /N` ofrece bajarla de msx.barcelona y grabarla (o `MXUPDATE /O` cuando quieras; [capítulo 11](11-actualizar.md)). A mano solo si ya tienes tu `yrw801.bin` |
 
@@ -54,8 +54,8 @@ Hay cuatro packs iguales en todo salvo el idioma del menú y el kernel de disco 
 |---|---|---|
 | `pack_bios_msximus.bin` | castellano | **2.1.4**, el estable, el que quieres |
 | `pack_bios_msximus_en.bin` | inglés | **2.1.4** |
-| `pack_bios_msximus_nextor3.bin` | castellano | **3.0 beta 2**, para probar la beta |
-| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0 beta 2** |
+| `pack_bios_msximus_nextor3.bin` | castellano | **3.0** |
+| `pack_bios_msximus_en_nextor3.bin` | inglés | **3.0** |
 
 Y de cada uno, una variante internacional y una japonesa, que cambian la BIOS y la SubROM. Quien prefiera montar el pack con sus propias ROMs tiene el [Pack Builder del MSXnano](https://github.com/Papipapito/MSXnano), que las ensambla con Nextor incluido. El [capítulo 04 de la referencia técnica](../tecnica/04-pack-bios.md) describe qué lleva y en qué orden.
 

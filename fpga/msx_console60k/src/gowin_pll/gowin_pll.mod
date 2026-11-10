@@ -7,7 +7,7 @@
 
 -mod_name Gowin_PLL_MOD
 -file_name gowin_pll_mod
--path C:/Users/alber/proyectosAI/msx/MSX_up/fpga/msx_console60k/src/gowin_pll/
+-path fpga/msx_console60k/src/gowin_pll/
 -type PLL_ADV
 -file_type vlg
 -ssc false

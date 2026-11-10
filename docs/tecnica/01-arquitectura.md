@@ -160,7 +160,7 @@ El grupo clásico pasa por una ganancia maestra ajustable de 0 a 7 por el puerto
 - **Tira de ocho LEDs WS2812**: diagnóstico. El LED de red parpadea con el tráfico de la UART del ESP.
 - **Ventilador** por temperatura (`fan_ctrl` + oscilador de anillo `ro_osc` como termómetro relativo).
 - **Telemetría serie** (`dbg_uart` por E22 y la UART del USB-C): contadores del shim del V9968, la DDR3, el audio y el ventilador; su periodo (`PERIOD_MS`) es el dado que siembra el placement de cada campaña.
-- La telemetría, la tira de LEDs, el ventilador por temperatura y el segundo PSG, más un decodificador de teclado único, forman la *dieta* de la v3.6h (`DIETA_V36H` en `top.v`, apagada): se probó y rutaba peor, ver el [capítulo 07](07-sintesis-campanas.md).
+- La telemetría, la tira de LEDs, el ventilador por temperatura y el segundo PSG, más un decodificador de teclado único, forman la *dieta* de la v3.6h (`DIETA_V36H` en `top.v`, apagada): se probó y rutaba peor.
 - **UART de depuración** a 54 MHz por un PMOD, apagada en las entregas.
 
 ## 9. Qué pasa al encender
