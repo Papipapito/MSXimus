@@ -8,7 +8,7 @@ Las piezas:
 |---|---|---|
 | Puente de la flash | `fpga/src/flash_bridge.v` + `flash_rw.v` | Deja leer, borrar y programar la flash SPI de la FPGA por E/S |
 | Formato `.UPD` | `tools/mxupd.py` | Fichero con los segmentos a grabar y sus CRC |
-| `MXUPDATE.COM` | `tools/mxupdate/` | El programa de MSX-DOS: fichero o internet |
+| `MXUPDATE.COM` | Compilado: en las releases de GitHub y en msx.barcelona | El programa de MSX-DOS: fichero o internet |
 | «Instalar actualización» | `bios-msxnano-msximus/src/actualizar.asm` | Lo mismo desde Ajustes, sin DOS, con el `MSXIMUS.UPD` de la SD |
 | La web | `https://msx.barcelona/wp-content/ota/tang60k/` | Los `.UPD` y el `manifiesto.txt` |
 
@@ -94,15 +94,13 @@ Las notas son solo para el usuario (las enseña `MXUPDATE /N`), de 60 caracteres
 
 ## 4. `MXUPDATE.COM`
 
-MSXgl + la librería UNAPI de red, compilado en el WSL (`tools/mxupdate/build.sh`, entorno de `sdk-tools/msx-unapi-env`). Lo que el UNAPI lee con la página 1 conmutada a su ROM o a su segmento (la cadena «TCP/IP» que busca EXTBIO y el nombre msx.barcelona para el DNS y el SNI) tiene que estar por debajo de 4000h o en RAM: `unapi_tcp_mxu.asm` (el `unapi_tcp.asm` de MSXgl sin UDP, IP en crudo, eco ni configuración) va el primero en `ProjModules`, justo detrás del arranque, y `g_web` es una variable en RAM. Los datos van desde 8000h (`ForceRamAddr`). El resto del código ya pasa de 4000h desde la 1.1.
+MSXgl + la librería UNAPI de red, compilado en el WSL (con SDCC). Lo que el UNAPI lee con la página 1 conmutada a su ROM o a su segmento (la cadena «TCP/IP» que busca EXTBIO y el nombre msx.barcelona para el DNS y el SNI) tiene que estar por debajo de 4000h o en RAM: `unapi_tcp_mxu.asm` (el `unapi_tcp.asm` de MSXgl sin UDP, IP en crudo, eco ni configuración) va el primero en `ProjModules`, justo detrás del arranque, y `g_web` es una variable en RAM. Los datos van desde 8000h (`ForceRamAddr`). El resto del código ya pasa de 4000h desde la 1.1.
 
 **Versión y autoactualización (1.1).** La versión está en un solo sitio, el cartel `"MXUPDATE " MXU_VERSION " - "`: se enseña al arrancar, se compara con la de la web y es lo que se busca en el `.COM` bajado. Antes de ir a por las imágenes de la placa (`/N`, o sin fichero y con un sí), MXUPDATE lee `mxupdate/manifiesto.txt` (el mismo formato, `placa=mxupdate`); si la versión es mayor, baja `MXUPDATE.COM` a `MXUPDATE.NEW` junto a sí mismo (variable `PROGRAM` de MSX-DOS 2), comprueba el tamaño y que lleve el cartel de esa versión, borra el viejo, renombra el nuevo y se relanza: un cargador de 30 bytes debajo del tope de la TPA lo lee sobre 0100h y salta, con la orden intacta en 0080h. Si algo falla, sigue con el que tiene.
 
 Sin fichero, el de la placa (`MSXIMUS.UPD`, `MSX138K.UPD`, `MSXNANO.UPD`) o el `MSXIMUS.UPD` de «Instalar actualización» si es de esa placa; si no hay, ofrece bajarlo.
 
 **Las ondas del OPL4 (1.4).** `/O` (que implica `/N`) lee del manifiesto la línea `ondas=`, baja ese `.UPD` a `ONDAS.UPD` (sin variantes ni aviso de Nextor) y sigue por el camino de siempre: cabecera, CRC, confirmación, grabar y releer. Es un `.UPD` normal con un solo segmento en el pack + 1 MB, que MXUPDATE ya aceptaba desde la 1.3. Además, con `/N` (y sin `/R`, cuya completa ya las lleva), tras releer lo grabado llama a `OndasVacias`: lee la primera página (256 bytes) de la flash en pack + 1 MB y, si es todo FF (la YRW801 no empieza así) y el manifiesto ofrece las ondas, pregunta si bajarlas; con sí vuelve a `Red` (sin repetir la autoactualización: `g_auto`) y repite el camino con el `.UPD` de las ondas, y el `Listo` sale al final de esa segunda vuelta. Las variables del manifiesto (`g_ond_f`, `g_ond_t`) se ponen a cero al empezar, porque el arranque de MSXgl no inicializa los datos.
-
-**Cada versión nueva de MXUPDATE**: subir `MXU_VERSION`, `build.sh`, `banco/run.sh` (todo bien), `python tools/mxupdate/publicar_mxu.py` y `python ota_subir.py mxupdate` (MSXimus_zynq/fpga/zynq/ota), y el `.COM` nuevo a las releases del 60K, del 138K y del MSXnano y a SD_Maker (`sd/extras/FPGA`).
 
 Orden de trabajo:
 
@@ -142,6 +140,5 @@ La web es `https://msx.barcelona/wp-content/ota/<placa>/`, con `tang60k`, `tang1
 | Banco | Qué prueba | Resultado |
 |---|---|---|
 | `tools/flash_tb` | El puente contra un modelo de la flash | — |
-| `tools/mxupdate/banco` (`run.sh`) | `MXUPDATE.COM` de verdad en un Z80 emulado con MSX-DOS, el puente, un ESP32 UNAPI y una web de imitación: flash del 60K, 138K y MSXnano, fichero dañado, otra placa, no, sin puente, `/C`, `/R`, y por red validado, sin validar, 404, sin TLS, descarga cortada y completa | 18/18 |
 | `bios-msxnano-msximus/tools/actualizar_tb` | «Instalar actualización» | 11/11 + inglés |
 | `bios-msxnano-msximus/tools/firma_tb` | La firma de tipo de ROM del menú ([manual/05](../manual/05-roms-mappers.md)) | 15/15 |

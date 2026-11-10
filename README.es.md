@@ -289,7 +289,6 @@ fpga/            top.v, build.tcl
     iosys/       El enlace con el BL616 y el panel en pantalla
   constraints/   Pinout y constraints de la Console 60K
 tools/           Testbenches y utilidades de validación
-  mxupdate/      MXUPDATE.COM (MSXgl + UNAPI) y su banco Z80
   mxupd.py       Hace los .UPD y el manifiesto de la actualización
 ```
 
