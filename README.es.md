@@ -10,6 +10,12 @@
 
 <p align="center">🇬🇧 <a href="README.md">English version</a></p>
 
+# ⚠️ Este proyecto ha pasado a la edición V9958: [MSXimus_V9958](https://github.com/Papipapito/MSXimus_V9958)
+
+**El MSXimus 60K se desarrolla ahora como [MSXimus_V9958](https://github.com/Papipapito/MSXimus_V9958)**, con el VDP V9958 clásico. El V9968 se ha sacado de la Console 60K porque el cambio de diseño que ha tenido (una VRAM de 4 MB en bancos) hace inviable meterlo dentro de la 60K sin sacrificar otras cosas.
+
+Este repositorio se queda como está, con la línea del V9968 hasta donde llegó (v3.8.4). Ya no se actualiza, y la actualización por red (`MXUPDATE /N` e *Instalar actualización* en el menú) instala ahora la edición V9958.
+
 <p align="center"><img src="docs/img/v9968_devcon.jpg" alt="La demo DEVCON del V9968 corriendo en el MSXimus" width="820"/></p>
 <p align="center"><i>La demo oficial del V9968 de HRA!, corriendo en el MSXimus.</i></p>
 
